@@ -1,0 +1,5 @@
+[project]
+name = "sb-backend"
+version = "1.0.0"
+requires-python = ">=3.11,<3.14"
+description = "FastAPI backend for a kids storytelling mobile application"
