@@ -1,6 +1,7 @@
+from datetime import date
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
@@ -16,11 +17,18 @@ router = APIRouter()
 
 @router.post("", response_model=ApiResponse[ChildProfileResponse], status_code=status.HTTP_201_CREATED)
 async def create_child_profile(
-    payload: ChildProfileCreateRequest,
+    request: Request,
+    first_name: str = Form(..., min_length=1, max_length=60),
+    last_name: str = Form(..., min_length=1, max_length=60),
+    dob: date = Form(...),
+    age: int = Form(..., ge=0, le=18),
+    gender: str | None = Form(default=None, max_length=32),
+    photo: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[ChildProfileResponse]:
-    data = await ChildService(session).create(current_user, payload)
+    payload = ChildProfileCreateRequest(first_name=first_name, last_name=last_name, dob=dob, age=age, gender=gender)
+    data = await ChildService(session).create(current_user, payload, photo, str(request.base_url).rstrip("/"))
     return success_response(data, "Child profile created successfully")
 
 

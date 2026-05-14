@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import status
+from fastapi import UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundException
@@ -9,6 +9,7 @@ from app.model.request.child import ChildProfileCreateRequest, ChildProfileUpdat
 from app.model.response.child import ActiveChildResponse, ChildProfileResponse
 from app.repository.child_repository import ChildRepository
 from app.repository.user_repository import UserRepository
+from app.service.image_storage_service import image_storage_service
 
 
 class ChildService:
@@ -18,13 +19,27 @@ class ChildService:
         self.children = ChildRepository(session)
         self.users = UserRepository(session)
 
-    async def create(self, current_user: User, payload: ChildProfileCreateRequest) -> ChildProfileResponse:
+    async def create(
+        self,
+        current_user: User,
+        payload: ChildProfileCreateRequest,
+        photo: UploadFile,
+        public_base_url: str,
+    ) -> ChildProfileResponse:
         child = await self.children.create(
             user_id=current_user.id,
-            child_name=payload.child_name,
+            first_name=payload.first_name,
+            last_name=payload.last_name,
+            dob=payload.dob,
             age=payload.age,
             gender=payload.gender,
-            avatar_image_url=str(payload.avatar_image_url) if payload.avatar_image_url else None,
+            avatar_image_url=None,
+        )
+        child.avatar_image_url = await image_storage_service.save_child_profile_photo(
+            current_user.id,
+            child.id,
+            photo,
+            public_base_url,
         )
         return ChildProfileResponse.model_validate(child)
 

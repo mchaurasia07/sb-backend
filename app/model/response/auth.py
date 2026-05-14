@@ -7,7 +7,8 @@ class UserResponse(BaseModel):
     id: UUID
     email: EmailStr
     phone: str | None
-    full_name: str | None
+    first_name: str | None
+    last_name: str | None
     is_email_verified: bool
     is_phone_verified: bool
 

@@ -29,6 +29,19 @@ class Settings(BaseSettings):
     BACKEND_CORS_ORIGINS: str = "http://localhost:3000"
     RATE_LIMIT_DEFAULT: str = "100/minute"
 
+    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM_EMAIL: str = ""
+    SMTP_FROM_NAME: str = "Storybook"
+    SMTP_USE_TLS: bool = True
+    SMTP_TIMEOUT_SECONDS: float = 10.0
+
+    MEDIA_ROOT: str = "photo"
+    MEDIA_URL_PREFIX: str = "/photo"
+    IMAGE_MAX_UPLOAD_BYTES: int = 5 * 1024 * 1024
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     @field_validator("DATABASE_URL")
@@ -37,6 +50,11 @@ class Settings(BaseSettings):
         if not value.startswith("mysql+aiomysql://"):
             raise ValueError("DATABASE_URL must use mysql+aiomysql://")
         return value
+
+    @field_validator("SMTP_FROM_EMAIL")
+    @classmethod
+    def set_default_from_email(cls, value: str, info) -> str:
+        return value or info.data.get("SMTP_USERNAME", "")
 
     @cached_property
     def cors_origins(self) -> list[str | AnyUrl]:

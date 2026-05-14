@@ -56,7 +56,13 @@ class AuthService:
             raise ConflictException("Email already registered", status.HTTP_409_CONFLICT, "EMAIL_EXISTS")
         if await self.users.get_by_phone(payload.phone):
             raise ConflictException("Phone already registered", status.HTTP_409_CONFLICT, "PHONE_EXISTS")
-        user = await self.users.create_local(payload.email, payload.phone, hash_password(payload.password))
+        user = await self.users.create_local(
+            payload.email,
+            payload.phone,
+            hash_password(payload.password),
+            payload.first_name,
+            payload.last_name,
+        )
         await self._issue_otp(user, OtpPurpose.EMAIL_VERIFICATION)
         logger.info("user_signup_created", user_id=str(user.id), email=user.email)
         return UserResponse.model_validate(user)
@@ -94,7 +100,13 @@ class AuthService:
         if user is None:
             user = await self.users.get_by_email(email)
             if user is None:
-                user = await self.users.create_google(email=email, google_sub=google_sub, full_name=google_payload.get("name"))
+                first_name, last_name = self._split_google_name(google_payload.get("name"))
+                user = await self.users.create_google(
+                    email=email,
+                    google_sub=google_sub,
+                    first_name=first_name,
+                    last_name=last_name,
+                )
             else:
                 user.google_sub = google_sub
                 user.is_email_verified = True
@@ -187,3 +199,13 @@ class AuthService:
     def _ensure_not_locked(self, user: User) -> None:
         if user.locked_until and user.locked_until > datetime.now(UTC):
             raise AuthException("Account is temporarily locked", status.HTTP_423_LOCKED, "ACCOUNT_LOCKED")
+
+    def _split_google_name(self, full_name: str | None) -> tuple[str | None, str | None]:
+        if not full_name:
+            return None, None
+        parts = full_name.strip().split(maxsplit=1)
+        if not parts:
+            return None, None
+        first_name = parts[0]
+        last_name = parts[1] if len(parts) > 1 else None
+        return first_name, last_name

@@ -4,10 +4,20 @@ from app.utils.validators import validate_password_strength, validate_phone_numb
 
 
 class SignupRequest(BaseModel):
+    first_name: str = Field(min_length=1, max_length=60)
+    last_name: str = Field(min_length=1, max_length=60)
     email: EmailStr
     phone: str = Field(min_length=8, max_length=20)
     password: str = Field(min_length=8, max_length=128)
     confirm_password: str = Field(min_length=8, max_length=128)
+
+    @field_validator("first_name", "last_name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Name cannot be blank")
+        return value
 
     @field_validator("phone")
     @classmethod

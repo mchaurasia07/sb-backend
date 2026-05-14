@@ -375,12 +375,43 @@
             "header": [
               {
                 "key": "Content-Type",
-                "value": "application/json"
+                "value": "multipart/form-data"
               }
             ],
             "body": {
-              "mode": "raw",
-              "raw": "{\n  \"child_name\": \"Aarav\",\n  \"age\": 6,\n  \"gender\": \"male\",\n  \"avatar_image_url\": \"https://example.com/avatar.png\"\n}"
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "first_name",
+                  "value": "Aarav",
+                  "type": "text"
+                },
+                {
+                  "key": "last_name",
+                  "value": "Sharma",
+                  "type": "text"
+                },
+                {
+                  "key": "dob",
+                  "value": "2018-05-14",
+                  "type": "text"
+                },
+                {
+                  "key": "age",
+                  "value": "6",
+                  "type": "text"
+                },
+                {
+                  "key": "gender",
+                  "value": "male",
+                  "type": "text"
+                },
+                {
+                  "key": "photo",
+                  "type": "file",
+                  "src": ""
+                }
+              ]
             },
             "url": {
               "raw": "{{base_url}}{{api_prefix}}/children",
@@ -441,7 +472,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"child_name\": \"Aarav\",\n  \"age\": 7,\n  \"gender\": \"male\",\n  \"avatar_image_url\": \"https://example.com/avatar-updated.png\"\n}"
+              "raw": "{\n  \"first_name\": \"Aarav\",\n  \"last_name\": \"Sharma\",\n  \"dob\": \"2018-05-14\",\n  \"age\": 7,\n  \"gender\": \"male\",\n  \"avatar_image_url\": \"https://example.com/avatar-updated.png\"\n}"
             },
             "url": {
               "raw": "{{base_url}}{{api_prefix}}/children/{{child_id}}",

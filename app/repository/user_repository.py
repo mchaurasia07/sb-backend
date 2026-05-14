@@ -33,17 +33,25 @@ class UserRepository:
         result = await self.session.execute(select(User).where(User.google_sub == google_sub))
         return result.scalar_one_or_none()
 
-    async def create_local(self, email: str, phone: str, password_hash: str) -> User:
-        user = User(email=email.lower(), phone=phone, password_hash=password_hash, auth_provider=AuthProvider.LOCAL)
+    async def create_local(self, email: str, phone: str, password_hash: str, first_name: str, last_name: str) -> User:
+        user = User(
+            email=email.lower(),
+            phone=phone,
+            password_hash=password_hash,
+            first_name=first_name,
+            last_name=last_name,
+            auth_provider=AuthProvider.LOCAL,
+        )
         self.session.add(user)
         await self.session.flush()
         return user
 
-    async def create_google(self, email: str, google_sub: str, full_name: str | None) -> User:
+    async def create_google(self, email: str, google_sub: str, first_name: str | None, last_name: str | None) -> User:
         user = User(
             email=email.lower(),
             google_sub=google_sub,
-            full_name=full_name,
+            first_name=first_name,
+            last_name=last_name,
             auth_provider=AuthProvider.GOOGLE,
             is_email_verified=True,
         )

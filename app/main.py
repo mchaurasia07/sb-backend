@@ -1,8 +1,10 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from slowapi.errors import RateLimitExceeded
 
 from app.core.config import settings
@@ -51,6 +53,8 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestContextMiddleware)
 
     register_exception_handlers(app)
+    Path(settings.MEDIA_ROOT).mkdir(parents=True, exist_ok=True)
+    app.mount(settings.MEDIA_URL_PREFIX, StaticFiles(directory=settings.MEDIA_ROOT), name="media")
     app.include_router(api_router, prefix=settings.API_V1_PREFIX)
 
     @app.get("/health", tags=["Health"])

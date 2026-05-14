@@ -1,4 +1,5 @@
 from uuid import UUID
+from datetime import date
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,10 +13,21 @@ class ChildRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def create(self, user_id: UUID, child_name: str, age: int, gender: str | None, avatar_image_url: str | None) -> ChildProfile:
+    async def create(
+        self,
+        user_id: UUID,
+        first_name: str,
+        last_name: str,
+        dob: date,
+        age: int,
+        gender: str | None,
+        avatar_image_url: str | None,
+    ) -> ChildProfile:
         child = ChildProfile(
             user_id=user_id,
-            child_name=child_name,
+            first_name=first_name,
+            last_name=last_name,
+            dob=dob,
             age=age,
             gender=gender,
             avatar_image_url=avatar_image_url,

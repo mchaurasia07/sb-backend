@@ -1,6 +1,7 @@
+from datetime import date
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, ForeignKey, Index, Integer, String, Uuid
+from sqlalchemy import CheckConstraint, Date, ForeignKey, Index, Integer, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -17,7 +18,9 @@ class ChildProfile(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     user_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    child_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    first_name: Mapped[str] = mapped_column(String(60), nullable=False)
+    last_name: Mapped[str] = mapped_column(String(60), nullable=False)
+    dob: Mapped[date | None] = mapped_column(Date, nullable=True)
     age: Mapped[int] = mapped_column(Integer, nullable=False)
     gender: Mapped[str | None] = mapped_column(String(32), nullable=True)
     avatar_image_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
