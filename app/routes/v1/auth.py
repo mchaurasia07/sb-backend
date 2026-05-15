@@ -14,9 +14,11 @@ from app.model.request.auth import (
     RefreshTokenRequest,
     ResetPasswordRequest,
     SignupRequest,
+    ValidateEmailRequest,
+    ValidatePhoneRequest,
     VerifyEmailOtpRequest,
 )
-from app.model.response.auth import AuthTokenResponse, GoogleLoginResponse, UserResponse
+from app.model.response.auth import AuthTokenResponse, GoogleLoginResponse, UserResponse, ValidateResponse
 from app.model.response.common import ApiResponse, success_response
 from app.service.auth_service import AuthService
 
@@ -98,3 +100,17 @@ async def refresh_token(
 async def logout(payload: LogoutRequest, session: AsyncSession = Depends(get_db_session)) -> ApiResponse[None]:
     await AuthService(session).logout(payload)
     return success_response(None, "Logout successful")
+
+
+@router.post("/validate-email", response_model=ApiResponse[ValidateResponse])
+@limiter.limit("20/minute")
+async def validate_email(request: Request, payload: ValidateEmailRequest, session: AsyncSession = Depends(get_db_session)) -> ApiResponse[ValidateResponse]:
+    data = await AuthService(session).validate_email(payload)
+    return success_response(data, "Email validation completed")
+
+
+@router.post("/validate-phone", response_model=ApiResponse[ValidateResponse])
+@limiter.limit("20/minute")
+async def validate_phone(request: Request, payload: ValidatePhoneRequest, session: AsyncSession = Depends(get_db_session)) -> ApiResponse[ValidateResponse]:
+    data = await AuthService(session).validate_phone(payload)
+    return success_response(data, "Phone validation completed")

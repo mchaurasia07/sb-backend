@@ -28,9 +28,11 @@ from app.model.request.auth import (
     RefreshTokenRequest,
     ResetPasswordRequest,
     SignupRequest,
+    ValidateEmailRequest,
+    ValidatePhoneRequest,
     VerifyEmailOtpRequest,
 )
-from app.model.response.auth import AuthTokenResponse, GoogleLoginResponse, UserResponse
+from app.model.response.auth import AuthTokenResponse, GoogleLoginResponse, UserResponse, ValidateResponse
 from app.repository.child_repository import ChildRepository
 from app.repository.otp_repository import OtpRepository
 from app.repository.refresh_token_repository import RefreshTokenRepository
@@ -152,6 +154,18 @@ class AuthService:
         persisted = await self.refresh_tokens.get_valid(token_hash)
         if persisted:
             await self.refresh_tokens.revoke(persisted)
+
+    async def validate_email(self, payload: ValidateEmailRequest) -> ValidateResponse:
+        user = await self.users.get_by_email(payload.email)
+        if user:
+            raise ConflictException("Email already registered", status.HTTP_409_CONFLICT, "EMAIL_EXISTS")
+        return ValidateResponse(available=True)
+
+    async def validate_phone(self, payload: ValidatePhoneRequest) -> ValidateResponse:
+        user = await self.users.get_by_phone(payload.phone)
+        if user:
+            raise ConflictException("Phone already registered", status.HTTP_409_CONFLICT, "PHONE_EXISTS")
+        return ValidateResponse(available=True)
 
     async def _build_auth_response(self, user: User, refresh_token: str | None = None) -> AuthTokenResponse:
         access_token = create_access_token(user.id)

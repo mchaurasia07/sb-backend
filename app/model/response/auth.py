@@ -26,3 +26,7 @@ class AuthTokenResponse(BaseModel):
 class GoogleLoginResponse(AuthTokenResponse):
     phone_required: bool
     redirect_to: str
+
+
+class ValidateResponse(BaseModel):
+    available: bool

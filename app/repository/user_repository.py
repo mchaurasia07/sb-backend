@@ -89,3 +89,4 @@ class UserRepository:
     async def set_active_child_profile(self, user: User, child_profile_id: UUID) -> None:
         user.active_child_profile_id = child_profile_id
         await self.session.flush()
+

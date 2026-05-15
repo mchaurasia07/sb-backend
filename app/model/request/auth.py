@@ -89,3 +89,16 @@ class RefreshTokenRequest(BaseModel):
 
 class LogoutRequest(BaseModel):
     refresh_token: str = Field(min_length=20)
+
+
+class ValidateEmailRequest(BaseModel):
+    email: EmailStr
+
+
+class ValidatePhoneRequest(BaseModel):
+    phone: str = Field(min_length=8, max_length=20)
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, value: str) -> str:
+        return validate_phone_number(value)
