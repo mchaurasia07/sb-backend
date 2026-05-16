@@ -103,36 +103,18 @@ class CharacterService:
         )
         logger.info(f"Character image saved to {character_url}")
 
-        # Generate character description from generated image
-        logger.info("Generating character description from generated image")
-        character_path = self._resolve_photo_path(character_url)
+        # Use analysis text from image generation as character description
+        logger.info("Using analysis text as character description")
+        analysis_text = image_result.metadata.get("analysis_text")
 
-        description_prompt = load_and_render_prompt(
-            "prompts/character_description.txt",
-            {
-                "child_name": child.first_name,
-                "age": child.age,
-            },
-        )
-        logger.info(f"Character Description Prompt:\n{description_prompt}")
-
-        try:
-            description_result = await self.ai_provider.generate_text_from_image(
-                image_path=character_path,
-                prompt=description_prompt,
-            )
-            logger.info("Successfully generated character description")
-        except AppException as e:
-            # If description generation fails, use a fallback
-            logger.warning(f"Character description generation failed: {e.message}, using fallback")
-            description_result = type('obj', (object,), {
-                'content': f"A beautifully illustrated character representing a {child.age}-year-old child in a Pixar-style 3D animated aesthetic.",
-                'model': 'fallback'
-            })()
+        if not analysis_text:
+            # Fallback if analysis was skipped
+            analysis_text = f"A beautifully illustrated character representing a {child.age}-year-old child in a Pixar-style 3D animated aesthetic."
+            logger.warning("No analysis text available, using fallback description")
 
         # Build character metadata
         metadata = {
-            "description": description_result.content,
+            "description": analysis_text,
             "style": "3D Pixar-style cartoon",
             "generation_model": image_result.model,
             "prompt_used": image_result.prompt_used,
@@ -158,7 +140,7 @@ class CharacterService:
 
         return CharacterGenerationResponse(
             character_image_url=character_url,
-            character_description=description_result.content,
+            character_description=analysis_text,
         )
 
     @staticmethod

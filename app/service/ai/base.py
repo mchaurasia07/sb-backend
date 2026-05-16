@@ -15,15 +15,6 @@ class ImageGenerationResult:
     metadata: dict[str, Any] | None = None
 
 
-@dataclass(frozen=True)
-class TextGenerationResult:
-    """Result from text generation operation."""
-
-    content: str
-    model: str
-    metadata: dict[str, Any] | None = None
-
-
 class AIProvider(ABC):
     """Abstract base class for AI/LLM providers.
 
@@ -40,6 +31,9 @@ class AIProvider(ABC):
     ) -> ImageGenerationResult:
         """Generate image based on a reference photo.
 
+        Analysis and text generation are handled internally and returned
+        in the metadata dictionary.
+
         Args:
             reference_image_path: Path to the reference image file
             prompt: Text prompt describing the desired image
@@ -47,24 +41,5 @@ class AIProvider(ABC):
 
         Returns:
             ImageGenerationResult with generated image bytes and metadata
-        """
-        pass
-
-    @abstractmethod
-    async def generate_text_from_image(
-        self,
-        image_path: Path | str,
-        prompt: str,
-        **kwargs: Any,
-    ) -> TextGenerationResult:
-        """Generate text description/analysis from an image.
-
-        Args:
-            image_path: Path to the image file to analyze
-            prompt: Text prompt requesting specific analysis or description
-            **kwargs: Provider-specific options
-
-        Returns:
-            TextGenerationResult with generated text and metadata
         """
         pass

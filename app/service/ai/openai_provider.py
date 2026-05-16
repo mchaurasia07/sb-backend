@@ -7,7 +7,7 @@ from openai import AsyncOpenAI, BadRequestError, OpenAIError, RateLimitError
 
 from app.core.config import settings
 from app.core.exceptions import AppException
-from app.service.ai.base import AIProvider, ImageGenerationResult, TextGenerationResult
+from app.service.ai.base import AIProvider, ImageGenerationResult
 
 logger = logging.getLogger(__name__)
 
@@ -162,72 +162,6 @@ Focus on visual details needed for character illustration."""
                 "analysis_text": analysis_text,
                 "enhanced_prompt": enhanced_prompt,
             },
-        )
-
-    async def generate_text_from_image(
-        self,
-        image_path: Path | str,
-        prompt: str,
-        **kwargs: Any,
-    ) -> TextGenerationResult:
-        """Generate text description from image using OpenAI GPT-4V.
-
-        Args:
-            image_path: Path to image file to analyze
-            prompt: Prompt requesting specific analysis or description
-            **kwargs: Additional options (currently unused)
-
-        Returns:
-            TextGenerationResult with generated description text
-
-        Raises:
-            AppException: On API errors
-        """
-        path = Path(image_path)
-        logger.info(f"Generating text description from image: {path.name}")
-
-        try:
-            b64_image = _extract_base64_image_data(path)
-
-            response = await self._client.chat.completions.create(
-                model=self.text_model,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": prompt},
-                            {"type": "image_url", "image_url": {"url": b64_image}},
-                        ],
-                    }
-                ],
-                max_tokens=1024,
-            )
-        except BadRequestError as e:
-            error_msg = self._extract_error_message(e)
-            logger.error(f"OpenAI rejected text request: {error_msg}")
-            raise AppException(f"OpenAI text generation failed: {error_msg}", code="OPENAI_ERROR")
-        except RateLimitError as e:
-            logger.error(f"OpenAI rate limit exceeded: {e}")
-            raise AppException(
-                "OpenAI rate limit exceeded. Please retry after a few moments.",
-                code="RATE_LIMIT_ERROR",
-            )
-        except OpenAIError as e:
-            logger.error(f"OpenAI error: {e}")
-            raise AppException(
-                "OpenAI service error. Please verify your API key and billing.",
-                code="OPENAI_ERROR",
-            )
-
-        content = response.choices[0].message.content
-        if not content:
-            raise AppException("OpenAI returned no text content", code="OPENAI_ERROR")
-
-        logger.info("Successfully generated text description from image")
-        return TextGenerationResult(
-            content=content,
-            model=self.text_model,
-            metadata={"max_tokens": 1024},
         )
 
     @staticmethod
