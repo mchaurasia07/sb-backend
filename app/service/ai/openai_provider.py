@@ -203,7 +203,13 @@ Focus on visual details needed for character illustration."""
             if "STORY PLAN" in prompt.upper():
                 mock_text = get_mock_story_plan_text(child_name="Emma", age_group=age_group)
             elif "story_plan_json" in prompt.lower():
-                mock_text = get_mock_story_text(child_name="Emma")
+                # Extract page count from story plan in prompt
+                story_pages_count = 8  # Default
+                import re
+                page_count_match = re.search(r'"final_page_count":\s*(\d+)', prompt)
+                if page_count_match:
+                    story_pages_count = int(page_count_match.group(1))
+                mock_text = get_mock_story_text(child_name="Emma", story_pages_count=story_pages_count)
             elif "IMAGE PLANNING" in prompt.upper() or "image plan" in prompt.lower():
                 # Extract page count from story_json in prompt
                 story_pages_count = 8  # Default

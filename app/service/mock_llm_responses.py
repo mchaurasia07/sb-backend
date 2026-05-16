@@ -198,46 +198,52 @@ def get_mock_story_plan(child_name: str = "Emma", age_group: str = "5-7") -> dic
     return plan
 
 
-def get_mock_story_json(child_name: str = "Emma") -> dict[str, Any]:
-    """Return valid mock story JSON with page text."""
+def get_mock_story_json(child_name: str = "Emma", story_pages_count: int = 8) -> dict[str, Any]:
+    """Return valid mock story JSON with page text (trimmed to story_pages_count)."""
+    # Base page content for all story types (8 pages available)
+    base_pages = [
+        {
+            "page_number": 1,
+            "text": f"One sunny morning, {child_name} discovered a secret garden entrance. Luna the owl waited there, ready for an adventure! {child_name} took a deep breath and stepped through the golden gate.",
+        },
+        {
+            "page_number": 2,
+            "text": "The path twisted through beautiful flowers of every color. Luna flew ahead, leading the way deeper into the garden. Emma followed bravely, even though she felt a little nervous.",
+        },
+        {
+            "page_number": 3,
+            "text": "At the fountain, Emma saw three paths. But one path had sad, wilted flowers. Emma knew something was wrong. She pulled out her magic compass to help decide which path to take.",
+        },
+        {
+            "page_number": 4,
+            "text": "Behind the fountain, Emma found a hidden room. The flowers here were getting weaker. 'We can help,' Emma whispered to Luna. She bravely entered the mysterious space.",
+        },
+        {
+            "page_number": 5,
+            "text": "Emma spotted a crystal spring, but its water had dried up. 'If we can bring the water back, the flowers will be happy again!' she thought. Luna helped her search for the source.",
+        },
+        {
+            "page_number": 6,
+            "text": "Emma found the waterfall! Stones were blocking it. With Luna's help and her own courage, Emma carefully moved the stones. Splash! The water flowed again, rushing and dancing!",
+        },
+        {
+            "page_number": 7,
+            "text": "As the water flowed, something magical happened! Flowers bloomed everywhere. Birds sang. Butterflies danced. The garden was alive again! Emma felt so proud and happy.",
+        },
+        {
+            "page_number": 8,
+            "text": "As stars appeared, Emma and Luna headed home. Emma smiled, knowing she had the courage to help. The garden would never forget her kindness and bravery.",
+        },
+    ]
+
+    # Trim pages to match story_pages_count
+    pages = base_pages[:story_pages_count]
+
     return {
         "title": f"{child_name}'s Amazing Adventure",
         "summary": f"Join {child_name} on an exciting adventure where they discover courage and kindness.",
         "moral_theme": "courage and kindness",
-        "pages": [
-            {
-                "page_number": 1,
-                "text": f"One sunny morning, {child_name} discovered a secret garden entrance. Luna the owl waited there, ready for an adventure! {child_name} took a deep breath and stepped through the golden gate.",
-            },
-            {
-                "page_number": 2,
-                "text": "The path twisted through beautiful flowers of every color. Luna flew ahead, leading the way deeper into the garden. Emma followed bravely, even though she felt a little nervous.",
-            },
-            {
-                "page_number": 3,
-                "text": "At the fountain, Emma saw three paths. But one path had sad, wilted flowers. Emma knew something was wrong. She pulled out her magic compass to help decide which path to take.",
-            },
-            {
-                "page_number": 4,
-                "text": "Behind the fountain, Emma found a hidden room. The flowers here were getting weaker. 'We can help,' Emma whispered to Luna. She bravely entered the mysterious space.",
-            },
-            {
-                "page_number": 5,
-                "text": "Emma spotted a crystal spring, but its water had dried up. 'If we can bring the water back, the flowers will be happy again!' she thought. Luna helped her search for the source.",
-            },
-            {
-                "page_number": 6,
-                "text": "Emma found the waterfall! Stones were blocking it. With Luna's help and her own courage, Emma carefully moved the stones. Splash! The water flowed again, rushing and dancing!",
-            },
-            {
-                "page_number": 7,
-                "text": "As the water flowed, something magical happened! Flowers bloomed everywhere. Birds sang. Butterflies danced. The garden was alive again! Emma felt so proud and happy.",
-            },
-            {
-                "page_number": 8,
-                "text": "As stars appeared, Emma and Luna headed home. Emma smiled, knowing she had the courage to help. The garden would never forget her kindness and bravery.",
-            },
-        ],
+        "pages": pages,
     }
 
 
@@ -295,9 +301,9 @@ def get_mock_story_plan_text(child_name: str = "Emma", age_group: str = "5-7") -
     return json.dumps(plan)
 
 
-def get_mock_story_text() -> str:
+def get_mock_story_text(child_name: str = "Emma", story_pages_count: int = 8) -> str:
     """Return mock story as JSON string."""
-    story = get_mock_story_json()
+    story = get_mock_story_json(child_name, story_pages_count)
     return json.dumps(story)
 
 
