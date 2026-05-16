@@ -165,7 +165,7 @@ class StoryService:
             await self.stories.update(story)
             logger.info(f"Story {story_id}: Starting step 4 - Image Plan Generation")
 
-            image_plan = await self._step_generate_image_plan(story, story_json, flags)
+            image_plan = await self._step_generate_image_plan(story, story_plan, story_json, flags)
 
             # Step 5: Image Plan Validation (optional, can skip)
             if not flags.skip_validation:
@@ -426,7 +426,7 @@ class StoryService:
             raise
 
     async def _step_generate_image_plan(
-        self, story: Story, story_json: dict[str, Any], flags: StoryGenerationFlags
+        self, story: Story, story_plan: dict[str, Any], story_json: dict[str, Any], flags: StoryGenerationFlags
     ) -> dict[str, Any]:
         """Step 4: Generate image plan from story."""
         step = await self.story_steps.create(story.id, StoryStepName.IMAGE_PLAN_GENERATION)
@@ -436,10 +436,12 @@ class StoryService:
         template = load_prompt("prompts/story/image_plan_prompt.txt")
 
         child = await self.children.get_for_user(story.user_id, story.child_id)
-        character_description = child.character_metadata.get("description", "") if child.character_metadata else ""
+        character_info = self._extract_character_analysis(child)
 
-        prompt = template.replace("{story_json}", json.dumps(story_json, indent=2))
-        prompt = prompt.replace("{character_description}", character_description)
+        # Populate all placeholders in template
+        prompt = template.replace("{story_plan_json}", json.dumps(story_plan, indent=2))
+        prompt = prompt.replace("{story_json}", json.dumps(story_json, indent=2))
+        prompt = prompt.replace("{character_description}", character_info)
         step.prompt = prompt
 
         try:
