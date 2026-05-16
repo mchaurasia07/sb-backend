@@ -7,7 +7,12 @@ from openai import AsyncOpenAI, BadRequestError, OpenAIError, RateLimitError
 
 from app.core.config import settings
 from app.core.exceptions import AppException
-from app.service.ai.base import AIProvider, ImageGenerationResult
+from app.service.ai.base import AIProvider, ImageGenerationResult, TextGenerationResult
+from app.service.mock_llm_responses import (
+    get_mock_story_plan_text,
+    get_mock_story_text,
+    get_mock_image_plan_text,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -161,6 +166,181 @@ Focus on visual details needed for character illustration."""
                 "quality": kwargs.get("quality", "high"),
                 "analysis_text": analysis_text,
                 "enhanced_prompt": enhanced_prompt,
+            },
+        )
+
+    async def generate_text(
+        self,
+        prompt: str,
+        **kwargs: Any,
+    ) -> TextGenerationResult:
+        """Generate text using OpenAI chat completion API.
+
+        Args:
+            prompt: Full text prompt for LLM
+            **kwargs: May include 'max_tokens', 'temperature'
+
+        Returns:
+            TextGenerationResult with generated text
+
+        Raises:
+            AppException: On API errors
+        """
+        # Check if mock mode is enabled
+        if settings.STORY_MOCK_LLM_RESPONSES:
+            logger.info("MOCK MODE: Returning mock LLM response instead of calling OpenAI")
+
+            # Extract age_group from prompt for correct mock response
+            age_group = "5-7"  # Default
+            if "2-4" in prompt:
+                age_group = "2-4"
+            elif "5-7" in prompt:
+                age_group = "5-7"
+            elif "8-12" in prompt:
+                age_group = "8-12"
+
+            # Determine which mock response to return based on prompt content
+            if "STORY PLAN" in prompt.upper():
+                mock_text = get_mock_story_plan_text(child_name="Emma", age_group=age_group)
+            elif "story_plan_json" in prompt.lower():
+                mock_text = get_mock_story_text(child_name="Emma")
+            elif "IMAGE PLANNING" in prompt.upper() or "image plan" in prompt.lower():
+                mock_text = get_mock_image_plan_text(story_pages_count=8)
+            else:
+                # Default mock response
+                mock_text = get_mock_story_plan_text(child_name="Emma", age_group=age_group)
+
+            return TextGenerationResult(
+                text=mock_text,
+                prompt_used=prompt,
+                model=self.text_model,
+                metadata={"mock_mode": True},
+            )
+
+        logger.info(f"Generating text with {self.text_model}")
+
+        try:
+            response = await self._client.chat.completions.create(
+                model=self.text_model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=kwargs.get("max_tokens", 4000),
+                temperature=kwargs.get("temperature", 0.7),
+                response_format=kwargs.get("response_format", None),
+            )
+        except BadRequestError as e:
+            error_msg = self._extract_error_message(e)
+            logger.error(f"OpenAI rejected text generation request: {error_msg}")
+            raise AppException(f"Text generation failed: {error_msg}", code="OPENAI_ERROR")
+        except RateLimitError as e:
+            logger.error(f"OpenAI rate limit exceeded: {e}")
+            raise AppException(
+                "OpenAI rate limit exceeded. Please retry after a few moments.",
+                code="RATE_LIMIT_ERROR",
+            )
+        except OpenAIError as e:
+            logger.error(f"OpenAI error: {e}")
+            raise AppException(
+                "OpenAI service error. Please verify your API key and billing.",
+                code="OPENAI_ERROR",
+            )
+
+        if not response.choices:
+            raise AppException("OpenAI returned no text", code="OPENAI_ERROR")
+
+        content = response.choices[0].message.content
+        if not content:
+            raise AppException("OpenAI returned empty text", code="OPENAI_ERROR")
+
+        logger.info(f"Successfully generated text using {self.text_model}")
+        return TextGenerationResult(
+            text=content,
+            prompt_used=prompt,
+            model=self.text_model,
+            metadata={
+                "finish_reason": response.choices[0].finish_reason,
+                "usage": response.usage.model_dump() if response.usage else None,
+            },
+        )
+
+    async def generate_image(
+        self,
+        prompt: str,
+        **kwargs: Any,
+    ) -> ImageGenerationResult:
+        """Generate image using DALL-E (no reference photo).
+
+        Args:
+            prompt: Image generation prompt
+            **kwargs: May include 'size', 'quality'
+
+        Returns:
+            ImageGenerationResult with image bytes
+
+        Raises:
+            AppException: On API errors
+        """
+        # Check if mock mode is enabled
+        if settings.STORY_MOCK_LLM_RESPONSES:
+            logger.info("MOCK MODE: Returning mock image (placeholder) instead of calling DALL-E")
+
+            # Generate a simple placeholder PNG (1x1 white pixel)
+            # In real testing, you'd replace with a proper placeholder image
+            placeholder_png = (
+                b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+                b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00"
+                b"\x00\x01\x01\x00\x05\x18\r*\xfe\x00\x00\x00\x00IEND\xaeB`\x82"
+            )
+
+            return ImageGenerationResult(
+                image_bytes=placeholder_png,
+                prompt_used=prompt,
+                model=self.image_model,
+                revised_prompt=None,
+                metadata={"mock_mode": True, "placeholder": True},
+            )
+
+        logger.info(f"Generating image with {self.image_model}")
+
+        try:
+            response = await self._client.images.generate(
+                model=self.image_model,
+                prompt=prompt,
+                size=kwargs.get("size", "1024x1024"),
+                quality=kwargs.get("quality", "standard"),
+                n=1,
+            )
+        except BadRequestError as e:
+            error_msg = self._extract_error_message(e)
+            logger.error(f"OpenAI rejected image generation request: {error_msg}")
+            raise AppException(f"Image generation failed: {error_msg}", code="OPENAI_ERROR")
+        except RateLimitError as e:
+            logger.error(f"OpenAI rate limit exceeded: {e}")
+            raise AppException(
+                "OpenAI rate limit exceeded. Please retry after a few moments.",
+                code="RATE_LIMIT_ERROR",
+            )
+        except OpenAIError as e:
+            logger.error(f"OpenAI error: {e}")
+            raise AppException(
+                "OpenAI service error. Please verify your API key and billing.",
+                code="OPENAI_ERROR",
+            )
+
+        if not response.data or not response.data[0].b64_json:
+            raise AppException("OpenAI returned no image data", code="OPENAI_ERROR")
+
+        image_bytes = base64.b64decode(response.data[0].b64_json)
+        revised_prompt = getattr(response.data[0], "revised_prompt", None)
+
+        logger.info(f"Successfully generated image using {self.image_model}")
+        return ImageGenerationResult(
+            image_bytes=image_bytes,
+            prompt_used=prompt,
+            model=self.image_model,
+            revised_prompt=revised_prompt,
+            metadata={
+                "size": kwargs.get("size", "1024x1024"),
+                "quality": kwargs.get("quality", "standard"),
             },
         )
 
