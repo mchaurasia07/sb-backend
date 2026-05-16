@@ -31,6 +31,7 @@ class CharacterService:
         user_id: UUID,
         public_base_url: str,
         payload: CharacterGenerationRequest,
+        ai_provider: str | None = None,
     ) -> CharacterGenerationResponse:
         """Generate AI character from child profile photo.
 
@@ -49,6 +50,7 @@ class CharacterService:
             user_id: ID of parent user (for ownership validation)
             public_base_url: Base URL for constructing public file URLs
             payload: Character generation request with optional context
+            ai_provider: AI provider to use ("openai" or "google") - uses default if not specified
 
         Returns:
             CharacterGenerationResponse with generated character data
@@ -57,7 +59,10 @@ class CharacterService:
             NotFoundException: If child profile not found or doesn't belong to user
             AppException: If child has no profile photo or AI service fails
         """
-        logger.info(f"Generating character for child_id={child_id}, user_id={user_id}")
+        # Get AI provider instance (use specified provider or default)
+        provider_name = ai_provider or "openai"
+        ai_service = get_ai_provider(provider_name)
+        logger.info(f"Generating character using {provider_name} provider for child_id={child_id}, user_id={user_id}")
 
         # Validate child exists and belongs to user
         child = await self.children.get_for_user(user_id, child_id)
@@ -77,14 +82,14 @@ class CharacterService:
         photo_path = self._resolve_photo_path(child.avatar_image_url)
 
         # Generate character image using AI provider
-        logger.info(f"Calling AI provider to generate character image from {photo_path.name}")
+        logger.info(f"Calling {provider_name} AI provider to generate character image from {photo_path.name}")
         character_prompt = load_and_render_prompt(
             "prompts/character_generation.txt",
             {"additional_context": payload.additional_context or ""},
         )
         logger.info(f"Character Generation Prompt:\n{character_prompt}")
 
-        image_result = await self.ai_provider.generate_image_from_reference(
+        image_result = await ai_service.generate_image_from_reference(
             reference_image_path=photo_path,
             prompt=character_prompt,
             size=settings.CHARACTER_IMAGE_SIZE,

@@ -42,13 +42,25 @@ class Settings(BaseSettings):
     MEDIA_URL_PREFIX: str = "/photo"
     IMAGE_MAX_UPLOAD_BYTES: int = 5 * 1024 * 1024
 
+    # AI Provider Selection
+    AI_PROVIDER: str = "openai"  # Options: "openai", "google"
+
+    # OpenAI Configuration
     OPENAI_API_KEY: str = Field(min_length=1)
     OPENAI_IMAGE_MODEL: str
     OPENAI_TEXT_MODEL: str
+
+    # Google Gemini Configuration
+    GOOGLE_API_KEY: str = ""  # Optional, only needed if using Google provider
+    GOOGLE_TEXT_MODEL: str = "gemini-2.5-flash"  # Text model for vision analysis and text generation
+    GOOGLE_IMAGE_MODEL: str = "imagen-4.0-generate-001"  # Image model for image generation
+
+    # Character Generation Settings
     CHARACTER_IMAGE_SIZE: str
     CHARACTER_IMAGE_QUALITY: str
     CHARACTER_GENERATION_ENABLED: bool
 
+    # Story Generation Settings
     STORY_TEXT_MODEL: str = "gpt-4o"
     STORY_IMAGE_MODEL: str = "dall-e-3"
     STORY_IMAGE_SIZE: str = "1024x1024"

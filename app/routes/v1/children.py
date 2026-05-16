@@ -78,6 +78,10 @@ async def generate_character(
     Generates a stylized storybook character from the child's profile photo
     and stores it alongside the original. Also generates a character description
     for maintaining visual consistency across story scenes.
+
+    Args:
+        ai_provider: AI provider to use ("openai" or "google") - default: "openai"
+        additional_context: Optional context like hobbies, personality traits, or styling preferences
     """
     public_base_url = str(request.base_url).rstrip("/")
     data = await CharacterService(session).generate_character(
@@ -85,5 +89,6 @@ async def generate_character(
         user_id=current_user.id,
         public_base_url=public_base_url,
         payload=payload,
+        ai_provider=payload.ai_provider,
     )
     return success_response(data, "Character generated successfully")
