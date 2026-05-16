@@ -7,9 +7,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db_session
 from app.core.dependencies import get_current_user
 from app.entity.user import User
+from app.model.request.character import CharacterGenerationRequest
 from app.model.request.child import ChildProfileCreateRequest, ChildProfileUpdateRequest
+from app.model.response.character import CharacterGenerationResponse
 from app.model.response.child import ActiveChildResponse, ChildProfileResponse
 from app.model.response.common import ApiResponse, success_response
+from app.service.character_service import CharacterService
 from app.service.child_service import ChildService
 
 router = APIRouter()
@@ -60,3 +63,27 @@ async def select_active_child_profile(
 ) -> ApiResponse[ActiveChildResponse]:
     data = await ChildService(session).select_active(current_user, child_id)
     return success_response(data, "Active child profile selected successfully")
+
+
+@router.post("/{child_id}/generate-character", response_model=ApiResponse[CharacterGenerationResponse])
+async def generate_character(
+    child_id: UUID,
+    request: Request,
+    payload: CharacterGenerationRequest,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[CharacterGenerationResponse]:
+    """Generate AI character from child profile photo.
+
+    Generates a stylized storybook character from the child's profile photo
+    and stores it alongside the original. Also generates a character description
+    for maintaining visual consistency across story scenes.
+    """
+    public_base_url = str(request.base_url).rstrip("/")
+    data = await CharacterService(session).generate_character(
+        child_id=child_id,
+        user_id=current_user.id,
+        public_base_url=public_base_url,
+        payload=payload,
+    )
+    return success_response(data, "Character generated successfully")

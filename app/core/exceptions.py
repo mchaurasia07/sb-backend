@@ -29,6 +29,9 @@ class AuthException(AppException):
 class NotFoundException(AppException):
     """Requested resource does not exist."""
 
+    def __init__(self, message: str, code: str = "NOT_FOUND"):
+        super().__init__(message, status_code=status.HTTP_404_NOT_FOUND, code=code)
+
 
 class ConflictException(AppException):
     """Requested operation conflicts with existing state."""

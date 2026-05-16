@@ -12,6 +12,8 @@ class ChildProfileResponse(BaseModel):
     age: int
     gender: str | None
     avatar_image_url: str | None
+    character_image_url: str | None = None
+    character_metadata: dict | None = None
     created_at: datetime
     updated_at: datetime
 

@@ -47,3 +47,8 @@ class ChildRepository:
     async def exists_for_user(self, user_id: UUID) -> bool:
         result = await self.session.execute(select(ChildProfile.id).where(ChildProfile.user_id == user_id).limit(1))
         return result.scalar_one_or_none() is not None
+
+    async def update_character(self, child: ChildProfile, character_image_url: str, character_metadata: dict | None) -> None:
+        child.character_image_url = character_image_url
+        child.character_metadata = character_metadata
+        await self.session.flush()

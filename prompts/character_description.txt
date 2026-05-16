@@ -1,0 +1,12 @@
+Describe this illustrated character in detail to create a reference for consistent character appearance across story illustrations.
+
+Character: {child_name}, Age {age}
+
+Describe the character's appearance in detail including:
+- Physical appearance (face shape, eye color, hair color and style)
+- Distinctive visual features that make this character unique
+- Clothing and accessories
+- Overall art style and aesthetic
+- Color palette and styling
+
+Write a single detailed paragraph suitable for reference in future AI character generation prompts. Focus on specific visual details that would help recreate this character consistently.

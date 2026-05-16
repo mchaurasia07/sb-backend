@@ -39,11 +39,12 @@ def generate_otp() -> str:
 
 def create_token(subject: UUID, token_type: TokenType, expires_delta: timedelta, extra_claims: dict[str, Any] | None = None) -> str:
     now = datetime.now(UTC)
+    expires_at = now + expires_delta
     payload: dict[str, Any] = {
         "sub": str(subject),
         "type": token_type.value,
         "iat": int(now.timestamp()),
-        "exp": now + expires_delta,
+        "exp": int(expires_at.timestamp()),
         "jti": secrets.token_urlsafe(32),
     }
     if extra_claims:

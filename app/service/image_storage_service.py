@@ -47,6 +47,44 @@ class ImageStorageService:
         public_path = f"{settings.MEDIA_URL_PREFIX}/{parent_id}/{child_id}/profile{extension}"
         return f"{public_base_url}{public_path}"
 
+    async def save_character_image(
+        self,
+        parent_id: UUID,
+        child_id: UUID,
+        image_bytes: bytes,
+        public_base_url: str,
+    ) -> str:
+        """Save AI-generated character image.
+
+        Args:
+            parent_id: Parent user ID
+            child_id: Child profile ID
+            image_bytes: Image data as bytes
+            public_base_url: Base URL for constructing public URLs
+
+        Returns:
+            Public URL of saved character image
+
+        Raises:
+            AppException: If save operation fails
+        """
+        directory = Path(settings.MEDIA_ROOT) / str(parent_id) / str(child_id)
+        directory.mkdir(parents=True, exist_ok=True)
+
+        file_path = directory / "child_character.png"
+
+        try:
+            await asyncio.to_thread(file_path.write_bytes, image_bytes)
+        except IOError as e:
+            raise AppException(
+                f"Failed to save character image: {str(e)}",
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                "STORAGE_ERROR",
+            )
+
+        public_path = f"{settings.MEDIA_URL_PREFIX}/{parent_id}/{child_id}/child_character.png"
+        return f"{public_base_url}{public_path}"
+
     def _get_extension(self, photo: UploadFile) -> str:
         if photo.content_type in self.allowed_content_types:
             return self.allowed_content_types[photo.content_type]

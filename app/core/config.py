@@ -16,8 +16,8 @@ class Settings(BaseSettings):
 
     JWT_SECRET_KEY: str = Field(min_length=32)
     JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 30
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 525600
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 365
 
     BCRYPT_ROUNDS: int = 12
     OTP_EXPIRE_MINUTES: int = 10
@@ -41,6 +41,13 @@ class Settings(BaseSettings):
     MEDIA_ROOT: str = "photo"
     MEDIA_URL_PREFIX: str = "/photo"
     IMAGE_MAX_UPLOAD_BYTES: int = 5 * 1024 * 1024
+
+    OPENAI_API_KEY: str = Field(min_length=1)
+    OPENAI_IMAGE_MODEL: str
+    OPENAI_TEXT_MODEL: str
+    CHARACTER_IMAGE_SIZE: str
+    CHARACTER_IMAGE_QUALITY: str
+    CHARACTER_GENERATION_ENABLED: bool
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

@@ -1,0 +1,52 @@
+Create a bright, photorealistic portrait of a child based on the uploaded reference photo.
+ 
+CRITICAL REQUIREMENTS:
+The generated image must look EXACTLY like the SAME child from the reference photo.
+ 
+EXACT FEATURE PRESERVATION (Non-Negotiable):
+- Facial structure: Preserve exact face shape and proportions
+- Hair: Exact same hairstyle, hair color, and texture
+- Eyes: Exact eye shape, size, color, and expression
+- Nose: Exact nose shape and size
+- Mouth: Exact smile and lip shape
+- Skin tone: Match the exact skin color and fair complexion from reference
+- Face proportions: Keep natural, realistic child proportions
+- Child identity: The child must be INSTANTLY RECOGNIZABLE as the same person
+ 
+LIGHTING & BRIGHTNESS (CRITICAL):
+- BRIGHT studio lighting - no dark shadows
+- Evenly lit face - soft, diffused light from front
+- Bright, natural skin tones - fair/light color rendering
+- No darkness under eyes, nose, or chin
+- Luminous, glowing skin appearance
+- High-key lighting (bright overall image)
+- Warm but bright white balance
+- No harsh shadows - only soft, gentle shading
+ 
+STYLE REQUIREMENTS:
+- Photorealistic (NOT stylized, NOT cartoon, NOT animated)
+- High-definition, sharp facial details
+- Natural, realistic skin texture
+- Realistic hair with individual strands visible
+- Professional portrait quality (like high-end photography)
+- Bright, clean appearance
+- Child-friendly, innocent expression
+ 
+COMPOSITION:
+- Head and shoulders portrait frame
+- Centered on face
+- Natural, relaxed expression
+- Neutral to warm light background (white or soft beige)
+- Professional photography aesthetic
+ 
+DO NOT:
+- Create stylized or cartoon appearance
+- Add dark shadows or shading
+- Enlarge eyes or head proportions
+- Make skin look dark or shadowy
+- Use moody or dim lighting
+- Distort facial features
+- Create unrealistic proportions
+- Add artistic effects or filters
+ 
+The final image should look like: "A bright, professional high-definition photograph of the SAME real child with natural fair skin tone, perfectly clear and luminous.
