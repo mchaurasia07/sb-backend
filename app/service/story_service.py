@@ -677,8 +677,10 @@ class StoryService:
     @staticmethod
     def _extract_character_analysis(child) -> str:
         """Extract detailed character analysis from child profile for visual consistency."""
+        age_str = f"{child.age} years old" if child.age else "child"
+
         if not child.character_metadata:
-            return f"A friendly {child.age}-year-old child named {child.first_name} ready for adventure."
+            return f"A friendly {age_str} child named {child.first_name} ready for adventure."
 
         metadata = child.character_metadata
         description = metadata.get("description", "")
@@ -686,13 +688,17 @@ class StoryService:
         # Build comprehensive character profile for image anchor consistency
         parts = []
 
+        # Add age and name as header
+        parts.append(f"Age: {age_str}")
+        parts.append(f"Name: {child.first_name}")
+
         # Use existing description as base
         if description:
-            parts.append(description)
+            parts.append(f"Description: {description}")
 
         # Add visual traits if available
         if metadata.get("generation_model"):
-            parts.append(f"Generated in {metadata.get('generation_model')} style.")
+            parts.append(f"Visual Style: Generated in {metadata.get('generation_model')} style.")
 
         # Add specific visual anchors for consistency
         parts.append(
@@ -702,7 +708,7 @@ class StoryService:
             "- Use this as the visual reference for the hero character"
         )
 
-        return "\n".join(parts) if parts else f"A friendly {child.age}-year-old child named {child.first_name}."
+        return "\n".join(parts) if parts else f"A friendly {age_str} child named {child.first_name}."
 
     async def get_story(self, user_id: UUID, story_id: UUID) -> StoryResponse:
         """Retrieve story with ownership validation."""
