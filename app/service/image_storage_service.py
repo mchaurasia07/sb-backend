@@ -85,6 +85,44 @@ class ImageStorageService:
         public_path = f"{settings.MEDIA_URL_PREFIX}/{parent_id}/{child_id}/child_character.png"
         return f"{public_base_url}{public_path}"
 
+    async def save_story_image(
+        self,
+        story_id: UUID,
+        image_bytes: bytes,
+        filename: str,
+        public_base_url: str,
+    ) -> str:
+        """Save story-generated image (cover/page/back_cover).
+
+        Args:
+            story_id: Story UUID
+            image_bytes: Image data as bytes
+            filename: Filename (e.g., 'cover.png', 'page_1.png', 'back_cover.png')
+            public_base_url: Base URL for constructing public URLs
+
+        Returns:
+            Public URL of saved image
+
+        Raises:
+            AppException: If save operation fails
+        """
+        directory = Path(settings.MEDIA_ROOT) / "stories" / str(story_id)
+        directory.mkdir(parents=True, exist_ok=True)
+
+        file_path = directory / filename
+
+        try:
+            await asyncio.to_thread(file_path.write_bytes, image_bytes)
+        except IOError as e:
+            raise AppException(
+                f"Failed to save story image: {str(e)}",
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                "STORAGE_ERROR",
+            )
+
+        public_path = f"{settings.MEDIA_URL_PREFIX}/stories/{story_id}/{filename}"
+        return f"{public_base_url}{public_path}"
+
     def _get_extension(self, photo: UploadFile) -> str:
         if photo.content_type in self.allowed_content_types:
             return self.allowed_content_types[photo.content_type]

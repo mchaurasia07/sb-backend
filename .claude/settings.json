@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//d/newWorkspace/story_book/story_book_backend/app/utils/**)",
+      "Bash(python -c ' *)",
+      "Bash(python)"
+    ]
+  }
+}

@@ -49,6 +49,14 @@ class Settings(BaseSettings):
     CHARACTER_IMAGE_QUALITY: str
     CHARACTER_GENERATION_ENABLED: bool
 
+    STORY_TEXT_MODEL: str = "gpt-4o"
+    STORY_IMAGE_MODEL: str = "dall-e-3"
+    STORY_IMAGE_SIZE: str = "1024x1024"
+    STORY_IMAGE_QUALITY: str = "standard"
+    STORY_MAX_RETRIES: int = 3
+    STORY_GENERATION_ENABLED: bool = True
+    STORY_MOCK_LLM_RESPONSES: bool = False
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     @field_validator("DATABASE_URL")

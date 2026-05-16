@@ -176,7 +176,6 @@ class AuthService:
         child_exists = await self.children.exists_for_user(user.id)
         return AuthTokenResponse(
             access_token=access_token,
-            refresh_token=refresh_token,
             user=UserResponse.model_validate(user),
             child_profile_exists=child_exists,
         )

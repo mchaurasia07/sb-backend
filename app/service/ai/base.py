@@ -5,6 +5,16 @@ from typing import Any
 
 
 @dataclass(frozen=True)
+class TextGenerationResult:
+    """Result from text generation operation."""
+
+    text: str
+    prompt_used: str
+    model: str
+    metadata: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
 class ImageGenerationResult:
     """Result from image generation operation."""
 

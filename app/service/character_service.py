@@ -112,9 +112,12 @@ class CharacterService:
             analysis_text = f"A beautifully illustrated character representing a {child.age}-year-old child in a Pixar-style 3D animated aesthetic."
             logger.warning("No analysis text available, using fallback description")
 
+        # Extract clean description from analysis text (remove numbered points if present)
+        clean_description = self._extract_clean_description(analysis_text)
+
         # Build character metadata
         metadata = {
-            "description": analysis_text,
+            "description": clean_description,
             "style": "3D Pixar-style cartoon",
             "generation_model": image_result.model,
             "prompt_used": image_result.prompt_used,
@@ -140,8 +143,43 @@ class CharacterService:
 
         return CharacterGenerationResponse(
             character_image_url=character_url,
-            character_description=analysis_text,
+            character_description=clean_description,
         )
+
+    @staticmethod
+    def _extract_clean_description(analysis_text: str) -> str:
+        """Extract a clean, concise description from LLM analysis text.
+
+        Removes numbered points and bullet points, keeping only the first sentence or main description.
+        """
+        if not analysis_text:
+            return "A beautifully illustrated character."
+
+        # Remove markdown formatting and numbered lists
+        lines = analysis_text.split('\n')
+        clean_lines = []
+
+        for line in lines:
+            # Skip empty lines and numbered/bulleted points
+            line = line.strip()
+            if not line or line[0].isdigit() or line.startswith('*') or line.startswith('-'):
+                continue
+            # Remove markdown bold/italic
+            line = line.replace('**', '').replace('__', '').replace('_', '')
+            if line:
+                clean_lines.append(line)
+
+        # Join lines and take first 1-2 sentences max (up to 200 chars)
+        description = ' '.join(clean_lines)
+        if len(description) > 200:
+            # Truncate at first period if available
+            first_period = description.find('.')
+            if first_period > 0 and first_period < 200:
+                description = description[:first_period + 1]
+            else:
+                description = description[:200] + "..."
+
+        return description or "A beautifully illustrated character."
 
     @staticmethod
     def _resolve_photo_path(url_or_path: str) -> Path:

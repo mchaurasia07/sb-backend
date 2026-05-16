@@ -1,0 +1,685 @@
+{
+  "info": {
+    "name": "Story Generation API",
+    "description": "Complete Postman collection for story generation endpoints - event-driven, input-driven, with mocking and polling support",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Setup",
+      "item": [
+        {
+          "name": "1. Login and Get Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"test@example.com\",\n  \"password\": \"YourPassword123!\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2. Get Child ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/children",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "children"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Story Generation - Input Driven Mode",
+      "item": [
+        {
+          "name": "1. Generate Story (Input-Driven, Skip Images, Mock Mode)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 202) {",
+                  "    var response = pm.response.json();",
+                  "    pm.environment.set('story_id', response.data.id);",
+                  "    console.log('Story ID saved: ' + response.data.id);",
+                  "    console.log('Status: ' + response.data.status);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"child_id\": \"{{child_id}}\",\n  \"mode\": \"INPUT_DRIVEN\",\n  \"age_group\": \"5-7\",\n  \"category\": \"adventure\",\n  \"learning_goal\": \"courage\",\n  \"context\": \"Emma loves exploring and learning about nature. She's curious and brave.\",\n  \"skip_image_generation\": true,\n  \"skip_validation\": false\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/stories/generate",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "stories",
+                "generate"
+              ]
+            },
+            "description": "Generate story with INPUT-DRIVEN mode (category, learning goal, context)\n\nWith skip_image_generation=true for fast testing"
+          },
+          "response": []
+        },
+        {
+          "name": "2. Generate Story (Input-Driven, Full with Images, Mock Mode)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 202) {",
+                  "    var response = pm.response.json();",
+                  "    pm.environment.set('story_id_full', response.data.id);",
+                  "    console.log('Story ID saved: ' + response.data.id);",
+                  "    console.log('Status: ' + response.data.status);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"child_id\": \"{{child_id}}\",\n  \"mode\": \"INPUT_DRIVEN\",\n  \"age_group\": \"5-7\",\n  \"category\": \"learning\",\n  \"learning_goal\": \"friendship\",\n  \"context\": \"A story about making new friends at school\",\n  \"skip_image_generation\": false,\n  \"skip_validation\": false\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/stories/generate",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "stories",
+                "generate"
+              ]
+            },
+            "description": "Generate story with INPUT-DRIVEN mode with FULL image generation\n\nWith skip_image_generation=false to generate all images"
+          },
+          "response": []
+        },
+        {
+          "name": "3. Generate Story (Input-Driven, Different Age Group)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 202) {",
+                  "    var response = pm.response.json();",
+                  "    pm.environment.set('story_id_toddler', response.data.id);",
+                  "    console.log('Toddler Story ID: ' + response.data.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"child_id\": \"{{child_id}}\",\n  \"mode\": \"INPUT_DRIVEN\",\n  \"age_group\": \"2-4\",\n  \"category\": \"animals\",\n  \"learning_goal\": \"colors\",\n  \"context\": \"Little ones learn about animals and colors\",\n  \"skip_image_generation\": true,\n  \"skip_validation\": false\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/stories/generate",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "stories",
+                "generate"
+              ]
+            },
+            "description": "Generate story for TODDLER age group (2-4)\n\nShows age-appropriate vocabulary and page count"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Story Generation - Event Driven Mode",
+      "item": [
+        {
+          "name": "1. Generate Story (Event-Driven, Skip Images, Mock Mode)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 202) {",
+                  "    var response = pm.response.json();",
+                  "    pm.environment.set('story_id_event', response.data.id);",
+                  "    console.log('Event Story ID saved: ' + response.data.id);",
+                  "    console.log('Status: ' + response.data.status);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"child_id\": \"{{child_id}}\",\n  \"mode\": \"EVENT_DRIVEN\",\n  \"age_group\": \"5-7\",\n  \"event_description\": \"Today Emma learned to ride a bike without training wheels for the first time! She felt scared at first but kept trying and finally did it!\",\n  \"skip_image_generation\": true,\n  \"skip_validation\": false\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/stories/generate",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "stories",
+                "generate"
+              ]
+            },
+            "description": "Generate story with EVENT-DRIVEN mode (personal event)\n\nConvert real-life events into educational stories"
+          },
+          "response": []
+        },
+        {
+          "name": "2. Generate Story (Event-Driven, Full with Images)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 202) {",
+                  "    var response = pm.response.json();",
+                  "    pm.environment.set('story_id_event_full', response.data.id);",
+                  "    console.log('Event Story ID (full): ' + response.data.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"child_id\": \"{{child_id}}\",\n  \"mode\": \"EVENT_DRIVEN\",\n  \"age_group\": \"8-12\",\n  \"event_description\": \"Yesterday Emma's soccer team lost their championship game. At first she felt disappointed, but she realized she made great friends and learned important skills. The coach praised her effort and teamwork.\",\n  \"skip_image_generation\": false,\n  \"skip_validation\": false\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/stories/generate",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "stories",
+                "generate"
+              ]
+            },
+            "description": "Generate story from EVENT with FULL image generation\n\nFor advanced age group (8-12) with longer text"
+          },
+          "response": []
+        },
+        {
+          "name": "3. Generate Story (Event-Driven, Another Event)",
+          "event": [
+            {
+              "listen": "test",
+              "script": [
+                "if (pm.response.code === 202) {",
+                "    var response = pm.response.json();",
+                "    console.log('Story created: ' + response.data.id);",
+                "}"
+              ]
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"child_id\": \"{{child_id}}\",\n  \"mode\": \"EVENT_DRIVEN\",\n  \"age_group\": \"5-7\",\n  \"event_description\": \"Emma helped her little brother when he was sad. She listened to him, gave him a hug, and they played together. He felt better and smiled.\",\n  \"skip_image_generation\": true,\n  \"skip_validation\": false\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/stories/generate",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "stories",
+                "generate"
+              ]
+            },
+            "description": "Another event-based story: Emma helping sibling"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Story Retrieval & Polling",
+      "item": [
+        {
+          "name": "1. Get Story (Check Status)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/stories/{{story_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "stories",
+                "{{story_id}}"
+              ]
+            },
+            "description": "Get story details by ID - Use for POLLING\n\nReturns:\n- PENDING: Story still generating\n- IN_PROGRESS: Workflow executing\n- COMPLETED: Story ready with pages and images\n- FAILED: Generation failed"
+          },
+          "response": []
+        },
+        {
+          "name": "2. Get Story (Wait for Completion - Polling Loop)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var response = pm.response.json();",
+                  "var status = response.data.status;",
+                  "",
+                  "console.log('Story Status: ' + status);",
+                  "console.log('Current Step: ' + response.data.current_step);",
+                  "",
+                  "if (status === 'COMPLETED') {",
+                  "    console.log('✓ Story generation complete!');",
+                  "    console.log('Title: ' + response.data.title);",
+                  "    console.log('Pages: ' + response.data.pages.length);",
+                  "} else if (status === 'FAILED') {",
+                  "    console.log('✗ Story generation failed!');",
+                  "    console.log('Error: ' + response.data.error_message);",
+                  "} else {",
+                  "    console.log('Story still generating... will retry in 5 seconds');",
+                  "    console.log('Current step: ' + response.data.current_step);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/stories/{{story_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "stories",
+                "{{story_id}}"
+              ]
+            },
+            "description": "Polling endpoint - Keep calling until COMPLETED\n\nIn production, frontend would poll every 3-5 seconds"
+          },
+          "response": []
+        },
+        {
+          "name": "3. Get Story Steps (Audit Trail)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/stories/{{story_id}}/steps",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "stories",
+                "{{story_id}}",
+                "steps"
+              ]
+            },
+            "description": "Get audit trail for story generation workflow\n\nShows all 6 steps:\n- Step name\n- Status (COMPLETED/FAILED)\n- Retry count\n- Error messages\n- Timing data (started_at, completed_at)"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Story Listing",
+      "item": [
+        {
+          "name": "1. List All Stories for User",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/stories",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "stories"
+              ]
+            },
+            "description": "List all stories for current user\n\nReturns stories in reverse chronological order (newest first)"
+          },
+          "response": []
+        },
+        {
+          "name": "2. List Stories for Specific Child",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/stories?child_id={{child_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "stories"
+              ],
+              "query": [
+                {
+                  "key": "child_id",
+                  "value": "{{child_id}}"
+                }
+              ]
+            },
+            "description": "List stories for a specific child\n\nFilter by child_id query parameter"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Advanced Scenarios",
+      "item": [
+        {
+          "name": "1. Skip Validation (Fast Generation)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"child_id\": \"{{child_id}}\",\n  \"mode\": \"INPUT_DRIVEN\",\n  \"age_group\": \"8-12\",\n  \"category\": \"fantasy\",\n  \"learning_goal\": \"creativity\",\n  \"context\": \"A fantasy adventure with magic and dragons\",\n  \"skip_image_generation\": true,\n  \"skip_validation\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/stories/generate",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "stories",
+                "generate"
+              ]
+            },
+            "description": "Skip plan validation for faster generation\n\nWith skip_validation=true:\n- Skips validation retries\n- No error feedback loop\n- Faster but less robust"
+          },
+          "response": []
+        },
+        {
+          "name": "2. Generate with All Features (Event + Full Images)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"child_id\": \"{{child_id}}\",\n  \"mode\": \"EVENT_DRIVEN\",\n  \"age_group\": \"8-12\",\n  \"event_description\": \"Emma participated in her first school play. She was nervous but remembered her lines and the audience loved her performance. She felt proud and excited.\",\n  \"skip_image_generation\": false,\n  \"skip_validation\": false\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/stories/generate",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "stories",
+                "generate"
+              ]
+            },
+            "description": "Full story generation with ALL features:\n- Event-driven mode\n- Advanced age group (8-12)\n- Full image generation\n- Validation enabled\n\nThis will take 3-5 minutes but generate complete story with images"
+          },
+          "response": []
+        },
+        {
+          "name": "3. Multiple Categories Test",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"child_id\": \"{{child_id}}\",\n  \"mode\": \"INPUT_DRIVEN\",\n  \"age_group\": \"5-7\",\n  \"category\": \"mystery\",\n  \"learning_goal\": \"problem_solving\",\n  \"context\": \"A mysterious treasure hunt in a magical forest\",\n  \"skip_image_generation\": true,\n  \"skip_validation\": false\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/stories/generate",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "stories",
+                "generate"
+              ]
+            },
+            "description": "Test with 'mystery' category and 'problem_solving' goal"
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "jwt_token",
+      "value": "YOUR_JWT_TOKEN_HERE",
+      "type": "string"
+    },
+    {
+      "key": "child_id",
+      "value": "YOUR_CHILD_ID_HERE",
+      "type": "string"
+    },
+    {
+      "key": "story_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "story_id_full",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "story_id_toddler",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "story_id_event",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "story_id_event_full",
+      "value": "",
+      "type": "string"
+    }
+  ]
+}
