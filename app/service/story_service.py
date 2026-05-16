@@ -683,6 +683,9 @@ class StoryService:
             return f"A friendly {age_str} child named {child.first_name} ready for adventure."
 
         metadata = child.character_metadata
+
+        # Priority: Use analysis_text (detailed visual analysis) over simple description
+        analysis_text = metadata.get("analysis_text", "")
         description = metadata.get("description", "")
 
         # Build comprehensive character profile for image anchor consistency
@@ -692,13 +695,16 @@ class StoryService:
         parts.append(f"Age: {age_str}")
         parts.append(f"Name: {child.first_name}")
 
-        # Use existing description as base
-        if description:
+        # Use analysis_text if available (detailed visual analysis from character generation)
+        if analysis_text:
+            parts.append(f"Visual Analysis:\n{analysis_text}")
+        # Fall back to simple description if analysis_text not available
+        elif description:
             parts.append(f"Description: {description}")
 
-        # Add visual traits if available
+        # Add visual generation style if available
         if metadata.get("generation_model"):
-            parts.append(f"Visual Style: Generated in {metadata.get('generation_model')} style.")
+            parts.append(f"Generated in: {metadata.get('generation_model')} style")
 
         # Add specific visual anchors for consistency
         parts.append(
