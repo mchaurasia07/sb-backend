@@ -64,7 +64,7 @@ Early Reader (5-7): 6-12 word sentences. Vivid sensory language. Simple compound
 Advanced (8-12): Up to 20 words. Inner monologues and thematic depth. "Show, Don't Tell" emotions through action.
 
 6. OUTPUT FORMAT (STRICT JSON)
-{{
+{
 "title": "string",
 "final_page_count": number,
 "age_band": "Toddler | Early Reader | Advanced",
@@ -74,37 +74,37 @@ Advanced (8-12): Up to 20 words. Inner monologues and thematic depth. "Show, Don
 "setting": "specific and vivid location",
 "tone": "e.g., whimsical, adventurous, calm",
 "characters": [
-{{
+{
 "name": "string",
 "role": "hero | companion | supporter",
 "anchor_description": "Full repeatable visual prompt for AI image generation",
-"visual_traits": {{
+"visual_traits": {
 "hair": "string",
 "clothing": "string",
 "signature_item": "string"
-}}
-}}
+}
+}
 ],
 "pages": [
-{{
+{
 "page_number": number,
 "story_role": "introduction | setup | conflict | escalation | climax | resolution",
 "scene_description": "2-3 visual elements for the illustrator",
 "narration_sample": "Illustrative text at correct age level",
 "child_action": "Specific decision or action taken by the child",
 "learning_goal_integration": "How the learning goal is applied on this specific page",
-"environment": {{
+"environment": {
 "lighting": "string",
 "time_of_day": "string",
 "dominant_colors": ["string"]
-}},
+},
 "mood": "Specific emotional shift (e.g., 'quiet wonder')",
 "hook_to_next": "A tension-building question or transition (null on last page)",
 "visual_continuity_notes": "Mandatory checklist of character traits present in this scene",
 "image_gen_prompt": "A combined prompt for DALL-E/Midjourney integrating style, character anchor, and scene"
-}}
+}
 ]
-}}
+}
 
 7. PAGE DISTRIBUTION REQUIREMENT
 For requested page count - break the complete narrative as follows:

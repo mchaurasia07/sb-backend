@@ -12,15 +12,19 @@ Strictly preserve:
 - smile
 - nose shape
 - skin tone
+- exact {child_age_label} age appearance
+- {child_age_visual_guidance}
 - overall child identity
 
 The child must be instantly recognizable as the same real child.
+The child must look like the same {child_age_label} child from the profile photo, not older or younger.
 
 STYLE DIRECTION:
 - realistic cinematic 3D character
-- subtle animated movie stylization
-- very light Pixar-inspired rendering
+- subtle high-end animated family film realism
+- no generic Pixar-style face
 - realistic child anatomy and proportions
+- realistic age-appropriate child proportions for {child_age_label}
 - natural facial features
 - soft warm cinematic lighting
 - polished movie-quality rendering
@@ -41,6 +45,9 @@ NOT:
 - oversized eyes
 - oversized head
 - doll-like appearance
+- wrong-age body
+- older-looking face or body
+- younger-looking face or body
 
 LIGHTING:
 - bright soft studio lighting
@@ -54,6 +61,10 @@ COMPOSITION:
 - full body portrait
 - centered composition
 - natural relaxed pose
+- age-appropriate child height for {child_age_label}
+- age-appropriate hands and feet
+- soft round cheeks
+- age-appropriate child limbs
 - warm friendly expression
 - neutral clean background
 
@@ -64,6 +75,8 @@ DO NOT:
 - make the character look animated or cartoonish
 - create unrealistic proportions
 - create toy-like rendering
+- make the child look older or younger than {child_age_label}
+- make the child taller, slimmer, or more mature than the reference child
 
 The final image should look like:
-"A cinematic storybook version of the SAME real child with subtle animated movie realism."
+"A cinematic storybook version of the SAME {child_age_label} real child with subtle animated movie realism."

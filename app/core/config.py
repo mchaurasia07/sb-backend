@@ -51,10 +51,10 @@ class Settings(BaseSettings):
     OPENAI_TEXT_MODEL: str
 
     # Google Gemini Configuration
-    GOOGLE_API_KEY: str = ""  # Optional, only needed if using Google provider
+    GOOGLE_API_KEY: str = "AQ.Ab8RN6LKnZRMxig4EoWgoh4nf0jOa8AUwiEJcla3mkqfFvJxwg"  # Optional, only needed if using Google provider
     GOOGLE_TEXT_MODEL: str = "gemini-2.5-flash"  # Text model for vision analysis and text generation
     GOOGLE_IMAGE_MODEL: str = "imagen-4.0-generate-001"  # Image model for image generation
-    GOOGLE_REFERENCE_IMAGE_MODEL: str = "imagen-4.0-generate-001"  # Image model for prompt + reference image
+    GOOGLE_REFERENCE_IMAGE_MODEL: str = "gemini-2.5-flash-image"  # Image model for prompt + reference image
 
     # Character Generation Settings
     CHARACTER_IMAGE_SIZE: str

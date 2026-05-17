@@ -89,15 +89,20 @@ class OpenAIProvider(AIProvider):
             # Step 1: Analyze reference image with vision API
             logger.info("Analyzing reference image for exact features...")
             b64_image = _extract_base64_image_data(path)
+            child_age_label = kwargs.get("child_age_label", "the child's profile age")
+            child_age_visual_guidance = kwargs.get(
+                "child_age_visual_guidance",
+                "age-appropriate child height, body build, hands, feet, limbs, and facial maturity",
+            )
 
-            analysis_prompt = """Describe this photo to create an illustrated storybook character that matches it.
+            analysis_prompt = f"""Describe this photo to create an illustrated storybook character that matches it.
 
 Describe:
 1. Hair: color, length, style
 2. Face appearance: shape, distinctive features
 3. Eyes: color and appearance
 4. Skin tone
-5. Approximate age
+5. Approximate age. The child profile age is {child_age_label}; describe how to preserve {child_age_visual_guidance}.
 6. Expression and mood
 7. Any unique visual characteristics
 8. Overall appearance to recreate in illustration form
@@ -124,7 +129,13 @@ Focus on visual details needed for character illustration."""
             logger.info("Reference image analysis complete")
 
             # Step 2: Enhance prompt with analysis
-            enhanced_prompt = f"{prompt}\n\nDETAILED REFERENCE ANALYSIS:\n{analysis_text}\n\nGenerate character matching EVERY analyzed detail exactly."
+            enhanced_prompt = (
+                f"{prompt}\n\n"
+                f"CHILD PROFILE AGE: {child_age_label}\n"
+                f"AGE APPEARANCE GUIDANCE: {child_age_visual_guidance}\n\n"
+                f"DETAILED REFERENCE ANALYSIS:\n{analysis_text}\n\n"
+                "Generate character matching EVERY analyzed detail exactly, including the correct profile age."
+            )
 
             # Step 3: Generate image with enhanced prompt
             logger.info("Generating character image with analysis-enhanced prompt...")
@@ -171,6 +182,8 @@ Focus on visual details needed for character illustration."""
                 "quality": kwargs.get("quality", "high"),
                 "analysis_text": analysis_text,
                 "enhanced_prompt": enhanced_prompt,
+                "child_age_label": child_age_label,
+                "child_age_visual_guidance": child_age_visual_guidance,
             },
         )
 
@@ -244,7 +257,7 @@ Focus on visual details needed for character illustration."""
             response = await self._client.chat.completions.create(
                 model=self.text_model,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=kwargs.get("max_tokens", 4000),
+                max_tokens=kwargs.get("max_tokens", 36000),
                 temperature=kwargs.get("temperature", 0.7),
                 response_format=kwargs.get("response_format", None),
             )
@@ -307,17 +320,55 @@ Focus on visual details needed for character illustration."""
 
         try:
             reference_image = parse_base64_image_data(reference_image_base64)
+            consistency_reference = None
+            if kwargs.get("consistency_reference_image_base64"):
+                consistency_reference = parse_base64_image_data(kwargs["consistency_reference_image_base64"])
 
-            analysis_prompt = """Describe this character reference image for consistent storybook illustration.
+            child_age_label = kwargs.get("child_age_label", "the child's profile age")
+            child_age_visual_guidance = kwargs.get(
+                "child_age_visual_guidance",
+                "age-appropriate child height, body build, hands, feet, limbs, and facial maturity",
+            )
+
+            analysis_prompt = f"""Describe the references for consistent storybook illustration.
 
 Focus on:
-1. Character face and age appearance
-2. Hair style and color
-3. Outfit, colors, and accessories
-4. Body proportions and overall animated style
-5. Key visual details that must remain consistent across story pages
+1. Exact illustrated master character face, outfit, colors, and proportions when a master character image is provided
+2. Real child face shape and age appearance from the original photo
+3. Hair style, hair direction, and color
+4. Eye shape, natural eye size, eye spacing, and eye color
+5. Eyebrow shape, nose shape, smile, teeth, cheeks, and skin tone
+6. Exact {child_age_label} age appearance and this age/body guidance: {child_age_visual_guidance}
+7. One locked story outfit, colors, accessories, and key visual details that must remain consistent across story pages
 
 Return a concise visual consistency description."""
+            content: list[dict[str, Any]] = [{"type": "text", "text": analysis_prompt}]
+            if consistency_reference is not None:
+                content.extend(
+                    [
+                        {
+                            "type": "text",
+                            "text": (
+                                "This image is the generated master character image from character_image_url. "
+                                "It is the PRIMARY reference. Describe the exact illustrated face, outfit, colors, "
+                                "rendering style, and proportions that must remain consistent on every story page."
+                            ),
+                        },
+                        {"type": "image_url", "image_url": {"url": consistency_reference.data_url}},
+                    ]
+                )
+            content.extend(
+                [
+                    {
+                        "type": "text",
+                        "text": (
+                            "This image is the original child profile photo. Use it only as supporting real-child "
+                            "identity context; do not let story costumes override the master character image."
+                        ),
+                    },
+                    {"type": "image_url", "image_url": {"url": reference_image.data_url}},
+                ]
+            )
 
             logger.info("Analyzing character reference image for story image consistency")
             analysis_response = await self._client.chat.completions.create(
@@ -326,10 +377,7 @@ Return a concise visual consistency description."""
                 messages=[
                     {
                         "role": "user",
-                        "content": [
-                            {"type": "text", "text": analysis_prompt},
-                            {"type": "image_url", "image_url": {"url": reference_image.data_url}},
-                        ],
+                        "content": content,
                     }
                 ],
             )
@@ -337,9 +385,14 @@ Return a concise visual consistency description."""
             analysis_text = analysis_response.choices[0].message.content or ""
             enhanced_prompt = (
                 f"{prompt}\n\n"
-                "CHARACTER REFERENCE DETAILS TO PRESERVE:\n"
+                "REAL CHILD REFERENCE DETAILS TO PRESERVE:\n"
                 f"{analysis_text}\n\n"
-                "Use the same character identity, outfit, and visual style. Do not redesign the character."
+                "Use the master character image as the primary face/age/body/style reference when provided. "
+                f"Keep that exact illustrated face, {child_age_label} age appearance, age-appropriate body proportions, "
+                "rendering style, and one locked story outfit across pages. Use the original child photo only to "
+                "support real-child identity. Do not redesign the child, do not enlarge the eyes, do not make the "
+                "child look older or younger, and do not create a generic cartoon face. "
+                f"Age/body guidance to preserve: {child_age_visual_guidance}."
             )
 
             logger.info(f"Generating story image with {self.image_model}")

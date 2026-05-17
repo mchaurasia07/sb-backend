@@ -94,7 +94,7 @@ Treat the child as the SAME animated movie character model in every illustration
 
 Maintain this EXACT rendering style:
 
-"High-quality Pixar-style 3D children's storybook illustration, cinematic lighting, soft shadows, depth of field, ultra-clean rendering, expressive characters, highly detailed face, animated movie quality."
+"Premium semi-realistic 3D children's storybook illustration, cinematic lighting, soft shadows, depth of field, clean polished rendering, natural child facial proportions, recognizable real-child likeness, expressive but not exaggerated, high-detail face, high-end animated family film realism."
 
 # STORYBOOK RULES
 
@@ -186,7 +186,7 @@ Avoid:
 
 Always apply:
 
-"no character redesign, no inconsistent face, no age change, no hairstyle change, no outfit change, no extra characters, no duplicate limbs, no distorted anatomy, no extra fingers, no blurry textures, no cropped face, no low-resolution rendering, no horror elements, no dark aggressive lighting, no photorealism, no messy composition"
+"no character redesign, no generic cartoon child, no stock Pixar face, no oversized eyes, no oversized head, no thick cartoon eyebrows, no inconsistent face, no age change, no hairstyle change, no outfit change, no extra characters, no duplicate limbs, no distorted anatomy, no extra fingers, no blurry textures, no cropped face, no low-resolution rendering, no horror elements, no dark aggressive lighting, no raw photographic output, no messy composition"
 
 # FINAL EXECUTION RULES
 

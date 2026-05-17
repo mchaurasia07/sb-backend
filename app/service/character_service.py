@@ -84,7 +84,11 @@ class CharacterService:
         logger.info(f"Calling {provider_name} AI provider to generate character image from {photo_path.name}")
         character_prompt = load_and_render_prompt(
             "prompts/character_generation.txt",
-            {"additional_context": payload.additional_context or ""},
+            {
+                "additional_context": payload.additional_context or "",
+                "child_age_label": self._child_age_label(child),
+                "child_age_visual_guidance": self._age_visual_guidance(child.age),
+            },
         )
         logger.info(f"Character Generation Prompt:\n{character_prompt}")
 
@@ -93,6 +97,8 @@ class CharacterService:
             prompt=character_prompt,
             size=settings.CHARACTER_IMAGE_SIZE,
             quality=settings.CHARACTER_IMAGE_QUALITY,
+            child_age_label=self._child_age_label(child),
+            child_age_visual_guidance=self._age_visual_guidance(child.age),
         )
 
         logger.info(f"Successfully generated character image using {image_result.model}")
@@ -113,7 +119,10 @@ class CharacterService:
 
         if not analysis_text:
             # Fallback if analysis was skipped
-            analysis_text = f"A beautifully illustrated character representing a {child.age}-year-old child in a Pixar-style 3D animated aesthetic."
+            analysis_text = (
+                f"A beautifully illustrated character representing a {child.age}-year-old child in a premium "
+                "semi-realistic 3D storybook aesthetic."
+            )
             logger.warning("No analysis text available, using fallback description")
 
         # Extract clean description from analysis text (remove numbered points if present)
@@ -122,12 +131,14 @@ class CharacterService:
         # Build character metadata
         metadata = {
             "description": clean_description,
-            "style": "3D Pixar-style cartoon",
+            "style": "premium semi-realistic 3D storybook",
             "generation_model": image_result.model,
             "prompt_used": image_result.prompt_used,
             "revised_prompt": image_result.revised_prompt,
             "analysis_text": image_result.metadata.get("analysis_text"),
             "enhanced_prompt": image_result.metadata.get("enhanced_prompt"),
+            "child_age_label": self._child_age_label(child),
+            "age_visual_guidance": self._age_visual_guidance(child.age),
             "size": image_result.metadata.get("size"),
             "quality": image_result.metadata.get("quality"),
             "generated_at": datetime.now(UTC).isoformat(),
@@ -184,6 +195,31 @@ class CharacterService:
                 description = description[:200] + "..."
 
         return description or "A beautifully illustrated character."
+
+    @staticmethod
+    def _child_age_label(child) -> str:
+        return f"{child.age} years old" if child.age is not None else "the child's profile age"
+
+    @staticmethod
+    def _age_visual_guidance(age: int | None) -> str:
+        if age is None:
+            return "age-appropriate child height, body build, hands, feet, limbs, and facial maturity"
+        if age <= 4:
+            return (
+                "toddler/preschool-age proportions: short child height, soft round cheeks, small hands and feet, "
+                "short child limbs, and very young child facial proportions"
+            )
+        if age <= 7:
+            return (
+                "early-reader child proportions: childlike height, rounded cheeks, natural child hands and feet, "
+                "and young child facial proportions"
+            )
+        if age <= 12:
+            return (
+                "older child proportions: age-appropriate height, natural child build, childlike facial maturity, "
+                "and no teenage features"
+            )
+        return "teen-appropriate but still child-safe proportions, matching the profile photo and not adult features"
 
     @staticmethod
     def _resolve_photo_path(url_or_path: str) -> Path:

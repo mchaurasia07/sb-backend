@@ -117,14 +117,14 @@ class AIProvider(ABC):
         reference_image_base64: str,
         **kwargs: Any,
     ) -> ImageGenerationResult:
-        """Create a story image using a prompt and base64 character image.
+        """Create a story image using a prompt and base64 child reference image.
 
         Args:
             prompt: Story image generation prompt
-            reference_image_base64: Base64-encoded character reference image.
+            reference_image_base64: Base64-encoded original child reference image.
                 Can be raw base64 or a data URL.
             **kwargs: Provider-specific options such as size, quality,
-                aspect_ratio, or model
+                aspect_ratio, model, or consistency_reference_image_base64
 
         Returns:
             ImageGenerationResult with generated image bytes and metadata

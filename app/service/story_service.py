@@ -1,6 +1,7 @@
 import base64
 import json
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,46 @@ from app.service.image_plan_validator import ImagePlanValidator
 from app.utils.prompt_loader import load_prompt, render_prompt
 
 logger = logging.getLogger(__name__)
+
+
+def _repair_json(text: str) -> str:
+    """Attempt to repair common JSON issues from LLM output."""
+    # Remove markdown code fences if present
+    text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.MULTILINE)
+    text = re.sub(r"\s*```$", "", text, flags=re.MULTILINE)
+
+    # Fix unterminated strings: find quotes with newlines before closing quote
+    # This is a heuristic - replace literal newlines in string values with \n
+    text = re.sub(r':\s*"([^"]*)\n([^"]*)"', r': "\1\\n\2"', text)
+
+    # Remove any control characters that might break JSON parsing
+    text = "".join(ch if ord(ch) >= 32 or ch in "\n\r\t" else "" for ch in text)
+
+    return text.strip()
+
+
+def _finish_reason(result: Any) -> str | None:
+    """Read provider finish reason metadata if available."""
+    metadata = result.metadata or {}
+    finish_reason = metadata.get("finish_reason")
+    return str(finish_reason) if finish_reason is not None else None
+
+
+def _is_token_limit_finish(result: Any) -> bool:
+    finish_reason = (_finish_reason(result) or "").lower()
+    return "length" in finish_reason or "max_token" in finish_reason
+
+
+def _looks_truncated_json(text: str) -> bool:
+    stripped = text.rstrip()
+    if not stripped:
+        return True
+    return not stripped.endswith(("}", "]"))
+
+
+def _compact_json(data: Any) -> str:
+    """Serialize prompt context without pretty-print whitespace."""
+    return json.dumps(data, ensure_ascii=False, separators=(",", ":"))
 
 # Testing flags helper
 class StoryGenerationFlags:
@@ -224,8 +265,8 @@ class StoryService:
         # Generate better hobby suggestions based on age group
         hobby = self._get_hobby_for_age_group(story.age_group)
 
-        # Extract detailed character info for consistent visual anchor
-        character_info = self._extract_character_analysis(child)
+        # Extract detailed character metadata for consistent visual anchor
+        character_context = self._build_character_reference_context(child)
 
         # Render template using safe string replacement to avoid format() issues with JSON
         prompt = template
@@ -238,7 +279,9 @@ class StoryService:
         prompt = prompt.replace("{moral}", "kindness and courage")
         prompt = prompt.replace("{pages}", str(pages))
         prompt = prompt.replace("{custom_character}", "false")
-        prompt = prompt.replace("{character_description}", character_info)
+        # Escape newlines and quotes in character info to prevent prompt injection
+        safe_character_info = character_context["character_description"].replace("\n", " ").replace('"', '\\"')
+        prompt = prompt.replace("{character_description}", safe_character_info)
 
         # Create step record
         step = await self.story_steps.create(story.id, StoryStepName.STORY_PLAN_GENERATION)
@@ -250,16 +293,31 @@ class StoryService:
             # Call LLM
             result = await self.ai_provider.generate_text(
                 prompt,
-                max_tokens=4000,
+                max_tokens=36000,
                 temperature=0.4,
                 response_format={"type": "json_object"},
             )
 
-            # Parse response
+            # Log raw response for debugging
+            logger.info(f"Story {story.id}: Raw LLM response (first 2000 chars):\n{result.text[:2000]}")
+
+            # Parse response with JSON repair
             try:
                 story_plan = json.loads(result.text)
             except json.JSONDecodeError as e:
-                raise AppException(f"Invalid JSON from LLM: {str(e)}", code="INVALID_LLM_JSON")
+                logger.error(f"Story {story.id}: JSON parse error - {str(e)}\nFull response:\n{result.text}")
+                # Try to repair common JSON issues
+                repaired = _repair_json(result.text)
+                logger.info(f"Story {story.id}: Repaired response (first 2000 chars):\n{repaired[:2000]}")
+                try:
+                    story_plan = json.loads(repaired)
+                    logger.warning(f"Story {story.id}: Recovered JSON after repair (original error: {str(e)})")
+                except json.JSONDecodeError as repair_error:
+                    logger.error(f"Story {story.id}: Repair failed - {str(repair_error)}")
+                    raise AppException(
+                        f"Invalid JSON from LLM (even after repair): {str(repair_error)}. Original: {str(e)}",
+                        code="INVALID_LLM_JSON",
+                    )
 
             step.response = story_plan
             step.status = StepStatus.COMPLETED
@@ -346,12 +404,14 @@ class StoryService:
         logger.info(f"Story {story.id}: Regenerating plan (attempt {attempt + 1}) with error feedback")
 
         child = await self.children.get_for_user(story.user_id, story.child_id)
+        if child is None:
+            raise NotFoundException("Child profile not found during plan retry")
         template = load_prompt("prompts/story/story_plan_prompt.txt")
 
         pages = self._get_page_count_for_age_group(story.age_group)
         theme = story.category or story.event_description or "adventure"
         hobby = self._get_hobby_for_age_group(story.age_group)
-        character_info = self._extract_character_analysis(child)
+        character_context = self._build_character_reference_context(child)
 
         # Add error feedback to prompt using safe string replacement
         error_feedback = "\n".join([f"- {err}" for err in errors])
@@ -365,20 +425,37 @@ class StoryService:
         enhanced_prompt = enhanced_prompt.replace("{moral}", "kindness and courage")
         enhanced_prompt = enhanced_prompt.replace("{pages}", str(pages))
         enhanced_prompt = enhanced_prompt.replace("{custom_character}", "false")
-        enhanced_prompt = enhanced_prompt.replace("{character_description}", character_info)
+        # Escape newlines and quotes in character info to prevent prompt injection
+        safe_character_info = character_context["character_description"].replace("\n", " ").replace('"', '\\"')
+        enhanced_prompt = enhanced_prompt.replace("{character_description}", safe_character_info)
         enhanced_prompt += f"\n\nPREVIOUS VALIDATION ERRORS (fix these):\n{error_feedback}"
 
         result = await self.ai_provider.generate_text(
             enhanced_prompt,
-            max_tokens=4000,
+            max_tokens=36000,
             temperature=0.4,
             response_format={"type": "json_object"},
         )
 
+        # Log raw response for debugging
+        logger.info(f"Story {story.id}: Raw retry LLM response (first 2000 chars):\n{result.text[:2000]}")
+
         try:
             new_plan = json.loads(result.text)
         except json.JSONDecodeError as e:
-            raise AppException(f"Invalid JSON from regenerated plan: {str(e)}", code="INVALID_LLM_JSON")
+            logger.error(f"Story {story.id}: JSON parse error in retry - {str(e)}\nFull response:\n{result.text}")
+            # Try to repair common JSON issues
+            repaired = _repair_json(result.text)
+            logger.info(f"Story {story.id}: Repaired retry response (first 2000 chars):\n{repaired[:2000]}")
+            try:
+                new_plan = json.loads(repaired)
+                logger.warning(f"Story {story.id}: Recovered JSON in retry after repair")
+            except json.JSONDecodeError as repair_error:
+                logger.error(f"Story {story.id}: Retry repair failed - {str(repair_error)}")
+                raise AppException(
+                    f"Invalid JSON from regenerated plan (even after repair): {str(repair_error)}",
+                    code="INVALID_LLM_JSON",
+                )
 
         return new_plan
 
@@ -397,7 +474,7 @@ class StoryService:
         try:
             result = await self.ai_provider.generate_text(
                 prompt,
-                max_tokens=4000,
+                max_tokens=36000,
                 temperature=0.7,
                 response_format={"type": "json_object"},
             )
@@ -439,18 +516,23 @@ class StoryService:
         template = load_prompt("prompts/story/image_plan_prompt.txt")
 
         child = await self.children.get_for_user(story.user_id, story.child_id)
-        character_info = self._extract_character_analysis(child)
+        if child is None:
+            raise NotFoundException("Child profile not found during image plan generation")
+        character_context = self._build_character_reference_context(child)
+        compact_story_plan, compact_story_json = self._build_image_plan_context(story_plan, story_json)
 
         # Populate all placeholders in template
-        prompt = template.replace("{story_plan_json}", json.dumps(story_plan, indent=2))
-        prompt = prompt.replace("{story_json}", json.dumps(story_json, indent=2))
-        prompt = prompt.replace("{character_description}", character_info)
+        prompt = template.replace("{story_plan_json}", _compact_json(compact_story_plan))
+        prompt = prompt.replace("{story_json}", _compact_json(compact_story_json))
+        prompt = prompt.replace("{character_description}", character_context["character_description"])
+        prompt = prompt.replace("{child_age_label}", character_context["child_age_label"])
+        prompt = prompt.replace("{child_age_visual_guidance}", character_context["child_age_visual_guidance"])
         step.prompt = prompt
 
         try:
             result = await self.ai_provider.generate_text(
                 prompt,
-                max_tokens=4000,
+                max_tokens=36000,
                 temperature=0.2,
                 response_format={"type": "json_object"},
             )
@@ -458,7 +540,39 @@ class StoryService:
             try:
                 image_plan = json.loads(result.text)
             except json.JSONDecodeError as e:
-                raise AppException(f"Invalid JSON from image plan generation: {str(e)}", code="INVALID_LLM_JSON")
+                finish_reason = _finish_reason(result)
+                logger.error(
+                    "Story %s: Image plan JSON parse error - %s. Finish reason: %s. "
+                    "Response length: %s. Response start:\n%s\nResponse end:\n%s",
+                    story.id,
+                    str(e),
+                    finish_reason,
+                    len(result.text),
+                    result.text[:2000],
+                    result.text[-2000:],
+                )
+
+                repaired = _repair_json(result.text)
+                try:
+                    image_plan = json.loads(repaired)
+                    logger.warning(
+                        "Story %s: Recovered image plan JSON after repair. Original error: %s",
+                        story.id,
+                        str(e),
+                    )
+                except json.JSONDecodeError as repair_error:
+                    if _is_token_limit_finish(result) or _looks_truncated_json(result.text):
+                        raise AppException(
+                            "Image plan generation returned incomplete JSON. "
+                            f"Finish reason: {finish_reason or 'unknown'}. "
+                            "This is usually caused by the model hitting its output token limit.",
+                            code="INVALID_LLM_JSON",
+                        )
+
+                    raise AppException(
+                        f"Invalid JSON from image plan generation: {str(repair_error)}",
+                        code="INVALID_LLM_JSON",
+                    )
 
             step.response = image_plan
             step.status = StepStatus.COMPLETED
@@ -541,8 +655,16 @@ class StoryService:
                     "Child profile photo is required for story image generation",
                     code="NO_PHOTO",
                 )
+            if not child.character_image_url:
+                raise AppException(
+                    "Generated character image is required for story image generation",
+                    code="NO_CHARACTER_IMAGE",
+                )
 
             avatar_image_base64 = self._load_image_as_base64(child.avatar_image_url)
+            character_image_base64 = self._load_image_as_base64(child.character_image_url)
+            character_context = self._build_character_reference_context(child)
+            generated_image_prompts: list[dict[str, Any]] = []
 
             # Generate cover image
             if cover and cover.get("image_prompt"):
@@ -551,12 +673,26 @@ class StoryService:
                     image_generation_template,
                     character_consistency,
                     cover.get("image_prompt"),
+                    character_context,
                 )
                 cover_bytes = await self.ai_provider.create_story_image(
                     cover_prompt,
                     reference_image_base64=avatar_image_base64,
+                    consistency_reference_image_base64=character_image_base64,
+                    child_age_label=character_context["child_age_label"],
+                    child_age_visual_guidance=character_context["child_age_visual_guidance"],
                     size=settings.STORY_IMAGE_SIZE,
                     quality=settings.STORY_IMAGE_QUALITY,
+                )
+                generated_image_prompts.append(
+                    {
+                        "page_type": "cover",
+                        "page_number": 0,
+                        "source_image_prompt": cover.get("image_prompt"),
+                        "rendered_prompt": cover_prompt,
+                        "provider_prompt_used": cover_bytes.prompt_used,
+                        "used_character_reference": True,
+                    }
                 )
                 cover_url = await image_storage_service.save_story_image(
                     story.id,
@@ -582,12 +718,26 @@ class StoryService:
                         image_generation_template,
                         character_consistency,
                         img_page.get("image_prompt"),
+                        character_context,
                     )
                     image_bytes = await self.ai_provider.create_story_image(
                         page_prompt,
                         reference_image_base64=avatar_image_base64,
+                        consistency_reference_image_base64=character_image_base64,
+                        child_age_label=character_context["child_age_label"],
+                        child_age_visual_guidance=character_context["child_age_visual_guidance"],
                         size=settings.STORY_IMAGE_SIZE,
                         quality=settings.STORY_IMAGE_QUALITY,
+                    )
+                    generated_image_prompts.append(
+                        {
+                            "page_type": "page",
+                            "page_number": page_num,
+                            "source_image_prompt": img_page.get("image_prompt"),
+                            "rendered_prompt": page_prompt,
+                            "provider_prompt_used": image_bytes.prompt_used,
+                            "used_character_reference": True,
+                        }
                     )
                     image_url = await image_storage_service.save_story_image(
                         story.id,
@@ -615,12 +765,26 @@ class StoryService:
                     image_generation_template,
                     character_consistency,
                     back_cover.get("image_prompt"),
+                    character_context,
                 )
                 back_cover_bytes = await self.ai_provider.create_story_image(
                     back_cover_prompt,
                     reference_image_base64=avatar_image_base64,
+                    consistency_reference_image_base64=character_image_base64,
+                    child_age_label=character_context["child_age_label"],
+                    child_age_visual_guidance=character_context["child_age_visual_guidance"],
                     size=settings.STORY_IMAGE_SIZE,
                     quality=settings.STORY_IMAGE_QUALITY,
+                )
+                generated_image_prompts.append(
+                    {
+                        "page_type": "back_cover",
+                        "page_number": len(pages) + 1,
+                        "source_image_prompt": back_cover.get("image_prompt"),
+                        "rendered_prompt": back_cover_prompt,
+                        "provider_prompt_used": back_cover_bytes.prompt_used,
+                        "used_character_reference": True,
+                    }
                 )
                 back_cover_url = await image_storage_service.save_story_image(
                     story.id,
@@ -641,8 +805,13 @@ class StoryService:
             step.response = {
                 "images_generated": True,
                 "message": "All images generated and saved successfully",
-                "image_count": len(image_pages) + (2 if cover and back_cover else (1 if cover or back_cover else 0)),
+                "image_count": len(generated_image_prompts),
                 "used_avatar_reference": True,
+                "used_character_reference": True,
+                "avatar_image_url": child.avatar_image_url,
+                "character_image_url": child.character_image_url,
+                "child_age_label": character_context["child_age_label"],
+                "rendered_image_prompts": generated_image_prompts,
             }
             step.status = StepStatus.COMPLETED
             step.completed_at = datetime.utcnow()
@@ -664,15 +833,74 @@ class StoryService:
         template: str,
         character_consistency: dict[str, Any],
         image_prompt: str,
+        character_context: dict[str, str],
     ) -> str:
         """Render the final story image prompt with consistency context."""
         return render_prompt(
             template,
             {
                 "character_consistency_json": character_consistency,
+                "character_reference_metadata": character_context["character_description"],
+                "child_age_label": character_context["child_age_label"],
+                "child_age_visual_guidance": character_context["child_age_visual_guidance"],
                 "current_page_image_prompt": image_prompt,
             },
         )
+
+    @staticmethod
+    def _build_image_plan_context(
+        story_plan: dict[str, Any],
+        story_json: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Build a compact prompt context with only fields needed for image planning."""
+        compact_plan_pages = []
+        for page in story_plan.get("pages", []):
+            if not isinstance(page, dict):
+                continue
+
+            page_number = page.get("page_number")
+            compact_plan_pages.append(
+                {
+                    "page_number": page_number,
+                    "story_role": page.get("story_role"),
+                    "scene_description": page.get("scene_description"),
+                    "child_action": page.get("child_action"),
+                    "learning_goal_integration": page.get("learning_goal_integration"),
+                    "environment": page.get("environment"),
+                    "mood": page.get("mood"),
+                    "visual_continuity_notes": page.get("visual_continuity_notes"),
+                    "base_image_prompt": page.get("image_gen_prompt"),
+                }
+            )
+
+        compact_story_plan = {
+            "title": story_plan.get("title"),
+            "final_page_count": story_plan.get("final_page_count"),
+            "age_band": story_plan.get("age_band"),
+            "global_visual_style": story_plan.get("global_visual_style"),
+            "summary": story_plan.get("summary"),
+            "moral_theme": story_plan.get("moral_theme"),
+            "setting": story_plan.get("setting"),
+            "tone": story_plan.get("tone"),
+            "characters": story_plan.get("characters", []),
+            "pages": compact_plan_pages,
+        }
+
+        compact_story_json = {
+            "title": story_json.get("title"),
+            "summary": story_json.get("summary"),
+            "moral_theme": story_json.get("moral_theme") or story_json.get("moral"),
+            "pages": [
+                {
+                    "page_number": page.get("page_number"),
+                    "text": page.get("text"),
+                }
+                for page in story_json.get("pages", [])
+                if isinstance(page, dict)
+            ],
+        }
+
+        return compact_story_plan, compact_story_json
 
     @staticmethod
     def _load_image_as_base64(url_or_path: str) -> str:
@@ -738,7 +966,6 @@ class StoryService:
             )
 
     @staticmethod
-    @staticmethod
     def _get_age_group_from_dob(dob) -> str:
         """Calculate age group from date of birth."""
         if not dob:
@@ -776,6 +1003,39 @@ class StoryService:
         return hobbies.get(age_group, "creative hobbies and exploration")
 
     @staticmethod
+    def _child_age_label(child) -> str:
+        return f"{child.age} years old" if child and child.age is not None else "the child's profile age"
+
+    @staticmethod
+    def _age_visual_guidance(age: int | None) -> str:
+        if age is None:
+            return "age-appropriate child height, body build, hands, feet, limbs, and facial maturity"
+        if age <= 4:
+            return (
+                "toddler/preschool-age proportions: short child height, soft round cheeks, small hands and feet, "
+                "short child limbs, and very young child facial proportions"
+            )
+        if age <= 7:
+            return (
+                "early-reader child proportions: childlike height, rounded cheeks, natural child hands and feet, "
+                "and young child facial proportions"
+            )
+        if age <= 12:
+            return (
+                "older child proportions: age-appropriate height, natural child build, childlike facial maturity, "
+                "and no teenage features"
+            )
+        return "teen-appropriate but still child-safe proportions, matching the profile photo and not adult features"
+
+    @staticmethod
+    def _build_character_reference_context(child) -> dict[str, str]:
+        return {
+            "character_description": StoryService._extract_character_analysis(child),
+            "child_age_label": StoryService._child_age_label(child),
+            "child_age_visual_guidance": StoryService._age_visual_guidance(child.age if child else None),
+        }
+
+    @staticmethod
     def _extract_character_analysis(child) -> str:
         """Extract detailed character analysis from child profile for visual consistency."""
         age_str = f"{child.age} years old" if child.age else "child"
@@ -795,6 +1055,7 @@ class StoryService:
         # Add age and name as header
         parts.append(f"Age: {age_str}")
         parts.append(f"Name: {child.first_name}")
+        parts.append(f"Age Appearance Guidance: {StoryService._age_visual_guidance(child.age)}")
 
         # Use analysis_text if available (detailed visual analysis from character generation)
         if analysis_text:
@@ -810,9 +1071,10 @@ class StoryService:
         # Add specific visual anchors for consistency
         parts.append(
             "\nVISUAL ANCHOR (keep consistent in EVERY page illustration):\n"
-            "- Same outfit, hair color, and features throughout the story\n"
-            "- This character should look identical on every page unless explicitly changing clothes/appearance in the story\n"
-            "- Use this as the visual reference for the hero character"
+            "- Same face, facial proportions, hair color, hairstyle, eyes, nose, smile, cheeks, skin tone, and age appearance throughout the story\n"
+            "- Same body proportions and developmental stage throughout the story\n"
+            "- Clothing may change only once as a story outfit, then must remain identical across every image\n"
+            "- Use the generated character_image_url as the master visual reference for the hero character"
         )
 
         return "\n".join(parts) if parts else f"A friendly {age_str} child named {child.first_name}."

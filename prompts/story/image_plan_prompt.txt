@@ -10,36 +10,57 @@ The final output must be STRICT VALID JSON ONLY.
 
 # INPUTS
 
-## Story Plan JSON
+## Compact Story Plan JSON
 {story_plan_json}
 
-## Story Narrative JSON
+## Compact Story Narrative JSON
 {story_json}
 
 ## Character Description
 {character_description}
 
+## Child Profile Age
+{child_age_label}
+
+## Age Appearance Guidance
+{child_age_visual_guidance}
+
 ## Visual Anchor
 The character_description contains the available visual identity and continuity details for planning.
-The generated character image is provided later as a reference image during final image generation, not during this planning step.
+The original child avatar/profile photo and the generated master character image from character_image_url are provided later as reference images during final image generation, not during this planning step.
 
 # SOURCE PRIORITY
 
 Use these sources in the following priority order:
 
 1. character_description
-→ outfit, accessories, signature items, stylized appearance
+-> real-child facial identity, hairstyle, eye shape, skin tone, accessories, signature items, stylized appearance, and outfit if no story outfit is chosen
 
-2. story_plan_json
-→ story structure, environments, continuity, emotional arc
+2. compact story_plan_json
+-> story structure, environments, continuity, emotional arc
 
-3. story_json
-→ emotional enhancement, expressions, body language, cinematic storytelling details
+3. compact story_json
+-> emotional enhancement, expressions, body language, cinematic storytelling details
 
 If conflicts occur:
-- Preserve clothing and accessories from character_description
-- Preserve continuity and environments from story_plan_json
-- Use story_json only to enrich cinematic storytelling details
+- Preserve real-child facial identity from character_description
+- Preserve accessories from character_description
+- Preserve clothing from character_description unless STORY OUTFIT POLICY defines one locked story outfit for the full book
+- Preserve continuity and environments from compact story_plan_json
+- Use compact story_json only to enrich cinematic storytelling details
+
+# STORY OUTFIT POLICY
+
+The story may use a story outfit or costume, but you must choose exactly ONE outfit for the child for the entire book.
+
+Rules:
+- The face, hair, eye shape, age appearance, and age-appropriate body proportions must never change.
+- Clothing may change for the story theme only once at the character_consistency level.
+- The chosen outfit must be repeated exactly in cover, every page, and back cover.
+- Do not create page-specific outfit changes.
+- Do not switch between normal clothes and costume across pages.
+- If the story theme does not require a costume, use "same outfit as the master character image".
+- If a story outfit is used, describe it once in character_consistency.locked_visual_identity.outfit and reuse the exact same wording in every image_prompt.
 
 # CHARACTER IDENTITY SOURCES
 
@@ -52,6 +73,12 @@ The character_description defines:
 - clothing colors
 - accessories
 - signature items
+- real-child facial identity
+- natural eye shape and size
+- hairstyle and hair direction
+- skin tone
+- exact {child_age_label} age appearance
+- age-appropriate body proportions: {child_age_visual_guidance}
 - visual personality traits
 - stylized appearance
 - companion relationships
@@ -60,20 +87,28 @@ The character_description defines:
 # GLOBAL CHARACTER CONSISTENCY LOCK
 
 Before generating prompts:
-- Build ONE immutable animated character identity
+- Build ONE immutable semi-realistic storybook character identity based on the real child
 - Reuse the SAME:
   - facial proportions
   - hairstyle
   - eye appearance
   - skin tone
-  - outfit
+  - exact {child_age_label} age appearance
+  - age-appropriate body proportions
+  - one locked story outfit
   - accessories
-  - age appearance
 across ALL pages
 
-Treat the child as the SAME animated movie character model in every illustration.
+Treat the child as the SAME semi-realistic storybook character model in every illustration.
 
 Never redesign or reinterpret the character between pages.
+Never turn the child into a generic Pixar-style child.
+Never change clothing colors between cover, pages, and back cover.
+Never make the child look older or younger than {child_age_label}.
+Never use body proportions that conflict with {child_age_visual_guidance}.
+Never use more than one outfit in a story.
+If you use a story-theme costume, it must be age-appropriate, soft, child-safe, and identical across all images.
+Represent story themes primarily through environment, props, lighting, or companion elements instead of changing the child's face or age.
 
 # AGE CONSISTENCY RULE
 
@@ -84,18 +119,22 @@ Do NOT:
 - change proportions inconsistently
 - alter maturity level
 - generate teenage features
+- generate body proportions for the wrong age group
+- make the child taller, slimmer, or older than the master character
+
+The child is {child_age_label}. Preserve {child_age_visual_guidance}.
 
 # STYLE LOCK
 
 Every image prompt must maintain this consistent render style:
 
-"High-quality Pixar-style 3D children's storybook illustration, cinematic lighting, soft shadows, depth of field, ultra-clean rendering, expressive characters, highly detailed face, consistent character design, animated movie quality."
+"Premium semi-realistic 3D children's storybook illustration, cinematic lighting, soft shadows, depth of field, ultra-clean rendering, expressive but naturally proportioned child, highly detailed face, recognizable real-child likeness, consistent character design, high-end animated family film realism."
 
 # VISUAL EMOTIONAL ARC
 
 Illustrations should visually progress emotionally across the story:
 
-Wonder → Curiosity → Effort → Determination → Triumph → Warm Joy
+Wonder -> Curiosity -> Effort -> Determination -> Triumph -> Warm Joy
 
 Use:
 - facial expressions
@@ -140,7 +179,7 @@ to reflect emotional progression.
 Each illustration should contain:
 - 1 primary action
 - 1 primary environment
-- 2–4 supporting objects maximum
+- 2-4 supporting objects maximum
 
 Avoid:
 - cluttered backgrounds
@@ -176,7 +215,7 @@ Mandatory phrase:
 
 Include:
 - one primary location
-- 2–3 nearby objects
+- 2-3 nearby objects
 - one specific surface texture
 
 Examples:
@@ -229,7 +268,8 @@ Maintain:
 - natural hand anatomy
 - symmetrical eyes
 - clean facial proportions
-- expressive eyes
+- expressive naturally sized eyes
+- age-appropriate child proportions
 - high-detail face rendering
 - polished cinematic rendering
 - soft believable lighting
@@ -240,6 +280,9 @@ Maintain:
 Maintain continuity across pages for:
 - clothing colors
 - clothing details
+- one locked story outfit
+- exact child age appearance
+- age-appropriate body proportions
 - props
 - signature items
 - companion placement
@@ -266,7 +309,7 @@ Construct every image prompt in this exact order:
 
 Include this negative prompt in EVERY image prompt:
 
-"no character redesign, no inconsistent face, no age change, no hairstyle change, no outfit change, no extra characters, no duplicate limbs, no distorted anatomy, no extra fingers, no blurry textures, no cropped face, no low-resolution rendering, no horror elements, no dark aggressive lighting, no photorealism, no messy composition"
+"no character redesign, no generic cartoon child, no stock Pixar face, no oversized eyes, no oversized head, no thick cartoon eyebrows, no inconsistent face, no age change, no wrong-age body, no older-looking child, no younger-looking child, no taller mature body, no slim mature body, no hairstyle change, no outfit change between pages, no clothing color change between pages, no multiple outfits in one story, no duplicate limbs, no distorted anatomy, no extra fingers, no blurry textures, no cropped face, no low-resolution rendering, no horror elements, no dark aggressive lighting, no raw photographic output, no messy composition, no watermark, no artist signature, no unwanted text except requested cover title text"
 
 # SAFETY RULES
 
@@ -424,7 +467,7 @@ Avoid:
 
 # STRICT VALIDATION RULES
 
-- pages.length MUST equal story_json page count
+- pages.length MUST equal compact story_json page count
 - page_number values must remain sequential
 - cover.image_prompt MUST be a non-empty string
 - back_cover.image_prompt MUST be a non-empty string
@@ -443,6 +486,8 @@ Avoid:
   - image_prompt
 - Preserve strict character consistency across all pages
 - Preserve outfit continuity across all pages
+- Preserve exact {child_age_label} age appearance across all pages
+- Use only one locked story outfit across cover, all pages, and back cover
 - Preserve companion continuity across all pages
 - Preserve emotional progression across all pages
 - Output MUST be valid parseable JSON

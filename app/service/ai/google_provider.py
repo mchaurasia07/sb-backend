@@ -126,8 +126,24 @@ class GoogleProvider(AIProvider):
             image_bytes = path.read_bytes()
             mime_type = _mime_type_for_path(path)
 
-            analysis_prompt = """Describe this photo to create an illustrated storybook character that matches it.
-Focus on visual details needed for character illustration (Hair, Face, Eyes, Skin tone, Age, Expression).
+            child_age_label = kwargs.get("child_age_label", "the child's profile age")
+            child_age_visual_guidance = kwargs.get(
+                "child_age_visual_guidance",
+                "age-appropriate child height, body build, hands, feet, limbs, and facial maturity",
+            )
+
+            analysis_prompt = f"""Describe this photo to create an illustrated storybook character that remains recognizable as the same real child.
+
+Focus on exact visual identity details:
+1. Hair color, hairstyle, hair direction, and side part
+2. Face shape and facial proportions
+3. Eye shape, natural eye size, eye spacing, and eye color
+4. Eyebrow shape and thickness
+5. Nose shape, smile, visible teeth or tooth gap, cheeks, and skin tone
+6. Approximate age appearance. The child profile age is {child_age_label}; describe how the photo should be illustrated with {child_age_visual_guidance}.
+7. Clothing details and colors
+8. Any small distinctive facial marks or unique features
+
 Format your response as a clear description list."""
 
             logger.info(f"Analyzing character profile using: {self.text_model}")
@@ -144,8 +160,12 @@ Format your response as a clear description list."""
 
             enhanced_prompt = (
                 "Create a single polished children's storybook character illustration from the reference photo. "
-                "Preserve the important visual identity cues from the child photo while transforming it into an "
-                "original illustrated character. Use a clean, warm, high-quality 3D storybook style. "
+                "The character must remain recognizably the same real child, with the same face shape, hairstyle, "
+                "eye shape, natural eye size, eyebrows, nose, smile, skin tone, and approximate age. "
+                f"The child profile age is {child_age_label}; preserve {child_age_visual_guidance}. "
+                "Use a clean, warm, premium semi-realistic 3D storybook style with natural child proportions. "
+                "Do not redesign the child into a generic cartoon character, do not enlarge the eyes, and do not "
+                "change the hairstyle or facial structure. "
                 "Do not include text, logos, watermarks, borders, or extra characters. "
                 f"Reference analysis: {analysis_text}. "
                 f"Scene and styling instruction: {prompt}"
@@ -179,6 +199,9 @@ Format your response as a clear description list."""
                 revised_prompt=enhanced_prompt,
                 metadata={
                     "analysis_text": analysis_text,
+                    "enhanced_prompt": enhanced_prompt,
+                    "child_age_label": child_age_label,
+                    "child_age_visual_guidance": child_age_visual_guidance,
                     "image_response_text": response_text,
                     "reference_path": str(path),
                     "provider": "google",
@@ -269,7 +292,7 @@ Format your response as a clear description list."""
                 model=self.text_model,
                 contents=prompt,
                 config=types.GenerateContentConfig(
-                    max_output_tokens=kwargs.get("max_tokens", 4000),
+                    max_output_tokens=kwargs.get("max_tokens", 36000),
                     temperature=kwargs.get("temperature", 0.7),
                     response_mime_type=response_mime_type,
                 ),
@@ -278,11 +301,22 @@ Format your response as a clear description list."""
             if not response.text:
                 raise AppException("Empty response from Google API", code="EMPTY_RESPONSE")
 
+            finish_reason = None
+            if response.candidates:
+                finish_reason = getattr(response.candidates[0], "finish_reason", None)
+
+            usage_metadata = getattr(response, "usage_metadata", None)
+            usage = usage_metadata.model_dump() if hasattr(usage_metadata, "model_dump") else None
+
             return TextGenerationResult(
                 text=response.text,
                 prompt_used=prompt,
                 model=self.text_model,
-                metadata={"provider": "google"},
+                metadata={
+                    "provider": "google",
+                    "finish_reason": str(finish_reason) if finish_reason is not None else None,
+                    "usage": usage,
+                },
             )
         except Exception as e:
             logger.error(f"Google text generation failed: {e}")
@@ -311,6 +345,9 @@ Format your response as a clear description list."""
 
         try:
             reference_image = parse_base64_image_data(reference_image_base64)
+            consistency_reference = None
+            if kwargs.get("consistency_reference_image_base64"):
+                consistency_reference = parse_base64_image_data(kwargs["consistency_reference_image_base64"])
         except ValueError as e:
             raise AppException(str(e), code="INVALID_REFERENCE_IMAGE")
 
@@ -325,25 +362,69 @@ Format your response as a clear description list."""
                 code="UNSUPPORTED_MODEL",
             )
 
+        consistency_instruction = ""
+        child_age_label = kwargs.get("child_age_label", "the child's profile age")
+        child_age_visual_guidance = kwargs.get(
+            "child_age_visual_guidance",
+            "age-appropriate child height, body build, hands, feet, limbs, and facial maturity",
+        )
+        if consistency_reference is not None:
+            consistency_instruction = (
+                "\nThe first attached image after this prompt is the generated master character image from "
+                "character_image_url. It is the PRIMARY reference and must be used as the exact illustrated "
+                "character model. Match the master character's face, facial proportions, eye shape, natural eye "
+                f"size, hairstyle, {child_age_label} age appearance, age-appropriate body proportions, and "
+                "illustration style. The second attached image is the original child profile photo and is only a "
+                "supporting real-identity reference. Do not redesign the face or make the child look older or younger. "
+                f"Preserve this age/body guidance: {child_age_visual_guidance}. "
+                "Clothing may follow the single locked story outfit from the scene prompt, but it must remain "
+                "identical across the whole book. If the scene prompt conflicts with the master character face, "
+                "age, or body proportions, keep the master character design and only change the action/environment.\n"
+            )
+        else:
+            consistency_instruction = (
+                "\nOnly the original child profile photo is attached. Preserve the real child identity and do "
+                "not invent a new outfit or story-theme costume.\n"
+            )
+
         story_prompt = (
-            "Generate one polished children's storybook illustration using the attached character image as the "
-            "visual identity reference. Preserve the character face, outfit, colors, proportions, and animated "
-            "storybook style while following this scene prompt:\n\n"
+            "Generate one polished children's storybook illustration. Character consistency is more important "
+            "than scene costume, theme costume, or decorative story details."
+            f"{consistency_instruction}"
+            "Use a premium semi-realistic 3D storybook style while following this scene prompt. The child must "
+            f"look like {child_age_label} and keep the same master-character face in every image. Character "
+            "likeness and age consistency are more important than costume or scene details:\n\n"
             f"{prompt}"
         )
 
         logger.info(f"Generating story image with Google reference image model: {model}")
 
         try:
-            response = await self.client.aio.models.generate_content(
-                model=model,
-                contents=[
-                    story_prompt,
+            contents: list[Any] = [story_prompt]
+            if consistency_reference is not None:
+                contents.extend(
+                    [
+                        types.Part.from_bytes(
+                            data=consistency_reference.image_bytes,
+                            mime_type=consistency_reference.mime_type,
+                        ),
+                        types.Part.from_bytes(
+                            data=reference_image.image_bytes,
+                            mime_type=reference_image.mime_type,
+                        ),
+                    ]
+                )
+            else:
+                contents.append(
                     types.Part.from_bytes(
                         data=reference_image.image_bytes,
                         mime_type=reference_image.mime_type,
-                    ),
-                ],
+                    )
+                )
+
+            response = await self.client.aio.models.generate_content(
+                model=model,
+                contents=contents,
                 config=types.GenerateContentConfig(
                     response_modalities=["IMAGE", "TEXT"],
                     image_config=types.ImageConfig(
@@ -362,6 +443,10 @@ Format your response as a clear description list."""
                     "mode": "story_reference_image",
                     "aspect_ratio": kwargs.get("aspect_ratio", "1:1"),
                     "reference_mime_type": reference_image.mime_type,
+                    "consistency_reference_used": consistency_reference is not None,
+                    "consistency_reference_mime_type": (
+                        consistency_reference.mime_type if consistency_reference is not None else None
+                    ),
                     "image_response_text": response_text,
                 },
             )
