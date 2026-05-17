@@ -1,4 +1,6 @@
 from abc import ABC, abstractmethod
+import base64
+import binascii
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -25,21 +27,118 @@ class ImageGenerationResult:
     metadata: dict[str, Any] | None = None
 
 
+@dataclass(frozen=True)
+class Base64ImageData:
+    """Decoded base64 image input."""
+
+    image_bytes: bytes
+    mime_type: str
+    data_url: str
+
+
+def parse_base64_image_data(
+    image_base64: str,
+    default_mime_type: str = "image/png",
+) -> Base64ImageData:
+    """Parse raw base64 image data or a data URL into bytes and MIME type."""
+    if not image_base64 or not image_base64.strip():
+        raise ValueError("Base64 image data is required")
+
+    value = image_base64.strip()
+    mime_type = default_mime_type
+    encoded = value
+
+    if value.startswith("data:"):
+        header, separator, payload = value.partition(",")
+        if not separator:
+            raise ValueError("Invalid base64 image data URL")
+        mime_type = header.removeprefix("data:").split(";")[0] or default_mime_type
+        encoded = payload
+
+    try:
+        image_bytes = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError) as e:
+        raise ValueError("Invalid base64 image data") from e
+
+    return Base64ImageData(
+        image_bytes=image_bytes,
+        mime_type=mime_type,
+        data_url=f"data:{mime_type};base64,{encoded}",
+    )
+
+
 class AIProvider(ABC):
     """Abstract base class for AI/LLM providers.
 
     Defines the interface for AI operations that backends can implement
-    for different providers (OpenAI, Replicate, etc.).
+    for different providers (OpenAI, Google, etc.).
     """
 
     @abstractmethod
-    async def generate_image_from_reference(
+    async def generate_text(
+        self,
+        prompt: str,
+        **kwargs: Any,
+    ) -> TextGenerationResult:
+        """Generate text from a prompt.
+
+        Args:
+            prompt: Full text prompt for the LLM
+            **kwargs: Provider-specific options such as max_tokens,
+                temperature, or response_format
+
+        Returns:
+            TextGenerationResult with generated text and metadata
+        """
+        pass
+
+    @abstractmethod
+    async def generate_image(
+        self,
+        prompt: str,
+        **kwargs: Any,
+    ) -> ImageGenerationResult:
+        """Generate an image from a text prompt.
+
+        Args:
+            prompt: Image generation prompt
+            **kwargs: Provider-specific options such as size, quality,
+                aspect_ratio, or model
+
+        Returns:
+            ImageGenerationResult with generated image bytes and metadata
+        """
+        pass
+
+    @abstractmethod
+    async def create_story_image(
+        self,
+        prompt: str,
+        reference_image_base64: str,
+        **kwargs: Any,
+    ) -> ImageGenerationResult:
+        """Create a story image using a prompt and base64 character image.
+
+        Args:
+            prompt: Story image generation prompt
+            reference_image_base64: Base64-encoded character reference image.
+                Can be raw base64 or a data URL.
+            **kwargs: Provider-specific options such as size, quality,
+                aspect_ratio, or model
+
+        Returns:
+            ImageGenerationResult with generated image bytes and metadata
+        """
+        pass
+
+    @abstractmethod
+    async def create_character_from_photo(
         self,
         reference_image_path: Path | str,
         prompt: str,
         **kwargs: Any,
     ) -> ImageGenerationResult:
-        """Generate image based on a reference photo.
+        """Create a character image based on a reference photo.
 
         Analysis and text generation are handled internally and returned
         in the metadata dictionary.

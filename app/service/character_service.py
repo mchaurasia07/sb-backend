@@ -89,7 +89,7 @@ class CharacterService:
         )
         logger.info(f"Character Generation Prompt:\n{character_prompt}")
 
-        image_result = await ai_service.generate_image_from_reference(
+        image_result = await ai_service.create_character_from_photo(
             reference_image_path=photo_path,
             prompt=character_prompt,
             size=settings.CHARACTER_IMAGE_SIZE,

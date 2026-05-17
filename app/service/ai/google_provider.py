@@ -8,7 +8,12 @@ from google.genai import types
 
 from app.core.config import settings
 from app.core.exceptions import AppException
-from app.service.ai.base import AIProvider, ImageGenerationResult, TextGenerationResult
+from app.service.ai.base import (
+    AIProvider,
+    ImageGenerationResult,
+    TextGenerationResult,
+    parse_base64_image_data,
+)
 from app.service.mock_llm_responses import (
     get_mock_story_plan_text,
     get_mock_story_text,
@@ -94,7 +99,7 @@ class GoogleProvider(AIProvider):
             code="EMPTY_RESPONSE",
         )
 
-    async def generate_image_from_reference(
+    async def create_character_from_photo(
         self,
         reference_image_path: Path | str,
         prompt: str,
@@ -217,19 +222,9 @@ Format your response as a clear description list."""
             elif "8-12" in prompt:
                 age_group = "8-12"
 
-            # Determine which mock response to return based on prompt content
-            if "STORY PLAN" in prompt.upper():
-                mock_text = get_mock_story_plan_text(child_name="Emma", age_group=age_group)
-            elif "story_plan_json" in prompt.lower():
-                # Extract page count from story plan in prompt
-                import re
-
-                story_pages_count = 8  # Default
-                page_count_match = re.search(r'"final_page_count":\s*(\d+)', prompt)
-                if page_count_match:
-                    story_pages_count = int(page_count_match.group(1))
-                mock_text = get_mock_story_text(child_name="Emma", story_pages_count=story_pages_count)
-            elif "IMAGE PLANNING" in prompt.upper() or "image plan" in prompt.lower():
+            # Determine which mock response to return based on prompt content.
+            # Check image planning first because that prompt includes "Story Plan JSON".
+            if "IMAGE PLANNING" in prompt.upper() or "IMAGE PLAN" in prompt.upper():
                 # Extract page count from story_json in prompt
                 import re
 
@@ -241,6 +236,17 @@ Format your response as a clear description list."""
                     if all_matches:
                         story_pages_count = max(int(m) for m in all_matches)
                 mock_text = get_mock_image_plan_text(story_pages_count=story_pages_count)
+            elif "story_plan_json" in prompt.lower():
+                # Extract page count from story plan in prompt
+                import re
+
+                story_pages_count = 8  # Default
+                page_count_match = re.search(r'"final_page_count":\s*(\d+)', prompt)
+                if page_count_match:
+                    story_pages_count = int(page_count_match.group(1))
+                mock_text = get_mock_story_text(child_name="Emma", story_pages_count=story_pages_count)
+            elif "STORY PLAN" in prompt.upper():
+                mock_text = get_mock_story_plan_text(child_name="Emma", age_group=age_group)
             else:
                 # Default mock response
                 mock_text = get_mock_story_plan_text(child_name="Emma", age_group=age_group)
@@ -256,12 +262,16 @@ Format your response as a clear description list."""
 
         try:
             # Use unified generation method for standard text requests
+            response_format = kwargs.get("response_format")
+            response_mime_type = "application/json" if response_format == {"type": "json_object"} else None
+
             response = await self.client.aio.models.generate_content(
                 model=self.text_model,
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     max_output_tokens=kwargs.get("max_tokens", 4000),
                     temperature=kwargs.get("temperature", 0.7),
+                    response_mime_type=response_mime_type,
                 ),
             )
 
@@ -277,6 +287,90 @@ Format your response as a clear description list."""
         except Exception as e:
             logger.error(f"Google text generation failed: {e}")
             raise AppException(f"Text generation failed: {str(e)}", code="GOOGLE_ERROR")
+
+    async def create_story_image(
+        self,
+        prompt: str,
+        reference_image_base64: str,
+        **kwargs: Any,
+    ) -> ImageGenerationResult:
+        """Generate a story image using a prompt and base64 character reference image."""
+        if settings.STORY_MOCK_LLM_RESPONSES:
+            logger.info("MOCK MODE: Returning mock story image instead of calling Google Gemini")
+            placeholder_png = (
+                b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+                b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00"
+                b"\x00\x01\x01\x00\x05\x18\r*\xfe\x00\x00\x00\x00IEND\xaeB`\x82"
+            )
+            return ImageGenerationResult(
+                image_bytes=placeholder_png,
+                prompt_used=prompt,
+                model=self.reference_image_model,
+                metadata={"mock_mode": True, "placeholder": True, "provider": "google"},
+            )
+
+        try:
+            reference_image = parse_base64_image_data(reference_image_base64)
+        except ValueError as e:
+            raise AppException(str(e), code="INVALID_REFERENCE_IMAGE")
+
+        model = _normalize_model_name(
+            kwargs.get("model") or kwargs.get("reference_image_model"),
+            self.reference_image_model,
+        )
+        if not _is_gemini_image_model(model):
+            raise AppException(
+                f"Story image generation with a reference image requires a Gemini image model. Use "
+                f"'{DEFAULT_GEMINI_IMAGE_MODEL}'.",
+                code="UNSUPPORTED_MODEL",
+            )
+
+        story_prompt = (
+            "Generate one polished children's storybook illustration using the attached character image as the "
+            "visual identity reference. Preserve the character face, outfit, colors, proportions, and animated "
+            "storybook style while following this scene prompt:\n\n"
+            f"{prompt}"
+        )
+
+        logger.info(f"Generating story image with Google reference image model: {model}")
+
+        try:
+            response = await self.client.aio.models.generate_content(
+                model=model,
+                contents=[
+                    story_prompt,
+                    types.Part.from_bytes(
+                        data=reference_image.image_bytes,
+                        mime_type=reference_image.mime_type,
+                    ),
+                ],
+                config=types.GenerateContentConfig(
+                    response_modalities=["IMAGE", "TEXT"],
+                    image_config=types.ImageConfig(
+                        aspect_ratio=kwargs.get("aspect_ratio", "1:1"),
+                    ),
+                ),
+            )
+            image_bytes, response_text = self._extract_image_from_content_response(response)
+
+            return ImageGenerationResult(
+                image_bytes=image_bytes,
+                prompt_used=story_prompt,
+                model=model,
+                metadata={
+                    "provider": "google",
+                    "mode": "story_reference_image",
+                    "aspect_ratio": kwargs.get("aspect_ratio", "1:1"),
+                    "reference_mime_type": reference_image.mime_type,
+                    "image_response_text": response_text,
+                },
+            )
+
+        except AppException:
+            raise
+        except Exception as e:
+            logger.error(f"Google story image generation failed: {e}")
+            raise AppException(f"Story image generation failed: {str(e)}", code="GOOGLE_ERROR")
 
     async def generate_image(
         self,

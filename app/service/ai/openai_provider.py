@@ -7,7 +7,12 @@ from openai import AsyncOpenAI, BadRequestError, OpenAIError, RateLimitError
 
 from app.core.config import settings
 from app.core.exceptions import AppException
-from app.service.ai.base import AIProvider, ImageGenerationResult, TextGenerationResult
+from app.service.ai.base import (
+    AIProvider,
+    ImageGenerationResult,
+    TextGenerationResult,
+    parse_base64_image_data,
+)
 from app.service.mock_llm_responses import (
     get_mock_story_plan_text,
     get_mock_story_text,
@@ -52,7 +57,7 @@ class OpenAIProvider(AIProvider):
         self.text_model = text_model
         self._client = AsyncOpenAI(api_key=api_key)
 
-    async def generate_image_from_reference(
+    async def create_character_from_photo(
         self,
         reference_image_path: Path | str,
         prompt: str,
@@ -199,18 +204,9 @@ Focus on visual details needed for character illustration."""
             elif "8-12" in prompt:
                 age_group = "8-12"
 
-            # Determine which mock response to return based on prompt content
-            if "STORY PLAN" in prompt.upper():
-                mock_text = get_mock_story_plan_text(child_name="Emma", age_group=age_group)
-            elif "story_plan_json" in prompt.lower():
-                # Extract page count from story plan in prompt
-                story_pages_count = 8  # Default
-                import re
-                page_count_match = re.search(r'"final_page_count":\s*(\d+)', prompt)
-                if page_count_match:
-                    story_pages_count = int(page_count_match.group(1))
-                mock_text = get_mock_story_text(child_name="Emma", story_pages_count=story_pages_count)
-            elif "IMAGE PLANNING" in prompt.upper() or "image plan" in prompt.lower():
+            # Determine which mock response to return based on prompt content.
+            # Check image planning first because that prompt includes "Story Plan JSON".
+            if "IMAGE PLANNING" in prompt.upper() or "IMAGE PLAN" in prompt.upper():
                 # Extract page count from story_json in prompt
                 story_pages_count = 8  # Default
                 import re
@@ -221,6 +217,16 @@ Focus on visual details needed for character illustration."""
                     if all_matches:
                         story_pages_count = max(int(m) for m in all_matches)
                 mock_text = get_mock_image_plan_text(story_pages_count=story_pages_count)
+            elif "story_plan_json" in prompt.lower():
+                # Extract page count from story plan in prompt
+                story_pages_count = 8  # Default
+                import re
+                page_count_match = re.search(r'"final_page_count":\s*(\d+)', prompt)
+                if page_count_match:
+                    story_pages_count = int(page_count_match.group(1))
+                mock_text = get_mock_story_text(child_name="Emma", story_pages_count=story_pages_count)
+            elif "STORY PLAN" in prompt.upper():
+                mock_text = get_mock_story_plan_text(child_name="Emma", age_group=age_group)
             else:
                 # Default mock response
                 mock_text = get_mock_story_plan_text(child_name="Emma", age_group=age_group)
@@ -274,6 +280,114 @@ Focus on visual details needed for character illustration."""
             metadata={
                 "finish_reason": response.choices[0].finish_reason,
                 "usage": response.usage.model_dump() if response.usage else None,
+            },
+        )
+
+    async def create_story_image(
+        self,
+        prompt: str,
+        reference_image_base64: str,
+        **kwargs: Any,
+    ) -> ImageGenerationResult:
+        """Generate a story image using a prompt and base64 character reference image."""
+        if settings.STORY_MOCK_LLM_RESPONSES:
+            logger.info("MOCK MODE: Returning mock story image instead of calling OpenAI")
+            placeholder_png = (
+                b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+                b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00"
+                b"\x00\x01\x01\x00\x05\x18\r*\xfe\x00\x00\x00\x00IEND\xaeB`\x82"
+            )
+            return ImageGenerationResult(
+                image_bytes=placeholder_png,
+                prompt_used=prompt,
+                model=self.image_model,
+                revised_prompt=None,
+                metadata={"mock_mode": True, "placeholder": True, "mode": "story_reference_image"},
+            )
+
+        try:
+            reference_image = parse_base64_image_data(reference_image_base64)
+
+            analysis_prompt = """Describe this character reference image for consistent storybook illustration.
+
+Focus on:
+1. Character face and age appearance
+2. Hair style and color
+3. Outfit, colors, and accessories
+4. Body proportions and overall animated style
+5. Key visual details that must remain consistent across story pages
+
+Return a concise visual consistency description."""
+
+            logger.info("Analyzing character reference image for story image consistency")
+            analysis_response = await self._client.chat.completions.create(
+                model=kwargs.get("vision_model", "gpt-4o"),
+                max_tokens=700,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": analysis_prompt},
+                            {"type": "image_url", "image_url": {"url": reference_image.data_url}},
+                        ],
+                    }
+                ],
+            )
+
+            analysis_text = analysis_response.choices[0].message.content or ""
+            enhanced_prompt = (
+                f"{prompt}\n\n"
+                "CHARACTER REFERENCE DETAILS TO PRESERVE:\n"
+                f"{analysis_text}\n\n"
+                "Use the same character identity, outfit, and visual style. Do not redesign the character."
+            )
+
+            logger.info(f"Generating story image with {self.image_model}")
+            response = await self._client.images.generate(
+                model=kwargs.get("model", self.image_model),
+                prompt=enhanced_prompt,
+                size=kwargs.get("size", "1024x1024"),
+                quality=kwargs.get("quality", "standard"),
+                n=1,
+            )
+        except ValueError as e:
+            raise AppException(str(e), code="INVALID_REFERENCE_IMAGE")
+        except BadRequestError as e:
+            error_msg = self._extract_error_message(e)
+            logger.error(f"OpenAI rejected story image generation request: {error_msg}")
+            raise AppException(f"Story image generation failed: {error_msg}", code="OPENAI_ERROR")
+        except RateLimitError as e:
+            logger.error(f"OpenAI rate limit exceeded: {e}")
+            raise AppException(
+                "OpenAI rate limit exceeded. Please retry after a few moments.",
+                code="RATE_LIMIT_ERROR",
+            )
+        except OpenAIError as e:
+            logger.error(f"OpenAI error: {e}")
+            raise AppException(
+                "OpenAI service error. Please verify your API key and billing.",
+                code="OPENAI_ERROR",
+            )
+
+        if not response.data or not response.data[0].b64_json:
+            raise AppException("OpenAI returned no image data", code="OPENAI_ERROR")
+
+        image_bytes = base64.b64decode(response.data[0].b64_json)
+        revised_prompt = getattr(response.data[0], "revised_prompt", None)
+
+        return ImageGenerationResult(
+            image_bytes=image_bytes,
+            prompt_used=enhanced_prompt,
+            model=kwargs.get("model", self.image_model),
+            revised_prompt=revised_prompt,
+            metadata={
+                "provider": "openai",
+                "mode": "story_reference_image",
+                "size": kwargs.get("size", "1024x1024"),
+                "quality": kwargs.get("quality", "standard"),
+                "reference_mime_type": reference_image.mime_type,
+                "analysis_text": analysis_text,
+                "enhanced_prompt": enhanced_prompt,
             },
         )
 

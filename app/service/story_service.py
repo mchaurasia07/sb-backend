@@ -1,27 +1,30 @@
+import base64
 import json
 import logging
 from datetime import datetime
+from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlparse
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.exceptions import AppException, NotFoundException
-from app.entity.child_profile import ChildProfile
-from app.entity.story import Story, StoryGenerationMode, AgeGroup, StoryStatus
-from app.entity.story_step import StoryStep, StoryStepName, StepStatus
+from app.entity.story import Story, StoryStatus
+from app.entity.story_step import StoryStepName, StepStatus
 from app.model.request.story import StoryGenerationRequest
 from app.model.response.story import StoryResponse, StoryPageResponse, StoryStepResponse
 from app.repository.child_repository import ChildRepository
 from app.repository.story_repository import StoryRepository
 from app.repository.story_step_repository import StoryStepRepository
 from app.repository.story_page_repository import StoryPageRepository
-from app.service.ai.openai_provider import OpenAIProvider
+from app.service.ai.base import AIProvider
 from app.service.ai.factory import get_ai_provider
 from app.service.image_storage_service import image_storage_service
-from app.service.plan_validator import PlanValidator, PlanValidationError
-from app.service.image_plan_validator import ImagePlanValidator, ImagePlanValidationError
-from app.utils.prompt_loader import load_prompt, render_prompt, load_and_render_prompt
+from app.service.plan_validator import PlanValidator
+from app.service.image_plan_validator import ImagePlanValidator
+from app.utils.prompt_loader import load_prompt, render_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +59,7 @@ class StoryService:
         self.story_steps = StoryStepRepository(session)
         self.story_pages = StoryPageRepository(session)
         self.children = ChildRepository(session)
-        self.ai_provider: OpenAIProvider = get_ai_provider()
+        self.ai_provider: AIProvider = get_ai_provider()
         self.plan_validator = PlanValidator()
         self.image_plan_validator = ImagePlanValidator()
 
@@ -515,7 +518,7 @@ class StoryService:
         image_plan: dict[str, Any],
         flags: StoryGenerationFlags,
     ) -> None:
-        """Step 6: Generate images using DALL-E."""
+        """Step 6: Generate story images using the character image as reference."""
         step = await self.story_steps.create(story.id, StoryStepName.IMAGE_GENERATION)
         step.status = StepStatus.IN_PROGRESS
         step.started_at = datetime.utcnow()
@@ -528,14 +531,32 @@ class StoryService:
             cover = image_plan.get("cover", {})
             back_cover = image_plan.get("back_cover", {})
             image_pages = image_plan.get("pages", [])
+            character_consistency = image_plan.get("character_consistency", {})
+            image_generation_template = load_prompt("prompts/story/image_generation_prompt.txt")
+            child = await self.children.get_for_user(story.user_id, story.child_id)
+            if child is None:
+                raise NotFoundException("Child profile not found during image generation")
+            if not child.avatar_image_url:
+                raise AppException(
+                    "Child profile photo is required for story image generation",
+                    code="NO_PHOTO",
+                )
+
+            avatar_image_base64 = self._load_image_as_base64(child.avatar_image_url)
 
             # Generate cover image
             if cover and cover.get("image_prompt"):
                 logger.info(f"Story {story.id}: Generating cover image")
-                cover_bytes = await self.ai_provider.generate_image(
+                cover_prompt = self._render_story_image_prompt(
+                    image_generation_template,
+                    character_consistency,
                     cover.get("image_prompt"),
-                    size="1024x1024",
-                    quality="standard",
+                )
+                cover_bytes = await self.ai_provider.create_story_image(
+                    cover_prompt,
+                    reference_image_base64=avatar_image_base64,
+                    size=settings.STORY_IMAGE_SIZE,
+                    quality=settings.STORY_IMAGE_QUALITY,
                 )
                 cover_url = await image_storage_service.save_story_image(
                     story.id,
@@ -557,10 +578,16 @@ class StoryService:
                 page_num = img_page.get("page_number", 0)
                 if img_page.get("image_prompt") and page_num > 0:
                     logger.info(f"Story {story.id}: Generating image for page {page_num}")
-                    image_bytes = await self.ai_provider.generate_image(
+                    page_prompt = self._render_story_image_prompt(
+                        image_generation_template,
+                        character_consistency,
                         img_page.get("image_prompt"),
-                        size="1024x1024",
-                        quality="standard",
+                    )
+                    image_bytes = await self.ai_provider.create_story_image(
+                        page_prompt,
+                        reference_image_base64=avatar_image_base64,
+                        size=settings.STORY_IMAGE_SIZE,
+                        quality=settings.STORY_IMAGE_QUALITY,
                     )
                     image_url = await image_storage_service.save_story_image(
                         story.id,
@@ -584,10 +611,16 @@ class StoryService:
             # Generate back cover image
             if back_cover and back_cover.get("image_prompt"):
                 logger.info(f"Story {story.id}: Generating back cover image")
-                back_cover_bytes = await self.ai_provider.generate_image(
+                back_cover_prompt = self._render_story_image_prompt(
+                    image_generation_template,
+                    character_consistency,
                     back_cover.get("image_prompt"),
-                    size="1024x1024",
-                    quality="standard",
+                )
+                back_cover_bytes = await self.ai_provider.create_story_image(
+                    back_cover_prompt,
+                    reference_image_base64=avatar_image_base64,
+                    size=settings.STORY_IMAGE_SIZE,
+                    quality=settings.STORY_IMAGE_QUALITY,
                 )
                 back_cover_url = await image_storage_service.save_story_image(
                     story.id,
@@ -608,7 +641,8 @@ class StoryService:
             step.response = {
                 "images_generated": True,
                 "message": "All images generated and saved successfully",
-                "image_count": len(image_pages) + (2 if cover and back_cover else (1 if cover or back_cover else 0))
+                "image_count": len(image_pages) + (2 if cover and back_cover else (1 if cover or back_cover else 0)),
+                "used_avatar_reference": True,
             }
             step.status = StepStatus.COMPLETED
             step.completed_at = datetime.utcnow()
@@ -624,6 +658,66 @@ class StoryService:
             await self.story_steps.update(step)
             await self.session.commit()
             raise
+
+    @staticmethod
+    def _render_story_image_prompt(
+        template: str,
+        character_consistency: dict[str, Any],
+        image_prompt: str,
+    ) -> str:
+        """Render the final story image prompt with consistency context."""
+        return render_prompt(
+            template,
+            {
+                "character_consistency_json": character_consistency,
+                "current_page_image_prompt": image_prompt,
+            },
+        )
+
+    @staticmethod
+    def _load_image_as_base64(url_or_path: str) -> str:
+        """Resolve a media image URL/path and return raw base64 image data."""
+        image_path = StoryService._resolve_media_path(url_or_path)
+        image_bytes = image_path.read_bytes()
+        if not image_bytes:
+            raise AppException(f"Image file is empty: {image_path}", code="EMPTY_IMAGE")
+        return base64.standard_b64encode(image_bytes).decode("utf-8")
+
+    @staticmethod
+    def _resolve_media_path(url_or_path: str) -> Path:
+        """Resolve local app media URLs to files under MEDIA_ROOT."""
+        raw_value = str(url_or_path)
+        parsed = urlparse(raw_value)
+        media_prefix = settings.MEDIA_URL_PREFIX.rstrip("/") + "/"
+
+        if parsed.scheme in {"http", "https"}:
+            url_path = unquote(parsed.path)
+            if not url_path.startswith(media_prefix):
+                raise AppException("Image URL must point to app media storage", code="INVALID_IMAGE_URL")
+            relative_path = url_path[len(media_prefix) :]
+            file_path = Path(settings.MEDIA_ROOT) / relative_path
+        elif raw_value.startswith(media_prefix):
+            relative_path = raw_value[len(media_prefix) :]
+            file_path = Path(settings.MEDIA_ROOT) / relative_path
+        else:
+            file_path = Path(raw_value)
+
+        file_path = file_path.resolve()
+        media_root = Path(settings.MEDIA_ROOT).resolve()
+        try:
+            file_path.relative_to(media_root)
+        except ValueError:
+            raise AppException("Image file must be in media directory", code="INVALID_IMAGE_PATH")
+
+        if not file_path.exists() and file_path.name == "child_character.png":
+            legacy_path = file_path.with_name("character.png")
+            if legacy_path.exists():
+                file_path = legacy_path
+
+        if not file_path.exists():
+            raise AppException(f"Image file not found: {file_path}", code="FILE_NOT_FOUND")
+
+        return file_path
 
     async def _create_pages_without_images(self, story: Story, story_json: dict[str, Any]) -> None:
         """Create story pages without images (for testing)."""

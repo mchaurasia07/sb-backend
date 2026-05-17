@@ -254,8 +254,65 @@ def get_mock_image_plan(story_pages_count: int = 8) -> dict[str, Any]:
         pages.append(
             {
                 "page_number": i,
-                "image_prompt": f"Page {i}: High-quality 3D Pixar-style children's illustration, cinematic lighting, Emma in colorful adventure outfit with compass, Luna the silver owl with golden bell, page-specific scene, watercolor style, safe margin composition, no extra fingers, consistent character design",
-                "visual_continuity_check": f"Page {i}: Emma (colorful outfit, compass) and Luna (silver feathers, golden bell) present, consistent styling throughout",
+                "story_role": "introduction" if i == 1 else ("resolution" if i == story_pages_count else "escalation"),
+                "scene_goal": f"Show story moment {i} with clear emotional progression.",
+                "character_state": {
+                    "expression": "bright and curious",
+                    "pose": "active storybook pose",
+                    "outfit_visibility": "colorful adventure outfit clearly visible",
+                    "prop_interaction": "holding magical compass",
+                },
+                "companion_state": {
+                    "present": True,
+                    "action": "Luna stays close beside Emma",
+                    "emotion": "supportive and cheerful",
+                    "position_relative_to_child": "slightly behind Emma",
+                },
+                "environment": {
+                    "primary_location": "magical garden",
+                    "foreground_elements": ["soft grass", "small flowers"],
+                    "midground_elements": ["Emma", "Luna"],
+                    "background_elements": ["glowing trees", "storybook sky"],
+                    "surface_texture": "lush green grass",
+                    "weather": "clear",
+                    "time_of_day": "warm afternoon",
+                },
+                "camera": {
+                    "shot_type": "medium storybook shot",
+                    "angle": "eye-level",
+                    "focus_subject": "Emma",
+                    "composition": "centered child-safe storybook composition",
+                },
+                "lighting": {
+                    "style": "cinematic soft lighting",
+                    "intensity": "medium",
+                    "color_temperature": "warm",
+                },
+                "emotion_arc": {
+                    "primary_emotion": "wonder",
+                    "energy_level": "medium",
+                    "scene_tension": "gentle",
+                },
+                "continuity_anchors": {
+                    "must_keep": ["colorful outfit", "magical compass", "Luna's silver feathers"],
+                    "must_not_change": ["Emma's outfit", "Emma's hairstyle", "Luna's golden bell"],
+                },
+                "generation_hints": {
+                    "style_strength": "high",
+                    "character_consistency_priority": "maximum",
+                    "detail_level": "medium-high",
+                    "render_quality": "ultra",
+                },
+                "visual_continuity_check": (
+                    f"Page {i}: Emma (colorful outfit, compass) and Luna "
+                    "(silver feathers, golden bell) present, consistent styling throughout"
+                ),
+                "image_prompt": (
+                    f"Page {i}: High-quality 3D Pixar-style children's illustration, cinematic lighting, "
+                    "Emma in colorful adventure outfit with compass, Luna the silver owl with golden bell, "
+                    "page-specific scene, watercolor style, safe margin composition, no extra fingers, "
+                    "consistent character design"
+                ),
             }
         )
 
@@ -263,16 +320,28 @@ def get_mock_image_plan(story_pages_count: int = 8) -> dict[str, Any]:
         "character_consistency": {
             "name": "Emma",
             "anchor_traits": "Curious young girl with bright eyes, wearing colorful adventure outfit, carrying a magical compass",
+            "locked_visual_identity": {
+                "hair": "brown shoulder-length hair",
+                "face_shape": "round friendly face",
+                "eye_color": "bright brown eyes",
+                "skin_tone": "warm medium skin tone",
+                "outfit": "colorful adventure outfit",
+                "signature_item": "magical compass",
+            },
         },
         "cover": {
-            "image_prompt": "Storybook cover design: 'Emma's Amazing Adventure' - Large bold playful typography. Emma standing excited with compass, Luna perched nearby, magical garden backdrop, Pixar 3D style, bright colors, high contrast",
+            "title_text": "Emma's Amazing Adventure",
+            "title_position": "top area",
+            "hero_pose": "Emma standing excited with compass",
+            "primary_color_palette": ["bright green", "gold", "sky blue"],
+            "iconic_story_element": "magical compass",
             "structured": {
                 "character": "Emma excited with compass, Luna nearby",
                 "action": "adventure ready, looking forward",
                 "environment": "magical garden entrance",
                 "mood": "joyful anticipation",
-                "style": "Pixar 3D children's illustration",
             },
+            "image_prompt": "Storybook cover design: 'Emma's Amazing Adventure' - Large bold playful typography. Emma standing excited with compass, Luna perched nearby, magical garden backdrop, Pixar 3D style, bright colors, high contrast",
         },
         "pages": pages,
         "back_cover": {
@@ -282,7 +351,6 @@ def get_mock_image_plan(story_pages_count: int = 8) -> dict[str, Any]:
                 "action": "looking at healed garden",
                 "environment": "magical garden at night with stars",
                 "mood": "peaceful triumph",
-                "style": "Pixar 3D watercolor illustration",
             },
         },
     }
