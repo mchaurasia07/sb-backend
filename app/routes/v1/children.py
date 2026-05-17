@@ -80,7 +80,7 @@ async def generate_character(
     for maintaining visual consistency across story scenes.
 
     Args:
-        ai_provider: AI provider to use ("openai" or "google") - default: "openai"
+        ai_provider: Optional AI provider override ("openai" or "google") - defaults to AI_PROVIDER
         additional_context: Optional context like hobbies, personality traits, or styling preferences
     """
     public_base_url = str(request.base_url).rstrip("/")

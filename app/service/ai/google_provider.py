@@ -66,12 +66,12 @@ def _mime_type_for_path(path: Path) -> str:
 class GoogleProvider(AIProvider):
     """Google Gemini implementation of the AI provider interface using the unified SDK."""
 
-    def __init__(self, api_key: str, image_model: str, text_model: str):
+    def __init__(self, api_key: str, image_model: str, text_model: str, reference_image_model: str | None = None):
         if not api_key:
             raise ValueError("Google Gemini API key is required")
 
         self.image_model = _normalize_model_name(image_model, DEFAULT_IMAGEN_MODEL)
-        self.reference_image_model = DEFAULT_GEMINI_IMAGE_MODEL
+        self.reference_image_model = _normalize_model_name(reference_image_model, DEFAULT_GEMINI_IMAGE_MODEL)
         self.text_model = _normalize_model_name(text_model, "gemini-2.5-flash")
         self.api_key = api_key
 

@@ -23,7 +23,6 @@ class CharacterService:
     def __init__(self, session: AsyncSession):
         self.session = session
         self.children = ChildRepository(session)
-        self.ai_provider = get_ai_provider()
 
     async def generate_character(
         self,
@@ -60,7 +59,7 @@ class CharacterService:
             AppException: If child has no profile photo or AI service fails
         """
         # Get AI provider instance (use specified provider or default)
-        provider_name = ai_provider or "openai"
+        provider_name = ai_provider or settings.AI_PROVIDER
         ai_service = get_ai_provider(provider_name)
         logger.info(f"Generating character using {provider_name} provider for child_id={child_id}, user_id={user_id}")
 

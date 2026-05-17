@@ -71,7 +71,7 @@ class ImageStorageService:
         directory = Path(settings.MEDIA_ROOT) / str(parent_id) / str(child_id)
         directory.mkdir(parents=True, exist_ok=True)
 
-        file_path = directory / "child_character.png"
+        file_path = directory / "character.png"
 
         try:
             await asyncio.to_thread(file_path.write_bytes, image_bytes)
@@ -82,7 +82,7 @@ class ImageStorageService:
                 "STORAGE_ERROR",
             )
 
-        public_path = f"{settings.MEDIA_URL_PREFIX}/{parent_id}/{child_id}/child_character.png"
+        public_path = f"{settings.MEDIA_URL_PREFIX}/{parent_id}/{child_id}/character.png"
         return f"{public_base_url}{public_path}"
 
     async def save_story_image(

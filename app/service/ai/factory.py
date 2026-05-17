@@ -47,6 +47,7 @@ def get_ai_provider(provider_name: str | None = None) -> AIProvider:
             api_key=settings.GOOGLE_API_KEY,
             image_model=settings.GOOGLE_IMAGE_MODEL,
             text_model=settings.GOOGLE_TEXT_MODEL,
+            reference_image_model=settings.GOOGLE_REFERENCE_IMAGE_MODEL,
         )
         return _provider_instance
 

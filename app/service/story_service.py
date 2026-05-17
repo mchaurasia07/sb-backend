@@ -714,6 +714,11 @@ class StoryService:
             if legacy_path.exists():
                 file_path = legacy_path
 
+        if not file_path.exists() and file_path.name == "character.png":
+            legacy_path = file_path.with_name("child_character.png")
+            if legacy_path.exists():
+                file_path = legacy_path
+
         if not file_path.exists():
             raise AppException(f"Image file not found: {file_path}", code="FILE_NOT_FOUND")
 

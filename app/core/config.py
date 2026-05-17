@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     GOOGLE_API_KEY: str = ""  # Optional, only needed if using Google provider
     GOOGLE_TEXT_MODEL: str = "gemini-2.5-flash"  # Text model for vision analysis and text generation
     GOOGLE_IMAGE_MODEL: str = "imagen-4.0-generate-001"  # Image model for image generation
+    GOOGLE_REFERENCE_IMAGE_MODEL: str = "imagen-4.0-generate-001"  # Image model for prompt + reference image
 
     # Character Generation Settings
     CHARACTER_IMAGE_SIZE: str
