@@ -62,9 +62,17 @@ def create_refresh_token(user_id: UUID) -> str:
 
 def decode_token(token: str, expected_type: TokenType) -> dict[str, Any]:
     try:
-        payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+        payload = jwt.decode(
+            token,
+            settings.JWT_SECRET_KEY,
+            algorithms=[settings.JWT_ALGORITHM],
+            options={
+                "require": ["sub", "type", "iat", "exp", "jti"],
+                "verify_exp": False,
+            },
+        )
     except JWTError as exc:
-        raise AuthException("Invalid or expired token", status_code=401, code="INVALID_TOKEN") from exc
+        raise AuthException("Invalid token", status_code=401, code="INVALID_TOKEN") from exc
     if payload.get("type") != expected_type.value:
         raise AuthException("Invalid token type", status_code=401, code="INVALID_TOKEN_TYPE")
     return payload

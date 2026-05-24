@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, Uuid
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -13,9 +13,11 @@ class ChildBook(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     __tablename__ = "child_books"
     __table_args__ = (
-        UniqueConstraint("child_id", "story_id", "story_type", name="uq_child_books_child_story_type"),
+        CheckConstraint("language IN ('en', 'hi')", name="ck_child_books_language"),
+        UniqueConstraint("child_id", "story_id", "story_type", "language", name="uq_child_books_child_story_type_language"),
         Index("ix_child_books_child_id", "child_id"),
         Index("ix_child_books_story_id", "story_id"),
+        Index("ix_child_books_language", "language"),
         Index("ix_child_books_status", "status"),
         Index("ix_child_books_created_at", "created_at"),
     )
@@ -27,6 +29,7 @@ class ChildBook(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     story_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
     story_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    language: Mapped[str] = mapped_column(String(2), nullable=False, default="en")
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     cover_image: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="not_started")

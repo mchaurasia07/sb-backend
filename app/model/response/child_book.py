@@ -9,6 +9,7 @@ class ChildBookResponse(BaseModel):
     child_id: UUID
     story_id: UUID
     story_type: str
+    language: str
     title: str
     cover_image: str | None
     status: str

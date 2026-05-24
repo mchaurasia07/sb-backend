@@ -15,6 +15,7 @@ from app.core.exceptions import AppException, NotFoundException
 from app.entity.story import Story, StoryStatus
 from app.entity.story_step import StoryStepName, StepStatus
 from app.model.request.story import StoryGenerationRequest
+from app.model.response.common import PaginatedResponse
 from app.model.response.story import StoryResponse, StoryPageResponse, StoryStepResponse
 from app.repository.child_repository import ChildRepository
 from app.repository.story_repository import StoryRepository
@@ -83,6 +84,19 @@ def _story_source_inputs(story: Story) -> dict[str, str]:
         "learning_goal": story.learning_goal or "personal growth",
         "context": story.context or "",
     }
+
+
+def _first_non_empty(*values: Any) -> str | None:
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _truncate(value: str | None, max_length: int) -> str | None:
+    if value is None:
+        return None
+    return value[:max_length]
 
 
 # Testing flags helper
@@ -222,6 +236,9 @@ class StoryService:
             logger.info(f"Story {story_id}: Starting step 3 - Story Generation")
 
             story_json = await self._step_generate_story(story, story_plan, flags)
+            self._apply_story_metadata(story, story_plan, story_json)
+            await self.stories.update(story)
+            await self.session.commit()
 
             # Step 4: Image Plan Generation
             story.current_step = StoryStepName.IMAGE_PLAN_GENERATION.value
@@ -250,6 +267,7 @@ class StoryService:
             # Mark story as completed
             story.status = StoryStatus.COMPLETED
             story.current_step = None
+            self._apply_story_metadata(story, story_plan, story_json)
             story.story_plan_json = story_plan
             story.story_json = story_json
             story.image_plan_json = image_plan
@@ -267,6 +285,53 @@ class StoryService:
             await self.stories.update(story)
             await self.session.commit()
             raise
+
+    @staticmethod
+    def _apply_story_metadata(story: Story, story_plan: dict[str, Any], story_json: dict[str, Any]) -> None:
+        """Copy generated metadata into searchable top-level story columns."""
+        source_inputs = story_json.get("source_inputs") or story_plan.get("source_inputs") or {}
+
+        story.title = _truncate(
+            _first_non_empty(
+                story_json.get("title"),
+                story_plan.get("title"),
+                story.title,
+            ),
+            255,
+        )
+        story.moral = _truncate(
+            _first_non_empty(
+                story_json.get("moral"),
+                story_json.get("moral_theme"),
+                story_plan.get("moral_theme"),
+                story.moral,
+            ),
+            255,
+        )
+        story.summary = _first_non_empty(
+            story_json.get("summary"),
+            story_plan.get("summary"),
+            story.summary,
+        )
+
+        # `category` is the existing stories-table column that represents the requested theme/category.
+        story.category = _truncate(
+            _first_non_empty(
+                story.category,
+                source_inputs.get("category") if isinstance(source_inputs, dict) else None,
+                story_plan.get("theme"),
+                story_plan.get("category"),
+                story.event_description,
+            ),
+            100,
+        )
+        story.learning_goal = _truncate(
+            _first_non_empty(
+                story.learning_goal,
+                source_inputs.get("learning_goal") if isinstance(source_inputs, dict) else None,
+            ),
+            500,
+        )
 
     async def _step_generate_plan(self, story: Story, flags: StoryGenerationFlags) -> dict[str, Any]:
         """Step 1: Generate story plan using LLM."""
@@ -1150,9 +1215,21 @@ class StoryService:
             updated_at=story.updated_at,
         )
 
-    async def list_stories(self, user_id: UUID, child_id: UUID | None = None) -> list[StoryResponse]:
+    async def list_stories(
+        self,
+        user_id: UUID,
+        child_id: UUID | None = None,
+        *,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> PaginatedResponse[StoryResponse]:
         """List user's stories, optionally filtered by child."""
-        stories = await self.stories.list_by_user(user_id, child_id)
+        stories, total = await self.stories.list_by_user_paginated(
+            user_id,
+            child_id,
+            page=page,
+            page_size=page_size,
+        )
         results = []
         for story in stories:
             pages = [
@@ -1184,7 +1261,12 @@ class StoryService:
                     updated_at=story.updated_at,
                 )
             )
-        return results
+        return PaginatedResponse[StoryResponse].create(
+            items=results,
+            total=total,
+            page=page,
+            page_size=page_size,
+        )
 
     async def get_story_steps(self, user_id: UUID, story_id: UUID) -> list[StoryStepResponse]:
         """Retrieve audit trail for story."""

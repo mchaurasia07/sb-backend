@@ -1,8 +1,17 @@
+from enum import StrEnum
+from uuid import UUID
+
 from sqlalchemy import CheckConstraint, Index, Integer, JSON, String, Text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import ForeignKey, UniqueConstraint, Uuid
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.entity.base import TimestampMixin, UUIDPrimaryKeyMixin
+
+
+class GenericStoryLanguage(StrEnum):
+    EN = "en"
+    HI = "hi"
 
 
 class GenericStory(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -12,6 +21,7 @@ class GenericStory(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (
         CheckConstraint("reading_time_minutes >= 0", name="ck_generic_stories_reading_time_non_negative"),
         CheckConstraint("total_pages >= 0", name="ck_generic_stories_total_pages_non_negative"),
+        UniqueConstraint("title", name="uq_generic_stories_title"),
         Index("ix_generic_stories_status", "status"),
         Index("ix_generic_stories_age_group", "age_group"),
         Index("ix_generic_stories_theme", "theme"),
@@ -24,12 +34,38 @@ class GenericStory(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     age_group: Mapped[str] = mapped_column(String(32), nullable=False)
     theme: Mapped[str | None] = mapped_column(String(100), nullable=True)
     genre: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    language: Mapped[str] = mapped_column(String(50), nullable=False, default="en")
     moral: Mapped[str | None] = mapped_column(String(255), nullable=True)
     learning_goal: Mapped[str | None] = mapped_column(String(500), nullable=True)
     reading_time_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     character_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     total_pages: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     cover_image: Mapped[str | None] = mapped_column(String(1024), nullable=True)
-    story_json: Mapped[dict] = mapped_column(JSON, nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+
+    contents = relationship(
+        "GenericStoryContent",
+        back_populates="generic_story",
+        cascade="all, delete-orphan",
+    )
+
+
+class GenericStoryContent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Language-specific story JSON for a generic story."""
+
+    __tablename__ = "generic_story_contents"
+    __table_args__ = (
+        CheckConstraint("language IN ('en', 'hi')", name="ck_generic_story_contents_language"),
+        UniqueConstraint("generic_story_id", "language", name="uq_generic_story_contents_story_language"),
+        Index("ix_generic_story_contents_story_id", "generic_story_id"),
+        Index("ix_generic_story_contents_language", "language"),
+    )
+
+    generic_story_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("generic_stories.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    language: Mapped[GenericStoryLanguage] = mapped_column(String(2), nullable=False)
+    story_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+
+    generic_story = relationship("GenericStory", back_populates="contents", foreign_keys=[generic_story_id])

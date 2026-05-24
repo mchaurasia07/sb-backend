@@ -1,14 +1,14 @@
 import logging
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session, AsyncSessionLocal
 from app.core.dependencies import get_current_user
 from app.entity.user import User
 from app.model.request.story import StoryGenerationRequest
-from app.model.response.common import ApiResponse, success_response
+from app.model.response.common import ApiResponse, PaginatedResponse, success_response
 from app.model.response.story import StoryResponse, StoryStepResponse
 from app.service.story_service import StoryService, StoryGenerationFlags
 
@@ -105,16 +105,23 @@ async def get_story_steps(
     return success_response(data, "Story steps retrieved successfully")
 
 
-@router.get("", response_model=ApiResponse[list[StoryResponse]])
+@router.get("", response_model=ApiResponse[PaginatedResponse[StoryResponse]])
 async def list_stories(
     child_id: UUID | None = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db_session),
-) -> ApiResponse[list[StoryResponse]]:
+) -> ApiResponse[PaginatedResponse[StoryResponse]]:
     """List stories for current user, optionally filtered by child.
 
     Returns stories in reverse chronological order (newest first).
     """
     service = StoryService(session)
-    data = await service.list_stories(current_user.id, child_id)
+    data = await service.list_stories(
+        current_user.id,
+        child_id,
+        page=page,
+        page_size=page_size,
+    )
     return success_response(data, "Stories retrieved successfully")

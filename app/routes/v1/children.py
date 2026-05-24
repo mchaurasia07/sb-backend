@@ -103,6 +103,7 @@ async def add_generic_story_to_child(
         current_user=current_user,
         child_id=child_id,
         generic_story_id=payload.generic_story_id,
+        language=payload.language,
     )
     return success_response(data, "Generic story added to child successfully")
 

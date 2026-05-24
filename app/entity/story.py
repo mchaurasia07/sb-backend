@@ -87,4 +87,9 @@ class Story(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     user = relationship("User", foreign_keys=[user_id])
     child = relationship("ChildProfile", foreign_keys=[child_id])
     steps = relationship("StoryStep", back_populates="story", cascade="all, delete-orphan")
-    pages = relationship("StoryPage", back_populates="story", cascade="all, delete-orphan")
+    pages = relationship(
+        "StoryPage",
+        back_populates="story",
+        cascade="all, delete-orphan",
+        order_by="StoryPage.page_number",
+    )

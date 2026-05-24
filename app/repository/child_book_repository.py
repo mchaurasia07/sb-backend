@@ -30,12 +30,14 @@ class ChildBookRepository:
         child_id: UUID,
         story_id: UUID,
         story_type: str,
+        language: str,
     ) -> ChildBook | None:
         result = await self.session.execute(
             select(ChildBook).where(
                 ChildBook.child_id == child_id,
                 ChildBook.story_id == story_id,
                 ChildBook.story_type == story_type,
+                ChildBook.language == language,
             )
         )
         return result.scalar_one_or_none()

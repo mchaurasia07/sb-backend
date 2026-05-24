@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppException, ConflictException, NotFoundException
 from app.entity.user import User
+from app.entity.generic_story import GenericStoryLanguage
 from app.model.response.child_book import ChildBookResponse
 from app.model.response.common import PaginatedResponse
 from app.repository.child_book_repository import ChildBookRepository
@@ -50,6 +51,7 @@ class ChildBookService:
         current_user: User,
         child_id: UUID,
         generic_story_id: UUID,
+        language: GenericStoryLanguage = GenericStoryLanguage.EN,
     ) -> ChildBookResponse:
         await self._get_child_for_user(current_user, child_id)
 
@@ -62,11 +64,19 @@ class ChildBookService:
                 status.HTTP_400_BAD_REQUEST,
                 "GENERIC_STORY_INACTIVE",
             )
+        available_languages = {GenericStoryLanguage(content.language) for content in generic_story.contents}
+        if language not in available_languages:
+            raise AppException(
+                "Generic story content is not available for the requested language",
+                status.HTTP_400_BAD_REQUEST,
+                "GENERIC_STORY_LANGUAGE_NOT_AVAILABLE",
+            )
 
         existing = await self.child_books.get_by_child_story(
             child_id=child_id,
             story_id=generic_story.id,
             story_type="generic",
+            language=language.value,
         )
         if existing is not None:
             raise ConflictException(
@@ -79,6 +89,7 @@ class ChildBookService:
             child_id=child_id,
             story_id=generic_story.id,
             story_type="generic",
+            language=language.value,
             title=generic_story.title,
             cover_image=generic_story.cover_image,
             status="not_started",

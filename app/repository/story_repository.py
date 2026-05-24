@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -55,12 +55,37 @@ class StoryRepository:
 
     async def list_by_user(self, user_id: UUID, child_id: UUID | None = None) -> list[Story]:
         """List stories for user, optionally filtered by child."""
-        query = select(Story).where(Story.user_id == user_id)
+        query = select(Story).options(selectinload(Story.pages)).where(Story.user_id == user_id)
         if child_id:
             query = query.where(Story.child_id == child_id)
         query = query.order_by(Story.created_at.desc())
         result = await self.session.execute(query)
         return list(result.scalars().all())
+
+    async def list_by_user_paginated(
+        self,
+        user_id: UUID,
+        child_id: UUID | None = None,
+        *,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[Story], int]:
+        """List stories for user with pagination metadata."""
+        filters = [Story.user_id == user_id]
+        if child_id:
+            filters.append(Story.child_id == child_id)
+
+        total = await self.session.scalar(select(func.count()).select_from(Story).where(*filters))
+        query = (
+            select(Story)
+            .options(selectinload(Story.pages))
+            .where(*filters)
+            .order_by(Story.created_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+        result = await self.session.execute(query)
+        return list(result.scalars().all()), int(total or 0)
 
     async def update(self, story: Story) -> Story:
         """Update an existing story."""
