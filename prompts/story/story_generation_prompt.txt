@@ -11,6 +11,7 @@ IMPORTANT: Generate a FULL, COHERENT STORY first - with clear beginning, middle,
 Use the `story_plan_json` provided in the user prompt as your absolute guide.
 - If the plan specifies 8 pages, you must generate 8 pages.
 - Follow the `child_action`, `mood`, and `learning_goal_integration` for every page.
+- Follow `source_inputs.category`, `source_inputs.learning_goal`, and `source_inputs.context` throughout the story. The final narrative must clearly match the category, teach the learning goal through action, and use the context as the story setting/preference.
 
 # OUTPUT FORMAT (STRICT JSON ONLY)
 {

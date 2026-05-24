@@ -69,6 +69,22 @@ def _compact_json(data: Any) -> str:
     """Serialize prompt context without pretty-print whitespace."""
     return json.dumps(data, ensure_ascii=False, separators=(",", ":"))
 
+
+def _safe_prompt_value(value: str | None, default: str = "") -> str:
+    """Keep user-provided prompt inputs on one line for safer template insertion."""
+    text = (value or default).strip()
+    return text.replace("\n", " ").replace('"', '\\"')
+
+
+def _story_source_inputs(story: Story) -> dict[str, str]:
+    """Canonical story-driving inputs used by plan, story, and image prompts."""
+    return {
+        "category": story.category or story.event_description or "adventure",
+        "learning_goal": story.learning_goal or "personal growth",
+        "context": story.context or "",
+    }
+
+
 # Testing flags helper
 class StoryGenerationFlags:
     """Helper for managing story generation test/feature flags."""
@@ -156,6 +172,9 @@ class StoryService:
             current_step=story.current_step,
             generation_mode=story.generation_mode.value,
             age_group=story.age_group.value,
+            category=story.category,
+            learning_goal=story.learning_goal,
+            context=story.context,
             pages=[],  # No pages yet, story is PENDING
             created_at=story.created_at,
             updated_at=story.updated_at,
@@ -260,7 +279,8 @@ class StoryService:
 
         # Prepare variables
         pages = self._get_page_count_for_age_group(story.age_group)
-        theme = story.category or story.event_description or "adventure"
+        source_inputs = _story_source_inputs(story)
+        theme = source_inputs["category"]
 
         # Generate better hobby suggestions based on age group
         hobby = self._get_hobby_for_age_group(story.age_group)
@@ -273,9 +293,10 @@ class StoryService:
         prompt = prompt.replace("{age_group}", story.age_group.value)
         prompt = prompt.replace("{first_name}", child.first_name or "Child")
         prompt = prompt.replace("{gender}", child.gender or "neutral")
-        prompt = prompt.replace("{theme}", theme)
+        prompt = prompt.replace("{theme}", _safe_prompt_value(theme))
         prompt = prompt.replace("{hobby}", hobby)
-        prompt = prompt.replace("{learning_goal}", story.learning_goal or "personal growth")
+        prompt = prompt.replace("{learning_goal}", _safe_prompt_value(source_inputs["learning_goal"]))
+        prompt = prompt.replace("{story_context}", _safe_prompt_value(source_inputs["context"], "none"))
         prompt = prompt.replace("{moral}", "kindness and courage")
         prompt = prompt.replace("{pages}", str(pages))
         prompt = prompt.replace("{custom_character}", "false")
@@ -319,6 +340,7 @@ class StoryService:
                         code="INVALID_LLM_JSON",
                     )
 
+            story_plan["source_inputs"] = source_inputs
             step.response = story_plan
             step.status = StepStatus.COMPLETED
             step.completed_at = datetime.utcnow()
@@ -351,7 +373,11 @@ class StoryService:
             step.retry_count = attempt - 1
 
             # Validate
-            result = self.plan_validator.validate(plan, age_group=story.age_group)
+            result = self.plan_validator.validate(
+                plan,
+                age_group=story.age_group,
+                source_inputs=_story_source_inputs(story),
+            )
 
             if result.ok:
                 step.status = StepStatus.COMPLETED
@@ -381,7 +407,11 @@ class StoryService:
                     raise
 
         # All retries exhausted - perform final validation to get errors for logging
-        final_result = self.plan_validator.validate(plan, age_group=story.age_group)
+        final_result = self.plan_validator.validate(
+            plan,
+            age_group=story.age_group,
+            source_inputs=_story_source_inputs(story),
+        )
         error_details = "\n".join([f"  - {err}" for err in final_result.errors])
         error_msg = f"Plan validation failed after {self.MAX_RETRIES} attempts:\n{error_details}"
 
@@ -409,7 +439,8 @@ class StoryService:
         template = load_prompt("prompts/story/story_plan_prompt.txt")
 
         pages = self._get_page_count_for_age_group(story.age_group)
-        theme = story.category or story.event_description or "adventure"
+        source_inputs = _story_source_inputs(story)
+        theme = source_inputs["category"]
         hobby = self._get_hobby_for_age_group(story.age_group)
         character_context = self._build_character_reference_context(child)
 
@@ -419,9 +450,10 @@ class StoryService:
         enhanced_prompt = enhanced_prompt.replace("{age_group}", story.age_group.value)
         enhanced_prompt = enhanced_prompt.replace("{first_name}", child.first_name or "Child")
         enhanced_prompt = enhanced_prompt.replace("{gender}", child.gender or "neutral")
-        enhanced_prompt = enhanced_prompt.replace("{theme}", theme)
+        enhanced_prompt = enhanced_prompt.replace("{theme}", _safe_prompt_value(theme))
         enhanced_prompt = enhanced_prompt.replace("{hobby}", hobby)
-        enhanced_prompt = enhanced_prompt.replace("{learning_goal}", story.learning_goal or "personal growth")
+        enhanced_prompt = enhanced_prompt.replace("{learning_goal}", _safe_prompt_value(source_inputs["learning_goal"]))
+        enhanced_prompt = enhanced_prompt.replace("{story_context}", _safe_prompt_value(source_inputs["context"], "none"))
         enhanced_prompt = enhanced_prompt.replace("{moral}", "kindness and courage")
         enhanced_prompt = enhanced_prompt.replace("{pages}", str(pages))
         enhanced_prompt = enhanced_prompt.replace("{custom_character}", "false")
@@ -457,6 +489,7 @@ class StoryService:
                     code="INVALID_LLM_JSON",
                 )
 
+        new_plan["source_inputs"] = source_inputs
         return new_plan
 
     async def _step_generate_story(
@@ -488,6 +521,7 @@ class StoryService:
             story_json["title"] = plan.get("title", "Untitled")
             story_json["moral"] = plan.get("moral_theme", "")
             story_json["summary"] = plan.get("summary", "")
+            story_json["source_inputs"] = plan.get("source_inputs", _story_source_inputs(story))
 
             step.response = story_json
             step.status = StepStatus.COMPLETED
@@ -874,6 +908,7 @@ class StoryService:
             )
 
         compact_story_plan = {
+            "source_inputs": story_plan.get("source_inputs"),
             "title": story_plan.get("title"),
             "final_page_count": story_plan.get("final_page_count"),
             "age_band": story_plan.get("age_band"),
@@ -1107,6 +1142,9 @@ class StoryService:
             current_step=story.current_step,
             generation_mode=story.generation_mode.value,
             age_group=story.age_group.value,
+            category=story.category,
+            learning_goal=story.learning_goal,
+            context=story.context,
             pages=pages,
             created_at=story.created_at,
             updated_at=story.updated_at,
@@ -1138,6 +1176,9 @@ class StoryService:
                     current_step=story.current_step,
                     generation_mode=story.generation_mode.value,
                     age_group=story.age_group.value,
+                    category=story.category,
+                    learning_goal=story.learning_goal,
+                    context=story.context,
                     pages=pages,
                     created_at=story.created_at,
                     updated_at=story.updated_at,

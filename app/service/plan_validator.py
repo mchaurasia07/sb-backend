@@ -29,7 +29,13 @@ class PlanValidator:
         "8-12": {"Advanced"},
     }
 
-    def validate(self, plan: dict[str, Any], *, age_group: str) -> PlanValidationResult:
+    def validate(
+        self,
+        plan: dict[str, Any],
+        *,
+        age_group: str,
+        source_inputs: dict[str, str] | None = None,
+    ) -> PlanValidationResult:
         errors: list[str] = []
 
         if not isinstance(plan, dict):
@@ -45,6 +51,7 @@ class PlanValidator:
         tone = plan.get("tone")
         characters = plan.get("characters")
         pages = plan.get("pages")
+        plan_source_inputs = plan.get("source_inputs")
 
         if not isinstance(title, str) or not title.strip():
             errors.append("Missing or invalid `title` (must be a non-empty string).")
@@ -63,6 +70,17 @@ class PlanValidator:
             errors.append("Missing or invalid `setting` (must be a non-empty string).")
         if not isinstance(tone, str) or not tone.strip():
             errors.append("Missing or invalid `tone` (must be a non-empty string).")
+        if source_inputs is not None:
+            if not isinstance(plan_source_inputs, dict):
+                errors.append("Missing or invalid `source_inputs` (must be an object).")
+            else:
+                for field in ("category", "learning_goal", "context"):
+                    expected = source_inputs.get(field, "")
+                    actual = plan_source_inputs.get(field)
+                    if actual != expected:
+                        errors.append(
+                            f"`source_inputs.{field}` must match the request value exactly."
+                        )
         if not isinstance(characters, list) or not characters:
             errors.append("Missing or invalid `characters` (must be a non-empty array).")
         if not isinstance(pages, list) or not pages:

@@ -10,12 +10,15 @@ Age Group: {age_group} (Toddler: 2-4 | Early Reader: 5-7 | Advanced: 8-12)
 Gender: {gender} (boy=he/him | girl=she/her | neutral=they/them)
 
 Theme/Category: {theme}
+-> The main genre/theme of the story. The setting, conflict, imagery, title, and page events must clearly match this category.
 
 Child's Hobby/Interest: {hobby}
 
 Learning Goal: {learning_goal}
-→ The child should USE this skill/quality to solve the story conflict
+-> The child should USE this skill/quality to solve the story conflict. This must be visible in every page's learning_goal_integration.
 
+Story Context / User Preference: {story_context}
+-> This is a user-provided story direction or setting preference. If present, it is mandatory and must shape the story's setting, conflict, page events, summary, and image_gen_prompt. Do not ignore it.
 Moral Lesson: {moral}
 
 Requested Page Count: {pages} pages
@@ -65,6 +68,11 @@ Advanced (8-12): Up to 20 words. Inner monologues and thematic depth. "Show, Don
 
 6. OUTPUT FORMAT (STRICT JSON)
 {
+"source_inputs": {
+"category": "string",
+"learning_goal": "string",
+"context": "string"
+},
 "title": "string",
 "final_page_count": number,
 "age_band": "Toddler | Early Reader | Advanced",
@@ -117,6 +125,10 @@ IMPORTANT: Each page should advance the learning goal, not repeat it. The narrat
 
 9. FINAL VALIDATION
 pages.length must equal final_page_count.
+
+source_inputs.category must exactly match Theme/Category.
+source_inputs.learning_goal must exactly match Learning Goal.
+source_inputs.context must exactly match Story Context / User Preference.
 
 Exactly one companion character who appears in 50%+ of pages.
 

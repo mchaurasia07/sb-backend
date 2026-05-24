@@ -28,6 +28,9 @@ class StoryResponse(BaseModel):
     current_step: str | None
     generation_mode: str
     age_group: str
+    category: str | None = None
+    learning_goal: str | None = None
+    context: str | None = None
     pages: list[StoryPageResponse] = []
     created_at: datetime
     updated_at: datetime
