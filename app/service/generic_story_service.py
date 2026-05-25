@@ -1,3 +1,4 @@
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -6,7 +7,10 @@ from app.core.exceptions import AppException, NotFoundException
 from app.entity.generic_story import GenericStory, GenericStoryLanguage
 from app.model.request.generic_story import GenericStoryCreateRequest, GenericStoryUpdateRequest
 from app.model.response.common import PaginatedResponse
-from app.model.response.generic_story import GenericStoryResponse
+from app.model.response.generic_story import (
+    GenericStoryListResponse,
+    GenericStoryResponse,
+)
 from app.repository.child_book_repository import ChildBookRepository
 from app.repository.generic_story_repository import GenericStoryRepository
 
@@ -51,6 +55,19 @@ class GenericStoryService:
             raise NotFoundException("Generic story not found", "GENERIC_STORY_NOT_FOUND")
         return self._to_response(generic_story, language=language)
 
+    async def get_content(
+        self,
+        generic_story_id: UUID,
+        language: GenericStoryLanguage = DEFAULT_GENERIC_STORY_LANGUAGE,
+    ) -> dict[str, Any]:
+        content = await self.generic_stories.get_content_by_story_and_language(
+            generic_story_id=generic_story_id,
+            language=language,
+        )
+        if content is None:
+            raise NotFoundException("Generic story content not found", "GENERIC_STORY_CONTENT_NOT_FOUND")
+        return content.story_json
+
     async def update(
         self,
         generic_story_id: UUID,
@@ -90,15 +107,22 @@ class GenericStoryService:
         page: int,
         page_size: int,
         status_filter: str | None = None,
-        language: GenericStoryLanguage = DEFAULT_GENERIC_STORY_LANGUAGE,
-    ) -> PaginatedResponse[GenericStoryResponse]:
+    ) -> PaginatedResponse[GenericStoryListResponse]:
         stories, total = await self.generic_stories.list_paginated(
             page=page,
             page_size=page_size,
             status=status_filter,
         )
-        items = [self._to_response(story, language=language) for story in stories]
-        return PaginatedResponse[GenericStoryResponse].create(
+        available_languages = await self.generic_stories.get_available_languages_by_story_ids(
+            [story.id for story in stories]
+        )
+        items = [
+            GenericStoryListResponse.model_validate(story).model_copy(
+                update={"available_languages": available_languages.get(story.id, [])}
+            )
+            for story in stories
+        ]
+        return PaginatedResponse[GenericStoryListResponse].create(
             items=items,
             total=total,
             page=page,

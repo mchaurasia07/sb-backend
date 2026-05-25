@@ -37,6 +37,37 @@ class GenericStoryRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_content_by_story_and_language(
+        self,
+        *,
+        generic_story_id: UUID,
+        language: GenericStoryLanguage,
+    ) -> GenericStoryContent | None:
+        result = await self.session.execute(
+            select(GenericStoryContent).where(
+                GenericStoryContent.generic_story_id == generic_story_id,
+                GenericStoryContent.language == language.value,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_available_languages_by_story_ids(
+        self,
+        generic_story_ids: list[UUID],
+    ) -> dict[UUID, list[GenericStoryLanguage]]:
+        if not generic_story_ids:
+            return {}
+
+        result = await self.session.execute(
+            select(GenericStoryContent.generic_story_id, GenericStoryContent.language)
+            .where(GenericStoryContent.generic_story_id.in_(generic_story_ids))
+            .order_by(GenericStoryContent.language)
+        )
+        languages_by_story_id: dict[UUID, list[GenericStoryLanguage]] = {}
+        for generic_story_id, language in result.all():
+            languages_by_story_id.setdefault(generic_story_id, []).append(GenericStoryLanguage(language))
+        return languages_by_story_id
+
     async def list_paginated(
         self,
         *,
@@ -44,7 +75,7 @@ class GenericStoryRepository:
         page_size: int,
         status: str | None = None,
     ) -> tuple[list[GenericStory], int]:
-        query: Select[tuple[GenericStory]] = select(GenericStory).options(selectinload(GenericStory.contents))
+        query: Select[tuple[GenericStory]] = select(GenericStory)
         count_query = select(func.count()).select_from(GenericStory)
 
         if status:
