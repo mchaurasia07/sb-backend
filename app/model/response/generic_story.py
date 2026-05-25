@@ -4,8 +4,6 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from app.entity.generic_story import GenericStoryLanguage
-
 
 class GenericStoryResponse(BaseModel):
     id: UUID
@@ -14,7 +12,7 @@ class GenericStoryResponse(BaseModel):
     age_group: str
     theme: str | None
     genre: str | None
-    language: GenericStoryLanguage
+    language: str
     moral: str | None
     learning_goal: str | None
     reading_time_minutes: int | None
@@ -22,7 +20,7 @@ class GenericStoryResponse(BaseModel):
     total_pages: int
     cover_image: str | None
     story_json: dict[str, Any]
-    available_languages: list[GenericStoryLanguage] = Field(default_factory=list)
+    available_languages: list[str] = Field(default_factory=list)
     status: str
     created_at: datetime
     updated_at: datetime
@@ -43,7 +41,7 @@ class GenericStoryListResponse(BaseModel):
     character_type: str | None
     total_pages: int
     cover_image: str | None
-    available_languages: list[GenericStoryLanguage] = Field(default_factory=list)
+    available_languages: list[str] = Field(default_factory=list)
     status: str
     created_at: datetime
     updated_at: datetime

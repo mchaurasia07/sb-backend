@@ -1,12 +1,11 @@
 CREATE TABLE generic_story_contents (
     id CHAR(32) NOT NULL,
     generic_story_id CHAR(32) NOT NULL,
-    language VARCHAR(2) NOT NULL,
+    language VARCHAR(16) NOT NULL,
     story_json JSON NOT NULL,
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL,
     PRIMARY KEY (id),
-    CONSTRAINT ck_generic_story_contents_language CHECK (language IN ('en', 'hi')),
     CONSTRAINT fk_generic_story_contents_story_id_generic_stories
         FOREIGN KEY (generic_story_id) REFERENCES generic_stories (id)
         ON DELETE CASCADE,
@@ -30,7 +29,7 @@ INSERT INTO generic_story_contents (
 SELECT
     REPLACE(UUID(), '-', ''),
     id,
-    CASE WHEN language IN ('en', 'hi') THEN language ELSE 'en' END,
+    language,
     story_json,
     created_at,
     updated_at

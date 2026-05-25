@@ -6,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
 from app.core.dependencies import get_current_user
-from app.entity.generic_story import GenericStoryLanguage
 from app.entity.user import User
 from app.model.request.generic_story import GenericStoryCreateRequest, GenericStoryUpdateRequest
 from app.model.response.common import ApiResponse, PaginatedResponse, success_response
@@ -33,7 +32,7 @@ async def create_generic_story(
 async def update_generic_story(
     generic_story_id: UUID,
     payload: GenericStoryUpdateRequest,
-    language: GenericStoryLanguage = Query(GenericStoryLanguage.EN),
+    language: str = Query("en", min_length=2, max_length=16),
     _: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[GenericStoryResponse]:
@@ -70,7 +69,7 @@ async def list_generic_stories(
 @router.get("/{generic_story_id}/content", response_model=ApiResponse[dict[str, Any]])
 async def get_generic_story_content(
     generic_story_id: UUID,
-    language: GenericStoryLanguage = Query(GenericStoryLanguage.EN),
+    language: str = Query("en", min_length=2, max_length=16),
     _: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[dict[str, Any]]:
@@ -81,7 +80,7 @@ async def get_generic_story_content(
 @router.get("/{generic_story_id}", response_model=ApiResponse[GenericStoryResponse])
 async def get_generic_story(
     generic_story_id: UUID,
-    language: GenericStoryLanguage = Query(GenericStoryLanguage.EN),
+    language: str = Query("en", min_length=2, max_length=16),
     _: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[GenericStoryResponse]:

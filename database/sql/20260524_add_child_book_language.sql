@@ -2,7 +2,7 @@ ALTER TABLE child_books
     ADD COLUMN language VARCHAR(2) NOT NULL DEFAULT 'en';
 
 ALTER TABLE child_books
-    ADD CONSTRAINT ck_child_books_language CHECK (language IN ('en', 'hi'));
+    ADD CONSTRAINT ck_child_books_language CHECK (language IN ('en', 'hi', 'mr'));
 
 ALTER TABLE child_books
     DROP INDEX uq_child_books_child_story_type;

@@ -4,7 +4,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppException, NotFoundException
-from app.entity.generic_story import GenericStory, GenericStoryLanguage
+from app.entity.generic_story import GenericStory
 from app.model.request.generic_story import GenericStoryCreateRequest, GenericStoryUpdateRequest
 from app.model.response.common import PaginatedResponse
 from app.model.response.generic_story import (
@@ -15,7 +15,7 @@ from app.repository.child_book_repository import ChildBookRepository
 from app.repository.generic_story_repository import GenericStoryRepository
 
 
-DEFAULT_GENERIC_STORY_LANGUAGE = GenericStoryLanguage.EN
+DEFAULT_GENERIC_STORY_LANGUAGE = "en"
 
 
 class GenericStoryService:
@@ -48,7 +48,7 @@ class GenericStoryService:
     async def get(
         self,
         generic_story_id: UUID,
-        language: GenericStoryLanguage = DEFAULT_GENERIC_STORY_LANGUAGE,
+        language: str = DEFAULT_GENERIC_STORY_LANGUAGE,
     ) -> GenericStoryResponse:
         generic_story = await self.generic_stories.get_by_id(generic_story_id)
         if generic_story is None:
@@ -58,7 +58,7 @@ class GenericStoryService:
     async def get_content(
         self,
         generic_story_id: UUID,
-        language: GenericStoryLanguage = DEFAULT_GENERIC_STORY_LANGUAGE,
+        language: str = DEFAULT_GENERIC_STORY_LANGUAGE,
     ) -> dict[str, Any]:
         content = await self.generic_stories.get_content_by_story_and_language(
             generic_story_id=generic_story_id,
@@ -72,7 +72,7 @@ class GenericStoryService:
         self,
         generic_story_id: UUID,
         payload: GenericStoryUpdateRequest,
-        language: GenericStoryLanguage = DEFAULT_GENERIC_STORY_LANGUAGE,
+        language: str = DEFAULT_GENERIC_STORY_LANGUAGE,
     ) -> GenericStoryResponse:
         generic_story = await self.generic_stories.get_by_id(generic_story_id)
         if generic_story is None:
@@ -135,7 +135,7 @@ class GenericStoryService:
         for content in contents:
             normalized.append(
                 {
-                    "language": GenericStoryLanguage(content.get("language") or DEFAULT_GENERIC_STORY_LANGUAGE).value,
+                    "language": str(content.get("language") or DEFAULT_GENERIC_STORY_LANGUAGE),
                     "story_json": content["story_json"],
                 }
             )
@@ -145,15 +145,15 @@ class GenericStoryService:
     def _to_response(
         generic_story: GenericStory,
         *,
-        language: GenericStoryLanguage = DEFAULT_GENERIC_STORY_LANGUAGE,
+        language: str = DEFAULT_GENERIC_STORY_LANGUAGE,
     ) -> GenericStoryResponse:
-        content = next((item for item in generic_story.contents if GenericStoryLanguage(item.language) == language), None)
+        content = next((item for item in generic_story.contents if str(item.language) == language), None)
         if content is None:
             content = next(
                 (
                     item
                     for item in generic_story.contents
-                    if GenericStoryLanguage(item.language) == DEFAULT_GENERIC_STORY_LANGUAGE
+                    if str(item.language) == DEFAULT_GENERIC_STORY_LANGUAGE
                 ),
                 None,
             )
@@ -167,7 +167,7 @@ class GenericStoryService:
             age_group=generic_story.age_group,
             theme=generic_story.theme,
             genre=generic_story.genre,
-            language=GenericStoryLanguage(content.language),
+            language=str(content.language),
             moral=generic_story.moral,
             learning_goal=generic_story.learning_goal,
             reading_time_minutes=generic_story.reading_time_minutes,
@@ -175,7 +175,7 @@ class GenericStoryService:
             total_pages=generic_story.total_pages,
             cover_image=generic_story.cover_image,
             story_json=content.story_json,
-            available_languages=sorted({GenericStoryLanguage(item.language) for item in generic_story.contents}),
+            available_languages=sorted({str(item.language) for item in generic_story.contents}),
             status=generic_story.status,
             created_at=generic_story.created_at,
             updated_at=generic_story.updated_at,

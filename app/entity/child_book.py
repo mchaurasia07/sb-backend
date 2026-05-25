@@ -13,7 +13,7 @@ class ChildBook(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     __tablename__ = "child_books"
     __table_args__ = (
-        CheckConstraint("language IN ('en', 'hi')", name="ck_child_books_language"),
+        CheckConstraint("language IN ('en', 'hi', 'mr')", name="ck_child_books_language"),
         UniqueConstraint("child_id", "story_id", "story_type", "language", name="uq_child_books_child_story_type_language"),
         Index("ix_child_books_child_id", "child_id"),
         Index("ix_child_books_story_id", "story_id"),

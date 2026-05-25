@@ -7,7 +7,7 @@ from app.entity.generic_story import GenericStoryLanguage
 
 
 class GenericStoryContentRequest(BaseModel):
-    language: GenericStoryLanguage = GenericStoryLanguage.EN
+    language: str = Field(default="en", min_length=2, max_length=16)
     story_json: dict[str, Any]
 
 

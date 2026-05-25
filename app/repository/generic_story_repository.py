@@ -4,7 +4,7 @@ from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.entity.generic_story import GenericStory, GenericStoryContent, GenericStoryLanguage
+from app.entity.generic_story import GenericStory, GenericStoryContent
 
 
 class GenericStoryRepository:
@@ -41,12 +41,12 @@ class GenericStoryRepository:
         self,
         *,
         generic_story_id: UUID,
-        language: GenericStoryLanguage,
+        language: str,
     ) -> GenericStoryContent | None:
         result = await self.session.execute(
             select(GenericStoryContent).where(
                 GenericStoryContent.generic_story_id == generic_story_id,
-                GenericStoryContent.language == language.value,
+                GenericStoryContent.language == language,
             )
         )
         return result.scalar_one_or_none()
@@ -54,7 +54,7 @@ class GenericStoryRepository:
     async def get_available_languages_by_story_ids(
         self,
         generic_story_ids: list[UUID],
-    ) -> dict[UUID, list[GenericStoryLanguage]]:
+    ) -> dict[UUID, list[str]]:
         if not generic_story_ids:
             return {}
 
@@ -63,9 +63,9 @@ class GenericStoryRepository:
             .where(GenericStoryContent.generic_story_id.in_(generic_story_ids))
             .order_by(GenericStoryContent.language)
         )
-        languages_by_story_id: dict[UUID, list[GenericStoryLanguage]] = {}
+        languages_by_story_id: dict[UUID, list[str]] = {}
         for generic_story_id, language in result.all():
-            languages_by_story_id.setdefault(generic_story_id, []).append(GenericStoryLanguage(language))
+            languages_by_story_id.setdefault(generic_story_id, []).append(str(language))
         return languages_by_story_id
 
     async def list_paginated(
@@ -100,13 +100,13 @@ class GenericStoryRepository:
         )
         existing_by_language = {str(content.language): content for content in result.scalars().all()}
         for data in contents:
-            language = GenericStoryLanguage(data["language"])
-            existing = existing_by_language.get(language.value)
+            language = str(data["language"])
+            existing = existing_by_language.get(language)
             if existing is None:
                 self.session.add(
                     GenericStoryContent(
                         generic_story_id=generic_story.id,
-                        language=language.value,
+                        language=language,
                         story_json=data["story_json"],
                     )
                 )

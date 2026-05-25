@@ -12,6 +12,7 @@ from app.entity.base import TimestampMixin, UUIDPrimaryKeyMixin
 class GenericStoryLanguage(StrEnum):
     EN = "en"
     HI = "hi"
+    MR = "mr"
 
 
 class GenericStory(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -54,7 +55,6 @@ class GenericStoryContent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     __tablename__ = "generic_story_contents"
     __table_args__ = (
-        CheckConstraint("language IN ('en', 'hi')", name="ck_generic_story_contents_language"),
         UniqueConstraint("generic_story_id", "language", name="uq_generic_story_contents_story_language"),
         Index("ix_generic_story_contents_story_id", "generic_story_id"),
         Index("ix_generic_story_contents_language", "language"),
@@ -65,7 +65,7 @@ class GenericStoryContent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKey("generic_stories.id", ondelete="CASCADE"),
         nullable=False,
     )
-    language: Mapped[GenericStoryLanguage] = mapped_column(String(2), nullable=False)
+    language: Mapped[str] = mapped_column(String(16), nullable=False)
     story_json: Mapped[dict] = mapped_column(JSON, nullable=False)
 
     generic_story = relationship("GenericStory", back_populates="contents", foreign_keys=[generic_story_id])

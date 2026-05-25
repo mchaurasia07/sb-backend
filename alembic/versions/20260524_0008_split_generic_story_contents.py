@@ -21,11 +21,10 @@ def upgrade() -> None:
         "generic_story_contents",
         sa.Column("id", sa.Uuid(as_uuid=True), nullable=False),
         sa.Column("generic_story_id", sa.Uuid(as_uuid=True), nullable=False),
-        sa.Column("language", sa.String(2), nullable=False),
+        sa.Column("language", sa.String(16), nullable=False),
         sa.Column("story_json", sa.JSON(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.CheckConstraint("language IN ('en', 'hi')", name="ck_generic_story_contents_language"),
         sa.ForeignKeyConstraint(["generic_story_id"], ["generic_stories.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("generic_story_id", "language", name="uq_generic_story_contents_story_language"),
@@ -46,7 +45,7 @@ def upgrade() -> None:
         SELECT
             REPLACE(UUID(), '-', ''),
             id,
-            CASE WHEN language IN ('en', 'hi') THEN language ELSE 'en' END,
+            language,
             story_json,
             created_at,
             updated_at

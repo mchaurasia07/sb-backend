@@ -18,7 +18,7 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     op.add_column("child_books", sa.Column("language", sa.String(2), nullable=False, server_default="en"))
-    op.create_check_constraint("ck_child_books_language", "child_books", "language IN ('en', 'hi')")
+    op.create_check_constraint("ck_child_books_language", "child_books", "language IN ('en', 'hi', 'mr')")
     op.drop_constraint("uq_child_books_child_story_type", "child_books", type_="unique")
     op.create_unique_constraint(
         "uq_child_books_child_story_type_language",
