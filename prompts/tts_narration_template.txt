@@ -1,0 +1,5 @@
+Say in {language} ({language_code}) using a warm cinematic children's storytelling style.
+Use a {voice_style} delivery with a {tone} tone, {pace} pace, and {emotion} emotion.
+Read only the narration text below:
+
+{narration_text}

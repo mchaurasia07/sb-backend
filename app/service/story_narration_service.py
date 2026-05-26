@@ -1,0 +1,199 @@
+"""Story narration generation service."""
+
+import asyncio
+from copy import deepcopy
+import logging
+from pathlib import Path
+from uuid import UUID
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import settings
+from app.core.exceptions import AppException, NotFoundException
+from app.repository.generic_story_repository import GenericStoryRepository
+from app.utils.google_tts_utils import GoogleTTSProvider
+from app.utils.word_timestamps import generate_word_timestamps
+
+logger = logging.getLogger(__name__)
+
+
+class StoryNarrationService:
+    """Orchestrates language-specific story narration generation workflow."""
+
+    REMOVED_PAGE_FIELDS = {
+        "audio_url",
+        "tts_model",
+        "tts_prompt",
+        "tts_skipped",
+        "tts_voice",
+    }
+
+    def __init__(self, session: AsyncSession):
+        self.generic_stories = GenericStoryRepository(session)
+        self.tts_provider = GoogleTTSProvider()
+        self.audio_root = Path("audio")
+
+    async def generate_narration(
+        self,
+        story_id: UUID,
+        language: str = "en",
+        overwrite: bool = False,
+    ) -> dict:
+        """Generate narration for a generic story content row.
+
+        The story text comes from generic_story_contents.story_json for the
+        requested story_id + language. Narration timing is written back to that
+        same language-specific JSON.
+        """
+        normalized_language = language.strip().lower()
+        content = await self.generic_stories.get_content_by_story_and_language(
+            generic_story_id=story_id,
+            language=normalized_language,
+        )
+        if content is None:
+            raise NotFoundException("Generic story content not found", "GENERIC_STORY_CONTENT_NOT_FOUND")
+
+        if not content.story_json:
+            logger.error("Generic story content has no story_json: story_id=%s language=%s", story_id, normalized_language)
+            raise AppException("Generic story content does not have story_json")
+
+        try:
+            story_json = deepcopy(content.story_json)
+            pages = story_json.get("pages", [])
+
+            if not pages:
+                logger.warning("Generic story content has no pages: story_id=%s language=%s", story_id, normalized_language)
+                return story_json
+
+            logger.info(
+                "Starting narration generation: story_id=%s language=%s page_count=%s",
+                story_id,
+                normalized_language,
+                len(pages),
+            )
+
+            for i, page in enumerate(pages):
+                page = self._remove_page_fields(page)
+                pages[i] = page
+                page_number = page.get("page_number", i + 1)
+                text = page.get("text", "").strip()
+
+                if not text:
+                    logger.info("Skipping empty page: story_id=%s language=%s page=%s", story_id, normalized_language, page_number)
+                    continue
+
+                if not settings.GOOGLE_TTS_SKIP_CALL and not overwrite and page.get("duration") and page.get("word_timestamps"):
+                    logger.info("Narration timing exists, skipping: story_id=%s language=%s page=%s", story_id, normalized_language, page_number)
+                    continue
+
+                enriched_page = await self._generate_page_narration(
+                    page,
+                    story_id=story_id,
+                    language=normalized_language,
+                )
+                pages[i] = enriched_page
+                logger.info(
+                    "Generated page narration: story_id=%s language=%s page=%s duration=%s",
+                    story_id,
+                    normalized_language,
+                    page_number,
+                    enriched_page.get("duration"),
+                )
+
+            content.story_json = story_json
+            updated_content = await self.generic_stories.update_content(content)
+
+            logger.info("Narration generation complete: story_id=%s language=%s", story_id, normalized_language)
+            return updated_content.story_json
+
+        except NotFoundException:
+            raise
+        except AppException:
+            raise
+        except Exception as e:
+            logger.exception("Unexpected error in narration generation: story_id=%s language=%s", story_id, normalized_language)
+            raise AppException(f"Failed to generate narration: {str(e)}")
+
+    async def _generate_page_narration(self, page_dict: dict, *, story_id: UUID, language: str) -> dict:
+        page_number = page_dict.get("page_number", 1)
+        text = page_dict.get("text", "").strip()
+
+        if not text:
+            raise ValueError(f"Page text is empty for page {page_number}")
+
+        speech_narration = page_dict.get("speech_narration", {})
+        pace = speech_narration.get("pace", "medium")
+        voice_style = speech_narration.get("voice_style", "storybook narrator")
+        tone = speech_narration.get("tone", "warm, magical, gentle")
+        emotion = speech_narration.get("emotion", "wonder")
+
+        logger.info(
+            "Generating TTS: story_id=%s language=%s page=%s pace=%s text_length=%s",
+            story_id,
+            language,
+            page_number,
+            pace,
+            len(text),
+        )
+
+        tts_prompt = self.tts_provider.build_prompt(
+            text,
+            pace=pace,
+            language=language,
+            voice_style=voice_style,
+            tone=tone,
+            emotion=emotion,
+        )
+        print(f"\n--- TTS PROMPT story_id={story_id} language={language} page={page_number} ---\n{tts_prompt}\n--- END TTS PROMPT ---\n")
+        logger.info("TTS prompt for story_id=%s language=%s page=%s:\n%s", story_id, language, page_number, tts_prompt)
+
+        if settings.GOOGLE_TTS_SKIP_CALL:
+            enriched_page = self._remove_page_fields(page_dict)
+            enriched_page.pop("duration", None)
+            enriched_page.pop("word_timestamps", None)
+            logger.info("Skipped Gemini TTS call: story_id=%s language=%s page=%s", story_id, language, page_number)
+            return enriched_page
+
+        audio_bytes, duration = await self.tts_provider.generate_narration_audio(
+            text,
+            pace,
+            language=language,
+            voice_style=voice_style,
+            tone=tone,
+            emotion=emotion,
+        )
+        file_path = await self._save_audio_file(audio_bytes, story_id, language, page_number)
+        word_timestamps = generate_word_timestamps(text, duration)
+
+        enriched_page = self._remove_page_fields(page_dict)
+        enriched_page["duration"] = round(duration, 2)
+        enriched_page["word_timestamps"] = word_timestamps
+
+        logger.info(
+            "Page narration complete: language=%s page=%s file=%s duration=%.2fs timestamps=%s",
+            language,
+            page_number,
+            file_path,
+            duration,
+            len(word_timestamps),
+        )
+        return enriched_page
+
+    def _remove_page_fields(self, page_dict: dict) -> dict:
+        cleaned_page = dict(page_dict)
+        for field in self.REMOVED_PAGE_FIELDS:
+            cleaned_page.pop(field, None)
+        return cleaned_page
+
+    async def _save_audio_file(self, audio_bytes: bytes, story_id: UUID, language: str, page_number: int) -> Path:
+        story_dir = self.audio_root / str(story_id) / language
+        story_dir.mkdir(parents=True, exist_ok=True)
+
+        file_path = story_dir / f"page_{page_number}.wav"
+        try:
+            await asyncio.to_thread(file_path.write_bytes, audio_bytes)
+            logger.info("Saved audio file: %s", file_path)
+            return file_path
+        except IOError:
+            logger.exception("Failed to save audio file: %s", file_path)
+            raise

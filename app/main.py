@@ -55,6 +55,11 @@ def create_app() -> FastAPI:
     register_exception_handlers(app)
     Path(settings.MEDIA_ROOT).mkdir(parents=True, exist_ok=True)
     app.mount(settings.MEDIA_URL_PREFIX, StaticFiles(directory=settings.MEDIA_ROOT), name="media")
+
+    # Mount audio files directory for story narration
+    Path("audio").mkdir(exist_ok=True)
+    app.mount("/audio", StaticFiles(directory="audio"), name="audio")
+
     app.include_router(api_router, prefix=settings.API_V1_PREFIX)
 
     @app.get("/health", tags=["Health"])

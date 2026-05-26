@@ -2,6 +2,7 @@ from uuid import UUID
 
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.orm import selectinload
 
 from app.entity.generic_story import GenericStory, GenericStoryContent
@@ -50,6 +51,11 @@ class GenericStoryRepository:
             )
         )
         return result.scalar_one_or_none()
+
+    async def update_content(self, content: GenericStoryContent) -> GenericStoryContent:
+        flag_modified(content, "story_json")
+        await self.session.flush()
+        return content
 
     async def get_available_languages_by_story_ids(
         self,
