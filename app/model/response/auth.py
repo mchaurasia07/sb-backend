@@ -1,6 +1,9 @@
+from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, EmailStr
+
+from app.entity.user import AuthProvider
 
 
 class UserResponse(BaseModel):
@@ -13,6 +16,14 @@ class UserResponse(BaseModel):
     is_phone_verified: bool
 
     model_config = {"from_attributes": True}
+
+
+class UserProfileResponse(UserResponse):
+    auth_provider: AuthProvider
+    is_active: bool
+    active_child_profile_id: UUID | None
+    created_at: datetime
+    updated_at: datetime
 
 
 class AuthTokenResponse(BaseModel):

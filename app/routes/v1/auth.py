@@ -18,11 +18,17 @@ from app.model.request.auth import (
     ValidatePhoneRequest,
     VerifyEmailOtpRequest,
 )
-from app.model.response.auth import AuthTokenResponse, GoogleLoginResponse, UserResponse, ValidateResponse
+from app.model.response.auth import AuthTokenResponse, GoogleLoginResponse, UserProfileResponse, UserResponse, ValidateResponse
 from app.model.response.common import ApiResponse, success_response
 from app.service.auth_service import AuthService
 
 router = APIRouter()
+
+
+@router.get("/me", response_model=ApiResponse[UserProfileResponse])
+async def get_me(current_user: User = Depends(get_current_user)) -> ApiResponse[UserProfileResponse]:
+    data = UserProfileResponse.model_validate(current_user)
+    return success_response(data, "User profile fetched successfully")
 
 
 @router.post("/signup", response_model=ApiResponse[UserResponse], status_code=status.HTTP_201_CREATED)
