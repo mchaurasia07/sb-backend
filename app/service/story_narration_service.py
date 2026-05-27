@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.exceptions import AppException, NotFoundException
 from app.repository.generic_story_repository import GenericStoryRepository
+from app.repository.story_repository import StoryRepository
 from app.utils.google_tts_utils import GoogleTTSProvider
 from app.utils.word_timestamps import generate_word_timestamps
 
@@ -30,10 +31,23 @@ class StoryNarrationService:
 
     def __init__(self, session: AsyncSession):
         self.generic_stories = GenericStoryRepository(session)
+        self.stories = StoryRepository(session)
         self.tts_provider = GoogleTTSProvider()
         self.audio_root = Path("audio")
 
     async def generate_narration(
+        self,
+        story_id: UUID,
+        language: str = "en",
+        overwrite: bool = False,
+    ) -> dict:
+        return await self.generate_generic_story_narration(
+            story_id=story_id,
+            language=language,
+            overwrite=overwrite,
+        )
+
+    async def generate_generic_story_narration(
         self,
         story_id: UUID,
         language: str = "en",
@@ -59,46 +73,13 @@ class StoryNarrationService:
 
         try:
             story_json = deepcopy(content.story_json)
-            pages = story_json.get("pages", [])
-
-            if not pages:
-                logger.warning("Generic story content has no pages: story_id=%s language=%s", story_id, normalized_language)
-                return story_json
-
-            logger.info(
-                "Starting narration generation: story_id=%s language=%s page_count=%s",
-                story_id,
-                normalized_language,
-                len(pages),
+            await self._generate_story_json_narration(
+                story_json,
+                story_id=story_id,
+                language=normalized_language,
+                overwrite=overwrite,
+                source="generic_story",
             )
-
-            for i, page in enumerate(pages):
-                page = self._remove_page_fields(page)
-                pages[i] = page
-                page_number = page.get("page_number", i + 1)
-                text = page.get("text", "").strip()
-
-                if not text:
-                    logger.info("Skipping empty page: story_id=%s language=%s page=%s", story_id, normalized_language, page_number)
-                    continue
-
-                if not settings.GOOGLE_TTS_SKIP_CALL and not overwrite and page.get("duration") and page.get("word_timestamps"):
-                    logger.info("Narration timing exists, skipping: story_id=%s language=%s page=%s", story_id, normalized_language, page_number)
-                    continue
-
-                enriched_page = await self._generate_page_narration(
-                    page,
-                    story_id=story_id,
-                    language=normalized_language,
-                )
-                pages[i] = enriched_page
-                logger.info(
-                    "Generated page narration: story_id=%s language=%s page=%s duration=%s",
-                    story_id,
-                    normalized_language,
-                    page_number,
-                    enriched_page.get("duration"),
-                )
 
             content.story_json = story_json
             updated_content = await self.generic_stories.update_content(content)
@@ -113,6 +94,109 @@ class StoryNarrationService:
         except Exception as e:
             logger.exception("Unexpected error in narration generation: story_id=%s language=%s", story_id, normalized_language)
             raise AppException(f"Failed to generate narration: {str(e)}")
+
+    async def generate_story_table_narration(
+        self,
+        story_id: UUID,
+        *,
+        user_id: UUID | None = None,
+        language: str = "en",
+        overwrite: bool = False,
+    ) -> dict:
+        """Generate narration directly on stories.story_json.
+
+        This is separate from the route-facing generic-story method so other
+        backend flows can narrate custom/generated stories without touching
+        generic_story_contents.
+        """
+        normalized_language = language.strip().lower()
+        story = (
+            await self.stories.get_for_user(user_id, story_id)
+            if user_id is not None
+            else await self.stories.get_by_id(story_id)
+        )
+        if story is None:
+            raise NotFoundException("Story not found", "STORY_NOT_FOUND")
+
+        if not story.story_json:
+            logger.error("Story has no story_json: story_id=%s language=%s", story_id, normalized_language)
+            raise AppException("Story does not have story_json")
+
+        try:
+            story_json = deepcopy(story.story_json)
+            await self._generate_story_json_narration(
+                story_json,
+                story_id=story_id,
+                language=normalized_language,
+                overwrite=overwrite,
+                source="story",
+            )
+
+            story.story_json = story_json
+            updated_story = await self.stories.update_story_json(story)
+
+            logger.info("Story table narration generation complete: story_id=%s language=%s", story_id, normalized_language)
+            return updated_story.story_json
+
+        except NotFoundException:
+            raise
+        except AppException:
+            raise
+        except Exception as e:
+            logger.exception("Unexpected error in story table narration generation: story_id=%s language=%s", story_id, normalized_language)
+            raise AppException(f"Failed to generate story table narration: {str(e)}")
+
+    async def _generate_story_json_narration(
+        self,
+        story_json: dict,
+        *,
+        story_id: UUID,
+        language: str,
+        overwrite: bool,
+        source: str,
+    ) -> None:
+        pages = story_json.get("pages", [])
+
+        if not pages:
+            logger.warning("Story JSON has no pages: source=%s story_id=%s language=%s", source, story_id, language)
+            return
+
+        logger.info(
+            "Starting narration generation: source=%s story_id=%s language=%s page_count=%s",
+            source,
+            story_id,
+            language,
+            len(pages),
+        )
+
+        for i, page in enumerate(pages):
+            page = self._remove_page_fields(page)
+            pages[i] = page
+            page_number = page.get("page_number", i + 1)
+            text = page.get("text", "").strip()
+
+            if not text:
+                logger.info("Skipping empty page: source=%s story_id=%s language=%s page=%s", source, story_id, language, page_number)
+                continue
+
+            if not settings.GOOGLE_TTS_SKIP_CALL and not overwrite and page.get("duration") and page.get("word_timestamps"):
+                logger.info("Narration timing exists, skipping: source=%s story_id=%s language=%s page=%s", source, story_id, language, page_number)
+                continue
+
+            enriched_page = await self._generate_page_narration(
+                page,
+                story_id=story_id,
+                language=language,
+            )
+            pages[i] = enriched_page
+            logger.info(
+                "Generated page narration: source=%s story_id=%s language=%s page=%s duration=%s",
+                source,
+                story_id,
+                language,
+                page_number,
+                enriched_page.get("duration"),
+            )
 
     async def _generate_page_narration(self, page_dict: dict, *, story_id: UUID, language: str) -> dict:
         page_number = page_dict.get("page_number", 1)

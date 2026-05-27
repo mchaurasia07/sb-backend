@@ -26,21 +26,25 @@ router = APIRouter()
 async def generate_story_narration(
     story_id: UUID,
     overwrite: bool = False,
+    generic_story: bool = Query(
+        True,
+        description="If true, narrate generic_story_contents.story_json. If false, narrate stories.story_json.",
+    ),
     language: str = Query("en", min_length=2, max_length=16),
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[dict[str, Any]]:
     """
-    Generate narration audio for all pages of a generic story content row.
+    Generate narration audio for all pages of a story JSON payload.
 
-    Reads generic_story_contents.story_json for the requested story_id and
-    language, generates WAV audio using Gemini TTS, creates
-    word-level timestamps for read-along functionality, saves audio files to
-    local storage, and writes narration timing back to that language-specific JSON.
+    With generic_story=true, reads generic_story_contents.story_json for the
+    requested story_id and language. With generic_story=false, reads
+    stories.story_json for the authenticated user's story row.
 
     Args:
         story_id: UUID of story to generate narration for
         overwrite: If true, regenerate audio even if it already exists
+        generic_story: If true use generic_story_contents, otherwise use stories
         language: Language code of generic_story_contents row to narrate
         current_user: Authenticated user (dependency)
         session: Database session (dependency)
@@ -84,21 +88,37 @@ async def generate_story_narration(
     """
     try:
         logger.info(
-            "Generating narration: user_id=%s story_id=%s language=%s overwrite=%s",
+            "Generating narration: user_id=%s story_id=%s language=%s overwrite=%s generic_story=%s",
             current_user.id,
             story_id,
             language,
             overwrite,
+            generic_story,
         )
 
         service = StoryNarrationService(session)
-        story_json = await service.generate_narration(
-            story_id=story_id,
-            language=language,
-            overwrite=overwrite,
-        )
+        narration_language = language if generic_story else "en"
 
-        logger.info("Narration generation successful: story_id=%s language=%s", story_id, language)
+        if generic_story:
+            story_json = await service.generate_generic_story_narration(
+                story_id=story_id,
+                language=narration_language,
+                overwrite=overwrite,
+            )
+        else:
+            story_json = await service.generate_story_table_narration(
+                story_id=story_id,
+                user_id=current_user.id,
+                language=narration_language,
+                overwrite=overwrite,
+            )
+
+        logger.info(
+            "Narration generation successful: story_id=%s language=%s generic_story=%s",
+            story_id,
+            narration_language,
+            generic_story,
+        )
         return success_response(story_json, "Narration generated successfully")
 
     except NotFoundException as e:

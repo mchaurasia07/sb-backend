@@ -2,6 +2,7 @@ from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.orm import selectinload
 
 from app.entity.story import Story, StoryGenerationMode, AgeGroup, StoryStatus
@@ -89,5 +90,11 @@ class StoryRepository:
 
     async def update(self, story: Story) -> Story:
         """Update an existing story."""
+        await self.session.flush()
+        return story
+
+    async def update_story_json(self, story: Story) -> Story:
+        """Persist changes to a story's JSON payload."""
+        flag_modified(story, "story_json")
         await self.session.flush()
         return story
