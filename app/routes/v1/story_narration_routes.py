@@ -50,7 +50,7 @@ async def generate_story_narration(
         session: Database session (dependency)
 
     Returns:
-        Updated story with duration and word_timestamps in each page
+        Updated story with duration and sentence-level word_timestamps in each page
 
     Raises:
         404: Story not found or user doesn't own it
@@ -76,8 +76,7 @@ async def generate_story_narration(
                         "text": "Every night, a strange whisper echoed...",
                         "duration": 18.2,
                         "word_timestamps": [
-                            {"word": "Every", "start": 0.12, "end": 0.48},
-                            {"word": "night", "start": 0.48, "end": 0.95},
+                            {"word": "Every night, a strange whisper echoed.", "start": 0.12, "end": 3.8},
                             ...
                         ]
                     },

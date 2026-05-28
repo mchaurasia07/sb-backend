@@ -10,7 +10,7 @@ from app.core.dependencies import get_current_user
 from app.entity.user import User
 from app.model.request.character import CharacterGenerationRequest
 from app.model.request.child import ChildProfileCreateRequest, ChildProfileUpdateRequest
-from app.model.request.generic_story import AddGenericStoryToChildRequest
+from app.model.request.generic_story import AddCustomStoryToChildRequest, AddGenericStoryToChildRequest
 from app.model.response.child_book import ChildBookResponse
 from app.model.response.character import CharacterGenerationResponse
 from app.model.response.child import ActiveChildResponse, ChildProfileResponse
@@ -106,6 +106,26 @@ async def add_generic_story_to_child(
         language=payload.language,
     )
     return success_response(data, "Generic story added to child successfully")
+
+
+@router.post(
+    "/{child_id}/books/custom",
+    response_model=ApiResponse[ChildBookResponse],
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_custom_story_to_child(
+    child_id: UUID,
+    payload: AddCustomStoryToChildRequest,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[ChildBookResponse]:
+    data = await ChildBookService(session).add_custom_story(
+        current_user=current_user,
+        child_id=child_id,
+        story_id=payload.story_id,
+        language=payload.language,
+    )
+    return success_response(data, "Custom story added to child successfully")
 
 
 @router.delete("/{child_id}/books/{child_book_id}", response_model=ApiResponse[None])

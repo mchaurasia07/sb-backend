@@ -4,6 +4,7 @@ from fastapi import status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppException, ConflictException, NotFoundException
+from app.entity.story import StoryStatus
 from app.entity.user import User
 from app.entity.generic_story import GenericStoryLanguage
 from app.model.response.child_book import ChildBookResponse
@@ -11,6 +12,7 @@ from app.model.response.common import PaginatedResponse
 from app.repository.child_book_repository import ChildBookRepository
 from app.repository.child_repository import ChildRepository
 from app.repository.generic_story_repository import GenericStoryRepository
+from app.repository.story_repository import StoryRepository
 
 
 class ChildBookService:
@@ -20,6 +22,7 @@ class ChildBookService:
         self.children = ChildRepository(session)
         self.child_books = ChildBookRepository(session)
         self.generic_stories = GenericStoryRepository(session)
+        self.stories = StoryRepository(session)
 
     async def list_for_child(
         self,
@@ -93,6 +96,68 @@ class ChildBookService:
             language=requested_language,
             title=generic_story.title,
             cover_image=generic_story.cover_image,
+            status="not_started",
+            last_page_read=0,
+            last_page_read_time=None,
+        )
+        return ChildBookResponse.model_validate(child_book)
+
+    async def add_custom_story(
+        self,
+        *,
+        current_user: User,
+        child_id: UUID,
+        story_id: UUID,
+        language: GenericStoryLanguage = GenericStoryLanguage.EN,
+    ) -> ChildBookResponse:
+        await self._get_child_for_user(current_user, child_id)
+
+        story = await self.stories.get_for_user(current_user.id, story_id)
+        if story is None:
+            raise NotFoundException("Custom story not found", "CUSTOM_STORY_NOT_FOUND")
+        if story.child_id != child_id:
+            raise AppException(
+                "Custom story does not belong to this child",
+                status.HTTP_400_BAD_REQUEST,
+                "CUSTOM_STORY_CHILD_MISMATCH",
+            )
+        if story.status != StoryStatus.COMPLETED:
+            raise AppException(
+                "Only completed custom stories can be added to a child",
+                status.HTTP_400_BAD_REQUEST,
+                "CUSTOM_STORY_NOT_COMPLETED",
+            )
+
+        requested_language = language.value
+        available_languages = {str(content.language) for content in story.contents}
+        if requested_language not in available_languages:
+            raise AppException(
+                "Custom story content is not available for the requested language",
+                status.HTTP_400_BAD_REQUEST,
+                "CUSTOM_STORY_LANGUAGE_NOT_AVAILABLE",
+            )
+
+        existing = await self.child_books.get_by_child_story(
+            child_id=child_id,
+            story_id=story.id,
+            story_type="custom",
+            language=requested_language,
+        )
+        if existing is not None:
+            raise ConflictException(
+                "Custom story is already available for this child",
+                status.HTTP_409_CONFLICT,
+                "CHILD_BOOK_ALREADY_EXISTS",
+            )
+
+        cover_image = next((page.image_url for page in story.pages if page.page_type == "cover"), None)
+        child_book = await self.child_books.create(
+            child_id=child_id,
+            story_id=story.id,
+            story_type="custom",
+            language=requested_language,
+            title=story.title or "Untitled Story",
+            cover_image=cover_image,
             status="not_started",
             last_page_read=0,
             last_page_read_time=None,

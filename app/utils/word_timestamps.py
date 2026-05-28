@@ -1,18 +1,29 @@
-"""Generate word-level timestamps for story narration audio."""
+"""Generate sentence-level timestamps for story narration audio."""
 
 import re
 from typing import List
 
 
+_SENTENCE_PATTERN = re.compile(r"\S.*?(?:[.!?।]+[\"')\]]*|$)", re.DOTALL)
+
+
+def _split_sentences(text: str) -> list[str]:
+    """Split narration into readable sentence segments."""
+    normalized = re.sub(r"\s+", " ", text.strip())
+    if not normalized:
+        return []
+
+    sentences = [match.group(0).strip() for match in _SENTENCE_PATTERN.finditer(normalized)]
+    return [sentence for sentence in sentences if sentence]
+
+
 def generate_word_timestamps(text: str, audio_duration: float) -> List[dict]:
     """
-    Generate approximate word-level timestamps based on text and audio duration.
+    Generate approximate sentence-level timestamps based on text and audio duration.
 
-    Algorithm:
-    1. Split text into words
-    2. Calculate base duration per word
-    3. Adjust word duration based on word length
-    4. Distribute timestamps across duration
+    The historical response field is named `word_timestamps`, so each item keeps
+    the `word` key for API compatibility. The value is now a complete sentence,
+    allowing the reader UI to highlight one sentence at a time.
 
     Args:
         text: Narration text to generate timestamps for
@@ -22,9 +33,9 @@ def generate_word_timestamps(text: str, audio_duration: float) -> List[dict]:
         List of dicts with keys: word, start (seconds), end (seconds)
 
     Example:
-        >>> timestamps = generate_word_timestamps("Every night", 2.0)
+        >>> timestamps = generate_word_timestamps("Every night. Luna waited.", 2.0)
         >>> timestamps[0]
-        {'word': 'Every', 'start': 0.0, 'end': 0.95}
+        {'word': 'Every night.', 'start': 0.0, 'end': 0.95}
     """
     if not text or not text.strip():
         return []
@@ -32,37 +43,25 @@ def generate_word_timestamps(text: str, audio_duration: float) -> List[dict]:
     if audio_duration <= 0:
         return []
 
-    # Split text into words, preserving punctuation
-    # This regex captures contiguous non-whitespace as words
-    words = text.split()
+    sentences = _split_sentences(text)
 
-    if not words:
+    if not sentences:
         return []
 
-    # Calculate base duration per word
-    base_duration_per_word = audio_duration / len(words)
-
-    # Calculate average word length for normalization
-    word_lengths = [len(word) for word in words]
-    avg_word_length = sum(word_lengths) / len(word_lengths) if word_lengths else 1
-
-    # Generate timestamps with length-based adjustment
+    sentence_lengths = [max(1, len(sentence)) for sentence in sentences]
+    total_length = sum(sentence_lengths)
     timestamps = []
     current_time = 0.0
 
-    for i, word in enumerate(words):
-        # Length factor: longer words get slightly more duration
-        length_factor = len(word) / avg_word_length if avg_word_length > 0 else 1.0
-        # Cap the length factor to avoid extreme variations (0.5x to 1.5x)
-        length_factor = max(0.5, min(1.5, length_factor))
-
-        # Adjusted duration for this word
-        word_duration = base_duration_per_word * length_factor
-
+    for index, sentence in enumerate(sentences):
         start_time = current_time
-        end_time = start_time + word_duration
+        if index == len(sentences) - 1:
+            end_time = audio_duration
+        else:
+            sentence_duration = audio_duration * (sentence_lengths[index] / total_length)
+            end_time = start_time + sentence_duration
 
-        timestamps.append({"word": word, "start": round(start_time, 2), "end": round(end_time, 2)})
+        timestamps.append({"word": sentence, "start": round(start_time, 2), "end": round(end_time, 2)})
 
         current_time = end_time
 

@@ -214,9 +214,16 @@ class StoryService:
         self.story_steps = StoryStepRepository(session)
         self.story_pages = StoryPageRepository(session)
         self.children = ChildRepository(session)
-        self.ai_provider: AIProvider = get_ai_provider()
+        self._ai_provider: AIProvider | None = None
         self.plan_validator = PlanValidator()
         self.image_plan_validator = ImagePlanValidator()
+
+    @property
+    def ai_provider(self) -> AIProvider:
+        """Initialize AI provider only for generation workflows."""
+        if self._ai_provider is None:
+            self._ai_provider = get_ai_provider()
+        return self._ai_provider
 
     async def generate_story_async(
         self,

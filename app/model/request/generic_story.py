@@ -46,3 +46,8 @@ class GenericStoryUpdateRequest(BaseModel):
 class AddGenericStoryToChildRequest(BaseModel):
     generic_story_id: UUID
     language: GenericStoryLanguage = GenericStoryLanguage.EN
+
+
+class AddCustomStoryToChildRequest(BaseModel):
+    story_id: UUID
+    language: GenericStoryLanguage = GenericStoryLanguage.EN

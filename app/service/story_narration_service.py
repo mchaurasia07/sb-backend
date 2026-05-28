@@ -203,7 +203,12 @@ class StoryNarrationService:
                 logger.info("Skipping empty page: source=%s story_id=%s language=%s page=%s", source, story_id, language, page_number)
                 continue
 
-            if not settings.GOOGLE_TTS_SKIP_CALL and not overwrite and page.get("duration") and page.get("word_timestamps"):
+            if (
+                not settings.GOOGLE_TTS_SKIP_CALL
+                and not overwrite
+                and page.get("duration")
+                and self._has_sentence_timestamps(page)
+            ):
                 logger.info("Narration timing exists, skipping: source=%s story_id=%s language=%s page=%s", source, story_id, language, page_number)
                 continue
 
@@ -309,6 +314,19 @@ class StoryNarrationService:
         for field in self.REMOVED_PAGE_FIELDS:
             cleaned_page.pop(field, None)
         return cleaned_page
+
+    @staticmethod
+    def _has_sentence_timestamps(page_dict: dict) -> bool:
+        timestamps = page_dict.get("word_timestamps")
+        text = page_dict.get("text", "")
+        if not isinstance(timestamps, list) or not timestamps:
+            return False
+        if not isinstance(text, str) or not text.strip():
+            return True
+
+        word_count = len(text.split())
+        timestamp_count = len(timestamps)
+        return timestamp_count < max(2, word_count // 2)
 
     async def _save_audio_file(self, audio_bytes: bytes, story_id: UUID, language: str, page_number: int) -> Path:
         story_dir = self.audio_root / str(story_id) / language
