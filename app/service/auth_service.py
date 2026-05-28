@@ -10,6 +10,7 @@ from app.core.logger import get_logger
 from app.core.security import (
     TokenType,
     create_access_token,
+    create_child_access_token,
     create_refresh_token,
     decode_token,
     generate_otp,
@@ -21,6 +22,7 @@ from app.entity.otp_verification import OtpPurpose
 from app.entity.user import User
 from app.model.request.auth import (
     AddPhoneRequest,
+    ChildLoginRequest,
     ForgotPasswordRequest,
     GoogleLoginRequest,
     LoginRequest,
@@ -32,7 +34,8 @@ from app.model.request.auth import (
     ValidatePhoneRequest,
     VerifyEmailOtpRequest,
 )
-from app.model.response.auth import AuthTokenResponse, GoogleLoginResponse, UserResponse, ValidateResponse
+from app.model.response.auth import AuthTokenResponse, ChildLoginResponse, GoogleLoginResponse, UserResponse, ValidateResponse
+from app.model.response.child import ChildProfileResponse
 from app.repository.child_repository import ChildRepository
 from app.repository.otp_repository import OtpRepository
 from app.repository.refresh_token_repository import RefreshTokenRepository
@@ -91,6 +94,19 @@ class AuthService:
             raise AuthException("Email is not verified", status.HTTP_403_FORBIDDEN, "EMAIL_NOT_VERIFIED")
         await self.users.clear_failed_logins(user)
         return await self._build_auth_response(user)
+
+    async def child_login(self, payload: ChildLoginRequest) -> ChildLoginResponse:
+        child_user_id = payload.child_user_id.strip().lower()
+        child = await self.children.get_active_by_child_user_id(child_user_id)
+        if child is None or payload.password != child.child_password:
+            raise AuthException("Invalid child credentials", status.HTTP_401_UNAUTHORIZED, "INVALID_CHILD_CREDENTIALS")
+
+        access_token = create_child_access_token(child.id, child.user_id)
+        return ChildLoginResponse(
+            access_token=access_token,
+            child=ChildProfileResponse.model_validate(child),
+            parent_user_id=child.user_id,
+        )
 
     async def google_login(self, payload: GoogleLoginRequest) -> GoogleLoginResponse:
         google_payload = await verify_google_id_token(payload.id_token)

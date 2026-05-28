@@ -4,6 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel, EmailStr
 
 from app.entity.user import AuthProvider
+from app.model.response.child import ChildProfileResponse
 
 
 class UserResponse(BaseModel):
@@ -31,6 +32,14 @@ class AuthTokenResponse(BaseModel):
     token_type: str = "bearer"
     user: UserResponse
     child_profile_exists: bool
+
+
+class ChildLoginResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    account_type: str = "child"
+    child: ChildProfileResponse
+    parent_user_id: UUID
 
 
 class GoogleLoginResponse(AuthTokenResponse):

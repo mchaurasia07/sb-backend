@@ -2,18 +2,24 @@ from datetime import date
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile, status
+from fastapi import APIRouter, Body, Depends, File, Form, Query, Request, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
 from app.core.dependencies import get_current_user
 from app.entity.user import User
 from app.model.request.character import CharacterGenerationRequest
-from app.model.request.child import ChildProfileCreateRequest, ChildProfileUpdateRequest
+from app.model.request.child import (
+    ChildAccountStatusUpdateRequest,
+    ChildPasswordUpdateRequest,
+    ChildProfileCreateRequest,
+    ChildProfileUpdateRequest,
+    ChildUsernameUpdateRequest,
+)
 from app.model.request.generic_story import AddCustomStoryToChildRequest, AddGenericStoryToChildRequest
 from app.model.response.child_book import ChildBookResponse
 from app.model.response.character import CharacterGenerationResponse
-from app.model.response.child import ActiveChildResponse, ChildProfileResponse
+from app.model.response.child import ActiveChildResponse, ChildProfileResponse, ChildUsernameAvailabilityResponse
 from app.model.response.common import ApiResponse, PaginatedResponse, success_response
 from app.service.character_service import CharacterService
 from app.service.child_book_service import ChildBookService
@@ -48,6 +54,17 @@ async def get_child_profiles(
     return success_response(data, "Child profiles fetched successfully")
 
 
+@router.get("/username/availability", response_model=ApiResponse[ChildUsernameAvailabilityResponse])
+async def check_child_username_availability(
+    child_user_id: str = Query(..., min_length=3, max_length=128, pattern=r"^[a-zA-Z0-9._-]+$"),
+    child_id: UUID | None = Query(default=None),
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[ChildUsernameAvailabilityResponse]:
+    data = await ChildService(session).check_child_username_availability(current_user, child_user_id, child_id)
+    return success_response(data, "Child username availability checked successfully")
+
+
 @router.put("/{child_id}", response_model=ApiResponse[ChildProfileResponse])
 async def update_child_profile(
     child_id: UUID,
@@ -57,6 +74,41 @@ async def update_child_profile(
 ) -> ApiResponse[ChildProfileResponse]:
     data = await ChildService(session).update(current_user, child_id, payload)
     return success_response(data, "Child profile updated successfully")
+
+
+@router.put("/{child_id}/username", response_model=ApiResponse[ChildProfileResponse])
+async def update_child_username(
+    child_id: UUID,
+    payload: ChildUsernameUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[ChildProfileResponse]:
+    data = await ChildService(session).update_child_username(current_user, child_id, payload)
+    return success_response(data, "Child username updated successfully")
+
+
+@router.put("/{child_id}/password", response_model=ApiResponse[ChildProfileResponse])
+async def update_child_password(
+    child_id: UUID,
+    payload: ChildPasswordUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[ChildProfileResponse]:
+    data = await ChildService(session).update_child_password(current_user, child_id, payload)
+    return success_response(data, "Child password updated successfully")
+
+
+@router.patch("/{child_id}/lock", response_model=ApiResponse[ChildProfileResponse])
+async def update_child_account_status(
+    child_id: UUID,
+    payload: ChildAccountStatusUpdateRequest | None = Body(default=None),
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[ChildProfileResponse]:
+    status_payload = payload or ChildAccountStatusUpdateRequest(active=False)
+    data = await ChildService(session).update_child_account_status(current_user, child_id, status_payload)
+    message = "Child account unlocked successfully" if status_payload.active else "Child account locked successfully"
+    return success_response(data, message)
 
 
 @router.post("/select/{child_id}", response_model=ApiResponse[ActiveChildResponse])

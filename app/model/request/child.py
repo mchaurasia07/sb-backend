@@ -18,3 +18,15 @@ class ChildProfileUpdateRequest(BaseModel):
     age: int | None = Field(default=None, ge=0, le=18)
     gender: str | None = Field(default=None, max_length=32)
     avatar_image_url: HttpUrl | None = None
+
+
+class ChildUsernameUpdateRequest(BaseModel):
+    child_user_id: str = Field(min_length=3, max_length=128, pattern=r"^[a-zA-Z0-9._-]+$")
+
+
+class ChildPasswordUpdateRequest(BaseModel):
+    child_password: str = Field(min_length=4, max_length=128)
+
+
+class ChildAccountStatusUpdateRequest(BaseModel):
+    active: bool = False

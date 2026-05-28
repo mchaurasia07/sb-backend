@@ -1,7 +1,7 @@
 from datetime import date
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, Date, ForeignKey, Index, Integer, JSON, String, Uuid
+from sqlalchemy import Boolean, CheckConstraint, Date, ForeignKey, Index, Integer, JSON, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -15,6 +15,7 @@ class ChildProfile(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (
         CheckConstraint("age >= 0 AND age <= 18", name="ck_child_profiles_age_range"),
         Index("ix_child_profiles_user_id", "user_id"),
+        Index("ix_child_profiles_child_user_id", "child_user_id", unique=True),
     )
 
     user_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
@@ -26,5 +27,8 @@ class ChildProfile(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     avatar_image_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     character_image_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     character_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    child_user_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    child_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     user = relationship("User", back_populates="child_profiles", foreign_keys=[user_id])

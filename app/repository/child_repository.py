@@ -22,6 +22,8 @@ class ChildRepository:
         age: int,
         gender: str | None,
         avatar_image_url: str | None,
+        child_user_id: str,
+        child_password: str,
     ) -> ChildProfile:
         child = ChildProfile(
             user_id=user_id,
@@ -31,10 +33,29 @@ class ChildRepository:
             age=age,
             gender=gender,
             avatar_image_url=avatar_image_url,
+            child_user_id=child_user_id,
+            child_password=child_password,
+            active=True,
         )
         self.session.add(child)
         await self.session.flush()
         return child
+
+    async def get_by_child_user_id(self, child_user_id: str) -> ChildProfile | None:
+        result = await self.session.execute(select(ChildProfile).where(ChildProfile.child_user_id == child_user_id))
+        return result.scalar_one_or_none()
+
+    async def get_active_by_child_user_id(self, child_user_id: str) -> ChildProfile | None:
+        result = await self.session.execute(
+            select(ChildProfile).where(ChildProfile.child_user_id == child_user_id, ChildProfile.active.is_(True))
+        )
+        return result.scalar_one_or_none()
+
+    async def list_child_user_ids_by_prefix(self, prefix: str) -> list[str]:
+        result = await self.session.execute(
+            select(ChildProfile.child_user_id).where(ChildProfile.child_user_id.like(f"{prefix}_%"))
+        )
+        return list(result.scalars().all())
 
     async def list_by_user(self, user_id: UUID) -> list[ChildProfile]:
         result = await self.session.execute(select(ChildProfile).where(ChildProfile.user_id == user_id).order_by(ChildProfile.created_at.desc()))
@@ -52,3 +73,7 @@ class ChildRepository:
         child.character_image_url = character_image_url
         child.character_metadata = character_metadata
         await self.session.flush()
+
+    async def update(self, child: ChildProfile) -> ChildProfile:
+        await self.session.flush()
+        return child

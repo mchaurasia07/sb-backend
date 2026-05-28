@@ -14,6 +14,9 @@ class ChildProfileResponse(BaseModel):
     avatar_image_url: str | None
     character_image_url: str | None = None
     character_metadata: dict | None = None
+    child_user_id: str
+    child_password: str
+    active: bool
     created_at: datetime
     updated_at: datetime
 
@@ -22,3 +25,9 @@ class ChildProfileResponse(BaseModel):
 
 class ActiveChildResponse(BaseModel):
     active_child_profile_id: UUID
+
+
+class ChildUsernameAvailabilityResponse(BaseModel):
+    child_user_id: str
+    available: bool
+    reason: str | None = None

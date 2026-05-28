@@ -56,6 +56,19 @@ def create_access_token(user_id: UUID) -> str:
     return create_token(user_id, TokenType.ACCESS, timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
 
 
+def create_child_access_token(child_id: UUID, parent_user_id: UUID) -> str:
+    return create_token(
+        child_id,
+        TokenType.ACCESS,
+        timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
+        extra_claims={
+            "account_type": "child",
+            "child_profile_id": str(child_id),
+            "parent_user_id": str(parent_user_id),
+        },
+    )
+
+
 def create_refresh_token(user_id: UUID) -> str:
     return create_token(user_id, TokenType.REFRESH, timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS))
 

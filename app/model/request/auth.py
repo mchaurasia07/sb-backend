@@ -47,6 +47,11 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1, max_length=128)
 
 
+class ChildLoginRequest(BaseModel):
+    child_user_id: str = Field(min_length=3, max_length=128, pattern=r"^[a-zA-Z0-9._-]+$")
+    password: str = Field(min_length=1, max_length=128)
+
+
 class GoogleLoginRequest(BaseModel):
     id_token: str = Field(min_length=10)
 

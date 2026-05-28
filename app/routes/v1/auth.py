@@ -7,6 +7,7 @@ from app.core.rate_limit import limiter
 from app.entity.user import User
 from app.model.request.auth import (
     AddPhoneRequest,
+    ChildLoginRequest,
     ForgotPasswordRequest,
     GoogleLoginRequest,
     LoginRequest,
@@ -18,7 +19,7 @@ from app.model.request.auth import (
     ValidatePhoneRequest,
     VerifyEmailOtpRequest,
 )
-from app.model.response.auth import AuthTokenResponse, GoogleLoginResponse, UserProfileResponse, UserResponse, ValidateResponse
+from app.model.response.auth import ChildLoginResponse, AuthTokenResponse, GoogleLoginResponse, UserProfileResponse, UserResponse, ValidateResponse
 from app.model.response.common import ApiResponse, success_response
 from app.service.auth_service import AuthService
 
@@ -54,6 +55,17 @@ async def verify_email_otp(
 async def login(request: Request, payload: LoginRequest, session: AsyncSession = Depends(get_db_session)) -> ApiResponse[AuthTokenResponse]:
     data = await AuthService(session).login(payload)
     return success_response(data, "Login successful")
+
+
+@router.post("/child-login", response_model=ApiResponse[ChildLoginResponse])
+@limiter.limit("20/minute")
+async def child_login(
+    request: Request,
+    payload: ChildLoginRequest,
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[ChildLoginResponse]:
+    data = await AuthService(session).child_login(payload)
+    return success_response(data, "Child login successful")
 
 
 @router.post("/google-login", response_model=ApiResponse[GoogleLoginResponse])
