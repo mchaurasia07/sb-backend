@@ -103,11 +103,12 @@ class StoryNarrationService:
         language: str = "en",
         overwrite: bool = False,
     ) -> dict:
-        """Generate narration directly on stories.story_json.
+        """Generate narration for a custom story content row.
 
         This is separate from the route-facing generic-story method so other
         backend flows can narrate custom/generated stories without touching
-        generic_story_contents.
+        generic_story_contents. Story JSON is read from and written back to
+        story_contents for the requested language.
         """
         normalized_language = language.strip().lower()
         story = (
@@ -118,12 +119,27 @@ class StoryNarrationService:
         if story is None:
             raise NotFoundException("Story not found", "STORY_NOT_FOUND")
 
-        if not story.story_json:
-            logger.error("Story has no story_json: story_id=%s language=%s", story_id, normalized_language)
-            raise AppException("Story does not have story_json")
+        content = await self.stories.get_content_by_story_and_language(
+            story_id=story.id,
+            language=normalized_language,
+        )
+        if content is None and normalized_language == "en" and story.story_json:
+            content = await self.stories.upsert_content(
+                story,
+                language=normalized_language,
+                story_json=story.story_json,
+            )
+
+        if content is None:
+            logger.error("Story content not found: story_id=%s language=%s", story_id, normalized_language)
+            raise NotFoundException("Story content not found", "STORY_CONTENT_NOT_FOUND")
+
+        if not content.story_json:
+            logger.error("Story content has no story_json: story_id=%s language=%s", story_id, normalized_language)
+            raise AppException("Story content does not have story_json")
 
         try:
-            story_json = deepcopy(story.story_json)
+            story_json = deepcopy(content.story_json)
             await self._generate_story_json_narration(
                 story_json,
                 story_id=story_id,
@@ -132,11 +148,15 @@ class StoryNarrationService:
                 source="story",
             )
 
-            story.story_json = story_json
-            updated_story = await self.stories.update_story_json(story)
+            content.story_json = story_json
+            updated_content = await self.stories.update_content(content)
 
-            logger.info("Story table narration generation complete: story_id=%s language=%s", story_id, normalized_language)
-            return updated_story.story_json
+            if normalized_language == "en":
+                story.story_json = story_json
+                await self.stories.update_story_json(story)
+
+            logger.info("Story content narration generation complete: story_id=%s language=%s", story_id, normalized_language)
+            return updated_content.story_json
 
         except NotFoundException:
             raise
@@ -156,6 +176,10 @@ class StoryNarrationService:
         source: str,
     ) -> None:
         pages = story_json.get("pages", [])
+        moral = story_json.get("moral") if isinstance(story_json.get("moral"), dict) else {}
+        default_speech_narration = (
+            moral.get("speech_narration", {}) if isinstance(moral.get("speech_narration"), dict) else {}
+        )
 
         if not pages:
             logger.warning("Story JSON has no pages: source=%s story_id=%s language=%s", source, story_id, language)
@@ -187,6 +211,7 @@ class StoryNarrationService:
                 page,
                 story_id=story_id,
                 language=language,
+                default_speech_narration=default_speech_narration,
             )
             pages[i] = enriched_page
             logger.info(
@@ -198,14 +223,21 @@ class StoryNarrationService:
                 enriched_page.get("duration"),
             )
 
-    async def _generate_page_narration(self, page_dict: dict, *, story_id: UUID, language: str) -> dict:
+    async def _generate_page_narration(
+        self,
+        page_dict: dict,
+        *,
+        story_id: UUID,
+        language: str,
+        default_speech_narration: dict | None = None,
+    ) -> dict:
         page_number = page_dict.get("page_number", 1)
         text = page_dict.get("text", "").strip()
 
         if not text:
             raise ValueError(f"Page text is empty for page {page_number}")
 
-        speech_narration = page_dict.get("speech_narration", {})
+        speech_narration = page_dict.get("speech_narration") or default_speech_narration or {}
         pace = speech_narration.get("pace", "medium")
         voice_style = speech_narration.get("voice_style", "storybook narrator")
         tone = speech_narration.get("tone", "warm, magical, gentle")
@@ -235,6 +267,10 @@ class StoryNarrationService:
             enriched_page = self._remove_page_fields(page_dict)
             enriched_page.pop("duration", None)
             enriched_page.pop("word_timestamps", None)
+            enriched_page["tts_prompt"] = tts_prompt
+            enriched_page["tts_skipped"] = True
+            enriched_page["tts_model"] = settings.GOOGLE_TTS_MODEL
+            enriched_page["tts_voice"] = settings.GOOGLE_TTS_VOICE
             logger.info("Skipped Gemini TTS call: story_id=%s language=%s page=%s", story_id, language, page_number)
             return enriched_page
 
@@ -250,6 +286,11 @@ class StoryNarrationService:
         word_timestamps = generate_word_timestamps(text, duration)
 
         enriched_page = self._remove_page_fields(page_dict)
+        enriched_page["tts_prompt"] = tts_prompt
+        enriched_page["tts_skipped"] = False
+        enriched_page["tts_model"] = settings.GOOGLE_TTS_MODEL
+        enriched_page["tts_voice"] = settings.GOOGLE_TTS_VOICE
+        enriched_page["audio_url"] = self._audio_url(story_id, language, page_number)
         enriched_page["duration"] = round(duration, 2)
         enriched_page["word_timestamps"] = word_timestamps
 
@@ -281,3 +322,7 @@ class StoryNarrationService:
         except IOError:
             logger.exception("Failed to save audio file: %s", file_path)
             raise
+
+    @staticmethod
+    def _audio_url(story_id: UUID, language: str, page_number: int) -> str:
+        return f"/audio/{story_id}/{language}/page_{page_number}.wav"

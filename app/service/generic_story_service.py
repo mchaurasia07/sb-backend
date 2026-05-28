@@ -1,4 +1,3 @@
-from typing import Any
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +10,7 @@ from app.model.response.generic_story import (
     GenericStoryListResponse,
     GenericStoryResponse,
 )
+from app.model.response.story_content import StoryContentResponse
 from app.repository.child_book_repository import ChildBookRepository
 from app.repository.generic_story_repository import GenericStoryRepository
 
@@ -59,14 +59,20 @@ class GenericStoryService:
         self,
         generic_story_id: UUID,
         language: str = DEFAULT_GENERIC_STORY_LANGUAGE,
-    ) -> dict[str, Any]:
+    ) -> StoryContentResponse:
+        normalized_language = language.strip().lower()
         content = await self.generic_stories.get_content_by_story_and_language(
             generic_story_id=generic_story_id,
-            language=language,
+            language=normalized_language,
         )
         if content is None:
             raise NotFoundException("Generic story content not found", "GENERIC_STORY_CONTENT_NOT_FOUND")
-        return content.story_json
+        return StoryContentResponse(
+            story_id=generic_story_id,
+            story_type="generic",
+            language=str(content.language),
+            story_json=content.story_json,
+        )
 
     async def update(
         self,

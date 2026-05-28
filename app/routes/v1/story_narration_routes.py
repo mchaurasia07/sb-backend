@@ -28,7 +28,7 @@ async def generate_story_narration(
     overwrite: bool = False,
     generic_story: bool = Query(
         True,
-        description="If true, narrate generic_story_contents.story_json. If false, narrate stories.story_json.",
+        description="If true, narrate generic_story_contents.story_json. If false, narrate story_contents.story_json.",
     ),
     language: str = Query("en", min_length=2, max_length=16),
     current_user: User = Depends(get_current_user),
@@ -39,13 +39,13 @@ async def generate_story_narration(
 
     With generic_story=true, reads generic_story_contents.story_json for the
     requested story_id and language. With generic_story=false, reads
-    stories.story_json for the authenticated user's story row.
+    story_contents.story_json for the authenticated user's story row.
 
     Args:
         story_id: UUID of story to generate narration for
         overwrite: If true, regenerate audio even if it already exists
-        generic_story: If true use generic_story_contents, otherwise use stories
-        language: Language code of generic_story_contents row to narrate
+        generic_story: If true use generic_story_contents, otherwise use story_contents
+        language: Language code of the content row to narrate
         current_user: Authenticated user (dependency)
         session: Database session (dependency)
 
@@ -97,7 +97,7 @@ async def generate_story_narration(
         )
 
         service = StoryNarrationService(session)
-        narration_language = language if generic_story else "en"
+        narration_language = language.strip().lower()
 
         if generic_story:
             story_json = await service.generate_generic_story_narration(

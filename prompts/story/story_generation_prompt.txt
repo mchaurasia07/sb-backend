@@ -16,15 +16,40 @@ Use the `story_plan_json` provided in the user prompt as your absolute guide.
 # OUTPUT FORMAT (STRICT JSON ONLY)
 {
   "title": "string",
+  "theme": "string (the story theme or moral theme)",
+  "art_style": "string",
   "summary": "string (copied from plan)",
-  "moral_theme": "string (copied from plan)",
   "pages": [
     {
       "page_number": 1,
+      "speech_narration": {
+        "tone": "string",
+        "pace": "slow | medium-slow | medium | fast",
+        "emotion": "string",
+        "voice_style": "string"
+      },
       "text": "string"
     }
-  ]
+  ],
+  "moral": {
+    "speech_narration": {
+      "tone": "string",
+      "pace": "slow | medium-slow | medium | fast",
+      "emotion": "string",
+      "voice_style": "string"
+    },
+    "text": "string"
+  }
 }
+
+STRICT SCHEMA RULES:
+- Return exactly these top-level keys: title, theme, art_style, summary, pages, moral.
+- Do not return source_inputs, moral_theme, final_page_count, age_band, setting, characters, image prompts, or planning fields in story output.
+- Every page must contain exactly page_number, speech_narration, and text.
+- Every page.speech_narration must be complete with tone, pace, emotion, and voice_style.
+- Keep page.speech_narration consistent with the mood of that specific page.
+- `moral.text` must contain the moral of the story as a child-friendly sentence.
+- `moral.speech_narration` must describe the narration style to use for audio generation.
 
 # LINGUISTIC RULES BY AGE BAND
 Use the `age_band` from the plan to apply these specific constraints:

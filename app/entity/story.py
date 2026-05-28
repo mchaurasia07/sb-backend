@@ -1,8 +1,7 @@
-from datetime import datetime
 from enum import Enum
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, DateTime, Enum as SAEnum, ForeignKey, Index, JSON, String, Text, Uuid
+from sqlalchemy import Enum as SAEnum, ForeignKey, Index, JSON, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -93,3 +92,29 @@ class Story(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         cascade="all, delete-orphan",
         order_by="StoryPage.page_number",
     )
+    contents = relationship(
+        "StoryContent",
+        back_populates="story",
+        cascade="all, delete-orphan",
+    )
+
+
+class StoryContent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Language-specific story JSON for a custom/generated story."""
+
+    __tablename__ = "story_contents"
+    __table_args__ = (
+        UniqueConstraint("story_id", "language", name="uq_story_contents_story_language"),
+        Index("ix_story_contents_story_id", "story_id"),
+        Index("ix_story_contents_language", "language"),
+    )
+
+    story_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("stories.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    language: Mapped[str] = mapped_column(String(16), nullable=False)
+    story_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+
+    story = relationship("Story", back_populates="contents", foreign_keys=[story_id])

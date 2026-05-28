@@ -17,6 +17,7 @@ from app.entity.story_step import StoryStepName, StepStatus
 from app.model.request.story import StoryGenerationRequest
 from app.model.response.common import PaginatedResponse
 from app.model.response.story import StoryResponse, StoryPageResponse, StoryStepResponse
+from app.model.response.story_content import StoryContentResponse
 from app.repository.child_repository import ChildRepository
 from app.repository.story_repository import StoryRepository
 from app.repository.story_step_repository import StoryStepRepository
@@ -29,6 +30,8 @@ from app.service.image_plan_validator import ImagePlanValidator
 from app.utils.prompt_loader import load_prompt, render_prompt
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_STORY_LANGUAGE = "en"
 
 
 def _repair_json(text: str) -> str:
@@ -97,6 +100,85 @@ def _truncate(value: str | None, max_length: int) -> str | None:
     if value is None:
         return None
     return value[:max_length]
+
+
+def _story_moral_text(story_json: dict[str, Any]) -> str | None:
+    moral = story_json.get("moral")
+    if isinstance(moral, dict):
+        return _first_non_empty(moral.get("text"))
+    return _first_non_empty(moral, story_json.get("moral_theme"))
+
+
+def _normalize_speech_narration(value: Any, fallback: dict[str, str] | None = None) -> dict[str, str]:
+    data = value if isinstance(value, dict) else {}
+    fallback = fallback or {}
+    return {
+        "tone": _first_non_empty(data.get("tone"), fallback.get("tone"), "warm, magical, gentle"),
+        "pace": _first_non_empty(data.get("pace"), fallback.get("pace"), "medium"),
+        "emotion": _first_non_empty(data.get("emotion"), fallback.get("emotion"), "wonder"),
+        "voice_style": _first_non_empty(data.get("voice_style"), fallback.get("voice_style"), "storybook narrator"),
+    }
+
+
+def _normalize_story_output(raw_story_json: dict[str, Any], plan: dict[str, Any], story: Story) -> dict[str, Any]:
+    """Coerce LLM story output into the canonical story_json contract."""
+    source_inputs = plan.get("source_inputs") or _story_source_inputs(story)
+    raw_moral = raw_story_json.get("moral")
+    raw_speech_narration = raw_moral.get("speech_narration") if isinstance(raw_moral, dict) else None
+    raw_moral_text = raw_moral.get("text") if isinstance(raw_moral, dict) else raw_moral
+
+    moral_speech_narration = _normalize_speech_narration(
+        raw_speech_narration,
+        {
+            "tone": _first_non_empty(plan.get("tone"), "warm, magical, gentle"),
+            "pace": "medium",
+            "emotion": "wonder",
+            "voice_style": "storybook narrator",
+        },
+    )
+
+    pages = []
+    for idx, page in enumerate(raw_story_json.get("pages") or []):
+        if not isinstance(page, dict):
+            continue
+        text = _first_non_empty(page.get("text"), page.get("narration_sample"))
+        if not text:
+            continue
+        pages.append(
+            {
+                "page_number": len(pages) + 1,
+                "speech_narration": _normalize_speech_narration(
+                    page.get("speech_narration"),
+                    moral_speech_narration,
+                ),
+                "text": text,
+            }
+        )
+
+    if not pages:
+        raise AppException("Story generation returned no valid pages", code="INVALID_STORY_JSON")
+
+    return {
+        "title": _first_non_empty(raw_story_json.get("title"), plan.get("title"), "Untitled"),
+        "theme": _first_non_empty(
+            raw_story_json.get("theme"),
+            plan.get("moral_theme"),
+            source_inputs.get("category") if isinstance(source_inputs, dict) else None,
+            story.category,
+            "adventure",
+        ),
+        "art_style": _first_non_empty(
+            raw_story_json.get("art_style"),
+            plan.get("global_visual_style"),
+            "",
+        ) or "",
+        "summary": _first_non_empty(raw_story_json.get("summary"), plan.get("summary")) or "",
+        "pages": pages,
+        "moral": {
+            "speech_narration": moral_speech_narration,
+            "text": _first_non_empty(raw_moral_text, raw_story_json.get("moral_theme"), plan.get("moral_theme")) or "",
+        },
+    }
 
 
 # Testing flags helper
@@ -271,6 +353,11 @@ class StoryService:
             story.story_plan_json = story_plan
             story.story_json = story_json
             story.image_plan_json = image_plan
+            await self.stories.upsert_content(
+                story,
+                language=DEFAULT_STORY_LANGUAGE,
+                story_json=story_json,
+            )
             await self.stories.update(story)
             await self.session.commit()
 
@@ -301,8 +388,7 @@ class StoryService:
         )
         story.moral = _truncate(
             _first_non_empty(
-                story_json.get("moral"),
-                story_json.get("moral_theme"),
+                _story_moral_text(story_json),
                 story_plan.get("moral_theme"),
                 story.moral,
             ),
@@ -578,15 +664,11 @@ class StoryService:
             )
 
             try:
-                story_json = json.loads(result.text)
+                raw_story_json = json.loads(result.text)
             except json.JSONDecodeError as e:
                 raise AppException(f"Invalid JSON from story generation: {str(e)}", code="INVALID_LLM_JSON")
 
-            # Extract metadata from plan
-            story_json["title"] = plan.get("title", "Untitled")
-            story_json["moral"] = plan.get("moral_theme", "")
-            story_json["summary"] = plan.get("summary", "")
-            story_json["source_inputs"] = plan.get("source_inputs", _story_source_inputs(story))
+            story_json = _normalize_story_output(raw_story_json, plan, story)
 
             step.response = story_json
             step.status = StepStatus.COMPLETED
@@ -989,7 +1071,7 @@ class StoryService:
         compact_story_json = {
             "title": story_json.get("title"),
             "summary": story_json.get("summary"),
-            "moral_theme": story_json.get("moral_theme") or story_json.get("moral"),
+            "moral_theme": _story_moral_text(story_json),
             "pages": [
                 {
                     "page_number": page.get("page_number"),
@@ -1213,6 +1295,40 @@ class StoryService:
             pages=pages,
             created_at=story.created_at,
             updated_at=story.updated_at,
+        )
+
+    async def get_story_content(
+        self,
+        user_id: UUID,
+        story_id: UUID,
+        language: str = DEFAULT_STORY_LANGUAGE,
+    ) -> StoryContentResponse:
+        """Retrieve a custom story's language-specific story JSON."""
+        normalized_language = language.strip().lower()
+        story = await self.stories.get_for_user(user_id, story_id)
+        if story is None:
+            raise NotFoundException("Story not found", "STORY_NOT_FOUND")
+
+        content = await self.stories.get_content_by_story_and_language(
+            story_id=story.id,
+            language=normalized_language,
+        )
+
+        if content is None and normalized_language == DEFAULT_STORY_LANGUAGE and story.story_json:
+            content = await self.stories.upsert_content(
+                story,
+                language=normalized_language,
+                story_json=story.story_json,
+            )
+
+        if content is None:
+            raise NotFoundException("Story content not found", "STORY_CONTENT_NOT_FOUND")
+
+        return StoryContentResponse(
+            story_id=story.id,
+            story_type="custom",
+            language=str(content.language),
+            story_json=content.story_json,
         )
 
     async def list_stories(
