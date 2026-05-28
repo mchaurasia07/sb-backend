@@ -96,7 +96,7 @@ Advanced (8-12): Up to 20 words. Inner monologues and thematic depth. "Show, Don
 "pages": [
 {
 "page_number": number,
-"story_role": "introduction | setup | conflict | escalation | climax | resolution",
+"story_role": "introduction | setup | build | conflict | struggle | escalation | climax | resolution",
 "scene_description": "2-3 visual elements for the illustrator",
 "narration_sample": "Illustrative text at correct age level",
 "child_action": "Specific decision or action taken by the child",

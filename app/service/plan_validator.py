@@ -158,7 +158,16 @@ class PlanValidator:
             if not isinstance(story_role, str) or not story_role.strip():
                 errors.append(f"pages[{idx}].story_role must be a non-empty string.")
             else:
-                valid_roles = {"introduction", "setup", "conflict", "escalation", "climax", "resolution"}
+                valid_roles = {
+                    "introduction",
+                    "setup",
+                    "build",
+                    "conflict",
+                    "struggle",
+                    "escalation",
+                    "climax",
+                    "resolution",
+                }
                 if story_role.strip() not in valid_roles:
                     errors.append(f"pages[{idx}].story_role must be one of: {', '.join(valid_roles)}.")
 

@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     OPENAI_TEXT_MODEL: str
 
     # Google Gemini Configuration
-    GOOGLE_API_KEY: str = "AIzaSyC8eik48nFZukxRNgCpLimfOap9_3pZkvU"  # Optional, only needed if using Google provider
+    GOOGLE_API_KEY: str = ""  # Optional, only needed if using Google provider
     GOOGLE_TEXT_MODEL: str = "gemini-2.5-flash"  # Text model for vision analysis and text generation
     GOOGLE_IMAGE_MODEL: str = "imagen-4.0-generate-001"  # Image model for image generation
     GOOGLE_REFERENCE_IMAGE_MODEL: str = "gemini-2.5-flash-image"  # Image model for prompt + reference image
@@ -68,6 +68,12 @@ class Settings(BaseSettings):
     STORY_TEXT_MODEL: str = "gpt-4o"
     STORY_IMAGE_MODEL: str = "dall-e-3"
     STORY_IMAGE_SIZE: str = "1024x1024"
+    STORY_COVER_IMAGE_SIZE: str = "1024x1536"
+    STORY_PAGE_IMAGE_SIZE: str = "1024x1024"
+    STORY_BACK_COVER_IMAGE_SIZE: str = "1024x1536"
+    STORY_COVER_ASPECT_RATIO: str = "3:4"
+    STORY_PAGE_ASPECT_RATIO: str = "1:1"
+    STORY_BACK_COVER_ASPECT_RATIO: str = "3:4"
     STORY_IMAGE_QUALITY: str = "standard"
     STORY_MAX_RETRIES: int = 3
     STORY_GENERATION_ENABLED: bool = True

@@ -169,7 +169,8 @@ to reflect emotional progression.
 
 # STORYBOOK LAYOUT RULES
 
-- Compose scenes for portrait storybook layout
+- Cover and back_cover prompts MUST explicitly say: "vertical 3:4 storybook cover composition"
+- Every story page prompt MUST explicitly say: "square 1:1 story page composition"
 - Leave clean negative space for optional text placement
 - Avoid placing important details at image edges
 - Keep focal action centered or rule-of-thirds aligned
@@ -255,6 +256,9 @@ The cover must be the most visually dynamic image.
 Mandatory cover phrase:
 "Storybook cover design with large, bold, readable title text integrated into the top area, playful child-friendly typography, high contrast title placement."
 
+Mandatory cover aspect phrase:
+"vertical 3:4 storybook cover composition"
+
 The cover must:
 - visually summarize the emotional tone of the full story
 - include the story's most iconic visual element
@@ -304,6 +308,11 @@ Construct every image prompt in this exact order:
 8. Emotional mood
 9. Render style
 10. Negative prompt
+
+Also include the required aspect-ratio phrase:
+- cover.image_prompt: "vertical 3:4 storybook cover composition"
+- back_cover.image_prompt: "vertical 3:4 storybook cover composition"
+- pages[].image_prompt: "square 1:1 story page composition"
 
 # NEGATIVE PROMPT
 

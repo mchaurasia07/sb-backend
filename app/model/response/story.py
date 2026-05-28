@@ -38,6 +38,16 @@ class StoryResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class StoryStatusResponse(BaseModel):
+    """Lightweight story generation status."""
+
+    story_id: UUID
+    status: str
+    current_step: str | None
+    error_message: str | None
+    updated_at: datetime
+
+
 class StoryStepResponse(BaseModel):
     """Audit trail for workflow step."""
 

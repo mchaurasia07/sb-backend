@@ -28,6 +28,12 @@ to generate ONE final storybook illustration.
 ## Age Appearance Guidance
 {child_age_visual_guidance}
 
+## Image Type
+{page_type}
+
+## Target Aspect Ratio
+{target_aspect_ratio}
+
 ## Current Page Image Prompt
 {current_page_image_prompt}
 
@@ -192,7 +198,10 @@ The image should not be a raw photograph, but it must preserve the real child's 
 
 # STORYBOOK RULES
 
-- portrait storybook composition
+- Use the requested target aspect ratio exactly: {target_aspect_ratio}
+- For cover or back_cover images, compose as a vertical 3:4 storybook cover/back-cover image.
+- For story_page images, compose as a square 1:1 story page image.
+- Do not crop or letterbox the scene; fill the full frame naturally.
 - emotionally readable expressions
 - cinematic composition
 - clear focal point

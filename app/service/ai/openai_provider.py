@@ -438,6 +438,7 @@ Return a concise visual consistency description."""
                 "mode": "story_reference_image",
                 "size": kwargs.get("size", "1024x1024"),
                 "quality": kwargs.get("quality", "standard"),
+                "aspect_ratio": kwargs.get("aspect_ratio"),
                 "reference_mime_type": reference_image.mime_type,
                 "analysis_text": analysis_text,
                 "enhanced_prompt": enhanced_prompt,

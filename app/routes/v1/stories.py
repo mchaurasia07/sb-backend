@@ -9,7 +9,7 @@ from app.core.dependencies import get_current_user
 from app.entity.user import User
 from app.model.request.story import StoryGenerationRequest
 from app.model.response.common import ApiResponse, PaginatedResponse, success_response
-from app.model.response.story import StoryResponse, StoryStepResponse
+from app.model.response.story import StoryResponse, StoryStatusResponse, StoryStepResponse
 from app.service.story_service import StoryService, StoryGenerationFlags
 
 logger = logging.getLogger(__name__)
@@ -69,6 +69,18 @@ async def generate_story(
 
     logger.info(f"Story {story_response.id} generation started in background")
     return success_response(story_response, "Story generation started successfully")
+
+
+@router.get("/{story_id}/status", response_model=ApiResponse[StoryStatusResponse])
+async def get_story_status(
+    story_id: UUID,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[StoryStatusResponse]:
+    """Retrieve only the current generation status for a story."""
+    service = StoryService(session)
+    data = await service.get_story_status(current_user.id, story_id)
+    return success_response(data, "Story status retrieved successfully")
 
 
 @router.get("/{story_id}", response_model=ApiResponse[StoryResponse])

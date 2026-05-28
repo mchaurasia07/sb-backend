@@ -79,6 +79,25 @@ class GoogleProvider(AIProvider):
         self.client = genai.Client(api_key=api_key)
 
     @staticmethod
+    def _model_dump_safe(value: Any) -> Any:
+        if value is None:
+            return None
+        if hasattr(value, "model_dump"):
+            return value.model_dump()
+        return str(value)
+
+    @classmethod
+    def _text_response_debug(cls, response: types.GenerateContentResponse) -> dict[str, Any]:
+        candidate = response.candidates[0] if response.candidates else None
+        return {
+            "finish_reason": str(getattr(candidate, "finish_reason", None)) if candidate is not None else None,
+            "safety_ratings": cls._model_dump_safe(getattr(candidate, "safety_ratings", None))
+            if candidate is not None
+            else None,
+            "prompt_feedback": cls._model_dump_safe(getattr(response, "prompt_feedback", None)),
+        }
+
+    @staticmethod
     def _extract_image_from_content_response(response: types.GenerateContentResponse) -> tuple[bytes, str | None]:
         text_parts: list[str] = []
         for part in response.parts or []:
@@ -287,37 +306,46 @@ Format your response as a clear description list."""
             # Use unified generation method for standard text requests
             response_format = kwargs.get("response_format")
             response_mime_type = "application/json" if response_format == {"type": "json_object"} else None
+            max_attempts = int(kwargs.get("empty_response_retries", 2)) + 1
+            last_empty_message = "Empty response from Google API"
 
-            response = await self.client.aio.models.generate_content(
-                model=self.text_model,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    max_output_tokens=kwargs.get("max_tokens", 36000),
-                    temperature=kwargs.get("temperature", 0.7),
-                    response_mime_type=response_mime_type,
-                ),
-            )
+            for attempt in range(1, max_attempts + 1):
+                response = await self.client.aio.models.generate_content(
+                    model=self.text_model,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        max_output_tokens=kwargs.get("max_tokens", 36000),
+                        temperature=kwargs.get("temperature", 0.7),
+                        response_mime_type=response_mime_type,
+                    ),
+                )
 
-            if not response.text:
-                raise AppException("Empty response from Google API", code="EMPTY_RESPONSE")
+                debug = self._text_response_debug(response)
+                if response.text:
+                    usage_metadata = getattr(response, "usage_metadata", None)
+                    usage = usage_metadata.model_dump() if hasattr(usage_metadata, "model_dump") else None
 
-            finish_reason = None
-            if response.candidates:
-                finish_reason = getattr(response.candidates[0], "finish_reason", None)
+                    return TextGenerationResult(
+                        text=response.text,
+                        prompt_used=prompt,
+                        model=self.text_model,
+                        metadata={
+                            "provider": "google",
+                            "finish_reason": debug["finish_reason"],
+                            "usage": usage,
+                        },
+                    )
 
-            usage_metadata = getattr(response, "usage_metadata", None)
-            usage = usage_metadata.model_dump() if hasattr(usage_metadata, "model_dump") else None
+                last_empty_message = (
+                    "Empty response from Google API"
+                    f" (attempt={attempt}/{max_attempts}, finish_reason={debug['finish_reason']}, "
+                    f"prompt_feedback={debug['prompt_feedback']}, safety_ratings={debug['safety_ratings']})"
+                )
+                logger.warning(last_empty_message)
 
-            return TextGenerationResult(
-                text=response.text,
-                prompt_used=prompt,
-                model=self.text_model,
-                metadata={
-                    "provider": "google",
-                    "finish_reason": str(finish_reason) if finish_reason is not None else None,
-                    "usage": usage,
-                },
-            )
+            raise AppException(last_empty_message, code="EMPTY_RESPONSE")
+        except AppException:
+            raise
         except Exception as e:
             logger.error(f"Google text generation failed: {e}")
             raise AppException(f"Text generation failed: {str(e)}", code="GOOGLE_ERROR")
@@ -422,17 +450,58 @@ Format your response as a clear description list."""
                     )
                 )
 
-            response = await self.client.aio.models.generate_content(
-                model=model,
-                contents=contents,
-                config=types.GenerateContentConfig(
-                    response_modalities=["IMAGE", "TEXT"],
-                    image_config=types.ImageConfig(
-                        aspect_ratio=kwargs.get("aspect_ratio", "1:1"),
+            try:
+                response = await self.client.aio.models.generate_content(
+                    model=model,
+                    contents=contents,
+                    config=types.GenerateContentConfig(
+                        response_modalities=["IMAGE", "TEXT"],
+                        image_config=types.ImageConfig(
+                            aspect_ratio=kwargs.get("aspect_ratio", "1:1"),
+                        ),
                     ),
-                ),
-            )
-            image_bytes, response_text = self._extract_image_from_content_response(response)
+                )
+                image_bytes, response_text = self._extract_image_from_content_response(response)
+            except AppException as exc:
+                if exc.code != "EMPTY_RESPONSE":
+                    raise
+
+                logger.warning(
+                    "Google reference story image returned no image; retrying text-only image fallback: %s",
+                    exc.message,
+                )
+                fallback_prompt = (
+                    "Generate one polished, child-safe children's storybook illustration from the written "
+                    "scene instructions below. Use the written character reference details in the prompt for "
+                    "identity consistency. Do not depend on attached reference images for this fallback attempt. "
+                    "Keep the image warm, family-friendly, cleanly composed, and visually readable.\n\n"
+                    f"{prompt}"
+                )
+                fallback_result = await self.generate_image(
+                    fallback_prompt,
+                    model=kwargs.get("fallback_image_model") or kwargs.get("image_model") or self.image_model,
+                    aspect_ratio=kwargs.get("aspect_ratio", "1:1"),
+                    output_mime_type=kwargs.get("output_mime_type", "image/jpeg"),
+                )
+                fallback_metadata = {
+                    **(fallback_result.metadata or {}),
+                    "mode": "story_image_text_fallback",
+                    "provider": "google",
+                    "reference_generation_error": exc.message,
+                    "reference_model": model,
+                    "reference_mime_type": reference_image.mime_type,
+                    "consistency_reference_used": consistency_reference is not None,
+                    "consistency_reference_mime_type": (
+                        consistency_reference.mime_type if consistency_reference is not None else None
+                    ),
+                }
+                return ImageGenerationResult(
+                    image_bytes=fallback_result.image_bytes,
+                    prompt_used=fallback_result.prompt_used,
+                    model=fallback_result.model,
+                    revised_prompt=fallback_result.revised_prompt,
+                    metadata=fallback_metadata,
+                )
 
             return ImageGenerationResult(
                 image_bytes=image_bytes,

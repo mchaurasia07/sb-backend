@@ -1,4 +1,5 @@
 import base64
+from io import BytesIO
 import json
 import logging
 import re
@@ -8,6 +9,7 @@ from typing import Any
 from urllib.parse import unquote, urlparse
 from uuid import UUID
 
+from PIL import Image, UnidentifiedImageError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -16,7 +18,7 @@ from app.entity.story import Story, StoryStatus
 from app.entity.story_step import StoryStepName, StepStatus
 from app.model.request.story import StoryGenerationRequest
 from app.model.response.common import PaginatedResponse
-from app.model.response.story import StoryResponse, StoryPageResponse, StoryStepResponse
+from app.model.response.story import StoryResponse, StoryPageResponse, StoryStatusResponse, StoryStepResponse
 from app.model.response.story_content import StoryContentResponse
 from app.repository.child_repository import ChildRepository
 from app.repository.story_repository import StoryRepository
@@ -465,7 +467,7 @@ class StoryService:
             # Call LLM
             result = await self.ai_provider.generate_text(
                 prompt,
-                max_tokens=36000,
+                max_tokens=12000,
                 temperature=0.4,
                 response_format={"type": "json_object"},
             )
@@ -615,7 +617,7 @@ class StoryService:
 
         result = await self.ai_provider.generate_text(
             enhanced_prompt,
-            max_tokens=36000,
+            max_tokens=12000,
             temperature=0.4,
             response_format={"type": "json_object"},
         )
@@ -855,6 +857,8 @@ class StoryService:
                     character_consistency,
                     cover.get("image_prompt"),
                     character_context,
+                    page_type="cover",
+                    target_aspect_ratio=settings.STORY_COVER_ASPECT_RATIO,
                 )
                 cover_bytes = await self.ai_provider.create_story_image(
                     cover_prompt,
@@ -862,22 +866,29 @@ class StoryService:
                     consistency_reference_image_base64=character_image_base64,
                     child_age_label=character_context["child_age_label"],
                     child_age_visual_guidance=character_context["child_age_visual_guidance"],
-                    size=settings.STORY_IMAGE_SIZE,
+                    size=settings.STORY_COVER_IMAGE_SIZE,
                     quality=settings.STORY_IMAGE_QUALITY,
+                    aspect_ratio=settings.STORY_COVER_ASPECT_RATIO,
                 )
                 generated_image_prompts.append(
                     {
                         "page_type": "cover",
                         "page_number": 0,
+                        "target_aspect_ratio": settings.STORY_COVER_ASPECT_RATIO,
+                        "image_size": settings.STORY_COVER_IMAGE_SIZE,
                         "source_image_prompt": cover.get("image_prompt"),
                         "rendered_prompt": cover_prompt,
                         "provider_prompt_used": cover_bytes.prompt_used,
                         "used_character_reference": True,
                     }
                 )
+                cover_image_bytes = self._crop_image_bytes_to_aspect_ratio(
+                    cover_bytes.image_bytes,
+                    settings.STORY_COVER_ASPECT_RATIO,
+                )
                 cover_url = await image_storage_service.save_story_image(
                     story.id,
-                    cover_bytes.image_bytes,
+                    cover_image_bytes,
                     "cover.png",
                     "",  # base_url will be added by storage service
                 )
@@ -900,6 +911,8 @@ class StoryService:
                         character_consistency,
                         img_page.get("image_prompt"),
                         character_context,
+                        page_type="story_page",
+                        target_aspect_ratio=settings.STORY_PAGE_ASPECT_RATIO,
                     )
                     image_bytes = await self.ai_provider.create_story_image(
                         page_prompt,
@@ -907,22 +920,29 @@ class StoryService:
                         consistency_reference_image_base64=character_image_base64,
                         child_age_label=character_context["child_age_label"],
                         child_age_visual_guidance=character_context["child_age_visual_guidance"],
-                        size=settings.STORY_IMAGE_SIZE,
+                        size=settings.STORY_PAGE_IMAGE_SIZE,
                         quality=settings.STORY_IMAGE_QUALITY,
+                        aspect_ratio=settings.STORY_PAGE_ASPECT_RATIO,
                     )
                     generated_image_prompts.append(
                         {
                             "page_type": "page",
                             "page_number": page_num,
+                            "target_aspect_ratio": settings.STORY_PAGE_ASPECT_RATIO,
+                            "image_size": settings.STORY_PAGE_IMAGE_SIZE,
                             "source_image_prompt": img_page.get("image_prompt"),
                             "rendered_prompt": page_prompt,
                             "provider_prompt_used": image_bytes.prompt_used,
                             "used_character_reference": True,
                         }
                     )
+                    page_image_bytes = self._crop_image_bytes_to_aspect_ratio(
+                        image_bytes.image_bytes,
+                        settings.STORY_PAGE_ASPECT_RATIO,
+                    )
                     image_url = await image_storage_service.save_story_image(
                         story.id,
-                        image_bytes.image_bytes,
+                        page_image_bytes,
                         f"page_{page_num}.png",
                         "",
                     )
@@ -947,6 +967,8 @@ class StoryService:
                     character_consistency,
                     back_cover.get("image_prompt"),
                     character_context,
+                    page_type="back_cover",
+                    target_aspect_ratio=settings.STORY_BACK_COVER_ASPECT_RATIO,
                 )
                 back_cover_bytes = await self.ai_provider.create_story_image(
                     back_cover_prompt,
@@ -954,22 +976,29 @@ class StoryService:
                     consistency_reference_image_base64=character_image_base64,
                     child_age_label=character_context["child_age_label"],
                     child_age_visual_guidance=character_context["child_age_visual_guidance"],
-                    size=settings.STORY_IMAGE_SIZE,
+                    size=settings.STORY_BACK_COVER_IMAGE_SIZE,
                     quality=settings.STORY_IMAGE_QUALITY,
+                    aspect_ratio=settings.STORY_BACK_COVER_ASPECT_RATIO,
                 )
                 generated_image_prompts.append(
                     {
                         "page_type": "back_cover",
                         "page_number": len(pages) + 1,
+                        "target_aspect_ratio": settings.STORY_BACK_COVER_ASPECT_RATIO,
+                        "image_size": settings.STORY_BACK_COVER_IMAGE_SIZE,
                         "source_image_prompt": back_cover.get("image_prompt"),
                         "rendered_prompt": back_cover_prompt,
                         "provider_prompt_used": back_cover_bytes.prompt_used,
                         "used_character_reference": True,
                     }
                 )
+                back_cover_image_bytes = self._crop_image_bytes_to_aspect_ratio(
+                    back_cover_bytes.image_bytes,
+                    settings.STORY_BACK_COVER_ASPECT_RATIO,
+                )
                 back_cover_url = await image_storage_service.save_story_image(
                     story.id,
-                    back_cover_bytes.image_bytes,
+                    back_cover_image_bytes,
                     "back_cover.png",
                     "",
                 )
@@ -1010,11 +1039,51 @@ class StoryService:
             raise
 
     @staticmethod
+    def _crop_image_bytes_to_aspect_ratio(image_bytes: bytes, aspect_ratio: str) -> bytes:
+        """Center-crop generated image bytes to an exact width:height ratio."""
+        try:
+            numerator_text, denominator_text = aspect_ratio.split(":", 1)
+            numerator = int(numerator_text)
+            denominator = int(denominator_text)
+        except (AttributeError, ValueError) as exc:
+            raise AppException(
+                f"Invalid story image aspect ratio '{aspect_ratio}'",
+                code="INVALID_IMAGE_ASPECT_RATIO",
+            ) from exc
+
+        if numerator <= 0 or denominator <= 0:
+            raise AppException(
+                f"Invalid story image aspect ratio '{aspect_ratio}'",
+                code="INVALID_IMAGE_ASPECT_RATIO",
+            )
+
+        try:
+            with Image.open(BytesIO(image_bytes)) as image:
+                image.load()
+                width, height = image.size
+                scale = min(width // numerator, height // denominator)
+                if scale <= 0:
+                    return image_bytes
+
+                target_width = scale * numerator
+                target_height = scale * denominator
+                left = (width - target_width) // 2
+                top = (height - target_height) // 2
+                cropped = image.crop((left, top, left + target_width, top + target_height))
+                output = BytesIO()
+                cropped.save(output, format="PNG")
+                return output.getvalue()
+        except UnidentifiedImageError as exc:
+            raise AppException("Generated story image is not a valid image", code="INVALID_GENERATED_IMAGE") from exc
+
+    @staticmethod
     def _render_story_image_prompt(
         template: str,
         character_consistency: dict[str, Any],
         image_prompt: str,
         character_context: dict[str, str],
+        page_type: str,
+        target_aspect_ratio: str,
     ) -> str:
         """Render the final story image prompt with consistency context."""
         return render_prompt(
@@ -1024,6 +1093,8 @@ class StoryService:
                 "character_reference_metadata": character_context["character_description"],
                 "child_age_label": character_context["child_age_label"],
                 "child_age_visual_guidance": character_context["child_age_visual_guidance"],
+                "page_type": page_type,
+                "target_aspect_ratio": target_aspect_ratio,
                 "current_page_image_prompt": image_prompt,
             },
         )
@@ -1295,6 +1366,21 @@ class StoryService:
             pages=pages,
             created_at=story.created_at,
             updated_at=story.updated_at,
+        )
+
+    async def get_story_status(self, user_id: UUID, story_id: UUID) -> StoryStatusResponse:
+        """Retrieve lightweight status fields from the stories table."""
+        row = await self.stories.get_status_for_user(user_id, story_id)
+        if row is None:
+            raise NotFoundException("Story not found")
+
+        status = row.status.value if hasattr(row.status, "value") else str(row.status)
+        return StoryStatusResponse(
+            story_id=row.id,
+            status=status,
+            current_step=row.current_step,
+            error_message=row.error_message,
+            updated_at=row.updated_at,
         )
 
     async def get_story_content(

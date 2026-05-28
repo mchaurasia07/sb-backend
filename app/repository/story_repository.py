@@ -56,6 +56,19 @@ class StoryRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_status_for_user(self, user_id: UUID, story_id: UUID):
+        """Retrieve only story status fields for a specific user."""
+        result = await self.session.execute(
+            select(
+                Story.id,
+                Story.status,
+                Story.current_step,
+                Story.error_message,
+                Story.updated_at,
+            ).where(Story.id == story_id, Story.user_id == user_id)
+        )
+        return result.one_or_none()
+
     async def get_content_by_story_and_language(
         self,
         *,
