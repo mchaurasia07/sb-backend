@@ -7,57 +7,62 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """Environment-driven application settings."""
 
-    APP_NAME: str = "SB Backend"
-    ENVIRONMENT: str = "local"
-    DEBUG: bool = False
-    API_V1_PREFIX: str = "/api/v1"
+    APP_NAME: str
+    ENVIRONMENT: str
+    DEBUG: bool = Field(validation_alias="APP_DEBUG")
+    API_V1_PREFIX: str
 
     DATABASE_URL: str
 
     JWT_SECRET_KEY: str = Field(min_length=32)
-    JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 525600
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 365
+    JWT_ALGORITHM: str
+    ACCESS_TOKEN_EXPIRE_MINUTES: int
+    REFRESH_TOKEN_EXPIRE_DAYS: int
 
-    BCRYPT_ROUNDS: int = 12
-    OTP_EXPIRE_MINUTES: int = 10
-    OTP_LENGTH: int = 6
-    MAX_LOGIN_ATTEMPTS: int = 5
-    ACCOUNT_LOCK_MINUTES: int = 15
+    BCRYPT_ROUNDS: int
+    OTP_EXPIRE_MINUTES: int
+    OTP_LENGTH: int
+    MAX_LOGIN_ATTEMPTS: int
+    ACCOUNT_LOCK_MINUTES: int
 
     GOOGLE_CLIENT_ID: str
-    BACKEND_CORS_ORIGINS: str = "http://localhost:3000"
-    RATE_LIMIT_DEFAULT: str = "100/minute"
+    BACKEND_CORS_ORIGINS: str
+    RATE_LIMIT_DEFAULT: str
 
-    SMTP_HOST: str = "smtp.gmail.com"
-    SMTP_PORT: int = 587
-    SMTP_USERNAME: str = ""
-    SMTP_PASSWORD: str = ""
-    SMTP_FROM_EMAIL: str = ""
-    SMTP_FROM_NAME: str = "Storybook"
-    SMTP_USE_TLS: bool = True
-    SMTP_TIMEOUT_SECONDS: float = 10.0
+    SMTP_HOST: str
+    SMTP_PORT: int
+    SMTP_USERNAME: str
+    SMTP_PASSWORD: str
+    SMTP_FROM_EMAIL: str
+    SMTP_FROM_NAME: str
+    SMTP_USE_TLS: bool
+    SMTP_TIMEOUT_SECONDS: float
 
-    MEDIA_ROOT: str = "photo"
-    MEDIA_URL_PREFIX: str = "/photo"
-    IMAGE_MAX_UPLOAD_BYTES: int = 5 * 1024 * 1024
+    # Storage Configuration - supports both relative and absolute paths
+    MEDIA_ROOT: str = Field(description="Absolute or relative path for image storage")
+    MEDIA_URL_PREFIX: str
+    IMAGE_MAX_UPLOAD_BYTES: int
+
+    # Audio Storage Configuration
+    AUDIO_ROOT: str = Field(description="Absolute or relative path for audio storage")
+    AUDIO_URL_PREFIX: str
 
     # AI Provider Selection
-    AI_PROVIDER: str = "openai"  # Options: "openai", "google"
+    AI_PROVIDER: str  # Options: "openai", "google"
 
     # OpenAI Configuration
-    OPENAI_API_KEY: str = Field(min_length=1)
+    OPENAI_API_KEY: str
     OPENAI_IMAGE_MODEL: str
     OPENAI_TEXT_MODEL: str
 
     # Google Gemini Configuration
-    GOOGLE_API_KEY: str = ""  # Optional, only needed if using Google provider
-    GOOGLE_TEXT_MODEL: str = "gemini-2.5-flash"  # Text model for vision analysis and text generation
-    GOOGLE_IMAGE_MODEL: str = "imagen-4.0-generate-001"  # Image model for image generation
-    GOOGLE_REFERENCE_IMAGE_MODEL: str = "gemini-2.5-flash-image"  # Image model for prompt + reference image
-    GOOGLE_TTS_MODEL: str = "gemini-3.1-flash-tts-preview"
-    GOOGLE_TTS_VOICE: str = "Kore"
-    GOOGLE_TTS_SKIP_CALL: bool = False
+    GOOGLE_API_KEY: str  # Optional, only needed if using Google provider
+    GOOGLE_TEXT_MODEL: str  # Text model for vision analysis and text generation
+    GOOGLE_IMAGE_MODEL: str  # Image model for image generation
+    GOOGLE_REFERENCE_IMAGE_MODEL: str  # Image model for prompt + reference image
+    GOOGLE_TTS_MODEL: str
+    GOOGLE_TTS_VOICE: str
+    GOOGLE_TTS_SKIP_CALL: bool
 
     # Character Generation Settings
     CHARACTER_IMAGE_SIZE: str
@@ -65,19 +70,19 @@ class Settings(BaseSettings):
     CHARACTER_GENERATION_ENABLED: bool
 
     # Story Generation Settings
-    STORY_TEXT_MODEL: str = "gpt-4o"
-    STORY_IMAGE_MODEL: str = "dall-e-3"
-    STORY_IMAGE_SIZE: str = "1024x1024"
-    STORY_COVER_IMAGE_SIZE: str = "1024x1536"
-    STORY_PAGE_IMAGE_SIZE: str = "1024x1024"
-    STORY_BACK_COVER_IMAGE_SIZE: str = "1024x1536"
-    STORY_COVER_ASPECT_RATIO: str = "3:4"
-    STORY_PAGE_ASPECT_RATIO: str = "1:1"
-    STORY_BACK_COVER_ASPECT_RATIO: str = "3:4"
-    STORY_IMAGE_QUALITY: str = "standard"
-    STORY_MAX_RETRIES: int = 3
-    STORY_GENERATION_ENABLED: bool = True
-    STORY_MOCK_LLM_RESPONSES: bool = False
+    STORY_TEXT_MODEL: str
+    STORY_IMAGE_MODEL: str
+    STORY_IMAGE_SIZE: str
+    STORY_COVER_IMAGE_SIZE: str
+    STORY_PAGE_IMAGE_SIZE: str
+    STORY_BACK_COVER_IMAGE_SIZE: str
+    STORY_COVER_ASPECT_RATIO: str
+    STORY_PAGE_ASPECT_RATIO: str
+    STORY_BACK_COVER_ASPECT_RATIO: str
+    STORY_IMAGE_QUALITY: str
+    STORY_MAX_RETRIES: int
+    STORY_GENERATION_ENABLED: bool
+    STORY_MOCK_LLM_RESPONSES: bool
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

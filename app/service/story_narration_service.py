@@ -33,7 +33,7 @@ class StoryNarrationService:
         self.generic_stories = GenericStoryRepository(session)
         self.stories = StoryRepository(session)
         self.tts_provider = GoogleTTSProvider()
-        self.audio_root = Path("audio")
+        self.audio_root = Path(settings.AUDIO_ROOT)
 
     async def generate_narration(
         self,
@@ -343,4 +343,4 @@ class StoryNarrationService:
 
     @staticmethod
     def _audio_url(story_id: UUID, language: str, page_number: int) -> str:
-        return f"/audio/{story_id}/{language}/page_{page_number}.wav"
+        return f"{settings.AUDIO_URL_PREFIX}/{story_id}/{language}/page_{page_number}.wav"
