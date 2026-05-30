@@ -107,7 +107,15 @@ class StoryCatalogService:
     @staticmethod
     def _custom_to_catalog(story, *, available_languages: list[str]) -> StoryCatalogResponse:
         pages = list(getattr(story, "pages", []) or [])
-        story_json = story.story_json if isinstance(story.story_json, dict) else {}
+        default_content = next(
+            (
+                content
+                for content in (getattr(story, "contents", []) or [])
+                if str(content.language).lower() == "en"
+            ),
+            None,
+        )
+        story_json = default_content.story_json if default_content and isinstance(default_content.story_json, dict) else {}
         json_pages = story_json.get("pages") if isinstance(story_json.get("pages"), list) else []
         return StoryCatalogResponse(
             id=story.id,

@@ -15,6 +15,10 @@ class ChildBookResponse(BaseModel):
     status: str
     last_page_read: int
     last_page_read_time: datetime | None
+    reading_started_at: datetime | None
+    reading_completed_at: datetime | None
+    reading_started_count: int
+    reading_completed_count: int
     created_at: datetime
     updated_at: datetime
 

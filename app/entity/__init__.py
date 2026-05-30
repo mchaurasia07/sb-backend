@@ -1,3 +1,4 @@
+from app.entity.child_activity import ChildActivity
 from app.entity.child_book import ChildBook
 from app.entity.child_profile import ChildProfile
 from app.entity.generic_story import GenericStory, GenericStoryContent, GenericStoryLanguage
@@ -10,6 +11,7 @@ from app.entity.user import AuthProvider, User
 
 __all__ = [
     "AuthProvider",
+    "ChildActivity",
     "ChildBook",
     "ChildProfile",
     "GenericStory",

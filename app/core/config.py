@@ -1,7 +1,7 @@
 from functools import cached_property
 
 from pydantic import AnyUrl, Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -85,6 +85,17 @@ class Settings(BaseSettings):
     STORY_MOCK_LLM_RESPONSES: bool
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        return dotenv_settings, env_settings, init_settings, file_secret_settings
 
     @field_validator("DATABASE_URL")
     @classmethod

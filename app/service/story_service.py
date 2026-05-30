@@ -29,6 +29,7 @@ from app.service.ai.factory import get_ai_provider
 from app.service.image_storage_service import image_storage_service
 from app.service.plan_validator import PlanValidator
 from app.service.image_plan_validator import ImagePlanValidator
+from app.service.story_narration_service import StoryNarrationService
 from app.utils.prompt_loader import load_prompt, render_prompt
 
 logger = logging.getLogger(__name__)
@@ -290,7 +291,7 @@ class StoryService:
         story_id: UUID,
         flags: StoryGenerationFlags = None,
     ) -> Story:
-        """Execute the 6-step story generation workflow.
+        """Execute the story generation workflow.
 
         This method is called by a background task with a fresh database session.
         """
@@ -355,12 +356,17 @@ class StoryService:
                 logger.info(f"Story {story_id}: Skipping image generation (test mode)")
                 await self._create_pages_without_images(story, story_json)
 
+            # Step 7: Narration Generation
+            story.current_step = StoryStepName.NARRATION_GENERATION.value
+            await self.stories.update(story)
+            logger.info(f"Story {story_id}: Starting step 7 - Narration Generation")
+            story_json = await self._step_generate_narration(story, story_json)
+
             # Mark story as completed
             story.status = StoryStatus.COMPLETED
             story.current_step = None
             self._apply_story_metadata(story, story_plan, story_json)
             story.story_plan_json = story_plan
-            story.story_json = story_json
             story.image_plan_json = image_plan
             await self.stories.upsert_content(
                 story,
@@ -379,6 +385,67 @@ class StoryService:
             story.error_message = str(e)
             story.current_step = None
             await self.stories.update(story)
+            await self.session.commit()
+            raise
+
+    async def _step_generate_narration(self, story: Story, story_json: dict[str, Any]) -> dict[str, Any]:
+        """Step 7: Generate narration audio and timing metadata for story JSON."""
+        step = await self.story_steps.create(story.id, StoryStepName.NARRATION_GENERATION)
+        step.status = StepStatus.IN_PROGRESS
+        step.started_at = datetime.utcnow()
+        step.prompt = json.dumps(
+            {
+                "language": DEFAULT_STORY_LANGUAGE,
+                "overwrite": True,
+                "source": "story_workflow",
+                "page_count": len(story_json.get("pages", [])),
+            },
+            indent=2,
+        )
+
+        try:
+            narration_service = StoryNarrationService(self.session)
+            narrated_story_json = await narration_service.generate_story_json_narration(
+                story_json,
+                story_id=story.id,
+                language=DEFAULT_STORY_LANGUAGE,
+                overwrite=True,
+                source="story_workflow",
+            )
+
+            pages = narrated_story_json.get("pages", [])
+            narrated_pages = [
+                page
+                for page in pages
+                if isinstance(page, dict)
+                and (page.get("tts_skipped") or page.get("audio_url") or page.get("duration"))
+            ]
+            total_duration = sum(
+                page.get("duration") or 0
+                for page in narrated_pages
+                if isinstance(page.get("duration"), (int, float))
+            )
+
+            step.response = {
+                "narration_generated": True,
+                "language": DEFAULT_STORY_LANGUAGE,
+                "page_count": len(pages),
+                "narrated_page_count": len(narrated_pages),
+                "total_duration": round(total_duration, 2),
+                "tts_skipped": settings.GOOGLE_TTS_SKIP_CALL,
+            }
+            step.status = StepStatus.COMPLETED
+            step.completed_at = datetime.utcnow()
+            await self.story_steps.update(step)
+            await self.session.commit()
+
+            return narrated_story_json
+
+        except Exception as e:
+            step.error_message = str(e)
+            step.status = StepStatus.FAILED
+            step.completed_at = datetime.utcnow()
+            await self.story_steps.update(step)
             await self.session.commit()
             raise
 
@@ -1406,13 +1473,6 @@ class StoryService:
             story_id=story.id,
             language=normalized_language,
         )
-
-        if content is None and normalized_language == DEFAULT_STORY_LANGUAGE and story.story_json:
-            content = await self.stories.upsert_content(
-                story,
-                language=normalized_language,
-                story_json=story.story_json,
-            )
 
         if content is None:
             raise NotFoundException("Story content not found", "STORY_CONTENT_NOT_FOUND")

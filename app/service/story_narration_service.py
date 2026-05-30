@@ -47,6 +47,26 @@ class StoryNarrationService:
             overwrite=overwrite,
         )
 
+    async def generate_story_json_narration(
+        self,
+        story_json: dict,
+        *,
+        story_id: UUID,
+        language: str = "en",
+        overwrite: bool = False,
+        source: str = "story",
+    ) -> dict:
+        """Generate narration directly into an in-memory story_json payload."""
+        normalized_language = language.strip().lower()
+        await self._generate_story_json_narration(
+            story_json,
+            story_id=story_id,
+            language=normalized_language,
+            overwrite=overwrite,
+            source=source,
+        )
+        return story_json
+
     async def generate_generic_story_narration(
         self,
         story_id: UUID,
@@ -123,12 +143,6 @@ class StoryNarrationService:
             story_id=story.id,
             language=normalized_language,
         )
-        if content is None and normalized_language == "en" and story.story_json:
-            content = await self.stories.upsert_content(
-                story,
-                language=normalized_language,
-                story_json=story.story_json,
-            )
 
         if content is None:
             logger.error("Story content not found: story_id=%s language=%s", story_id, normalized_language)
@@ -150,10 +164,6 @@ class StoryNarrationService:
 
             content.story_json = story_json
             updated_content = await self.stories.update_content(content)
-
-            if normalized_language == "en":
-                story.story_json = story_json
-                await self.stories.update_story_json(story)
 
             logger.info("Story content narration generation complete: story_id=%s language=%s", story_id, normalized_language)
             return updated_content.story_json

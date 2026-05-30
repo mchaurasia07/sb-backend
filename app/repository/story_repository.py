@@ -131,7 +131,7 @@ class StoryRepository:
 
     async def list_by_user(self, user_id: UUID, child_id: UUID | None = None) -> list[Story]:
         """List stories for user, optionally filtered by child."""
-        query = select(Story).options(selectinload(Story.pages)).where(Story.user_id == user_id)
+        query = select(Story).options(selectinload(Story.pages), selectinload(Story.contents)).where(Story.user_id == user_id)
         if child_id:
             query = query.where(Story.child_id == child_id)
         query = query.order_by(Story.created_at.desc())
@@ -157,7 +157,7 @@ class StoryRepository:
         total = await self.session.scalar(select(func.count()).select_from(Story).where(*filters))
         query = (
             select(Story)
-            .options(selectinload(Story.pages))
+            .options(selectinload(Story.pages), selectinload(Story.contents))
             .where(*filters)
             .order_by(Story.created_at.desc())
             .offset((page - 1) * page_size)
@@ -168,11 +168,5 @@ class StoryRepository:
 
     async def update(self, story: Story) -> Story:
         """Update an existing story."""
-        await self.session.flush()
-        return story
-
-    async def update_story_json(self, story: Story) -> Story:
-        """Persist changes to a story's JSON payload."""
-        flag_modified(story, "story_json")
         await self.session.flush()
         return story

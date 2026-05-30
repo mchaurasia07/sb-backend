@@ -6,8 +6,6 @@ services:
       - .env
     ports:
       - "8000:8000"
-    environment:
-      DATABASE_URL: mysql+asyncmy://root:root@mysql:3306/storybook
     depends_on:
       mysql:
         condition: service_healthy

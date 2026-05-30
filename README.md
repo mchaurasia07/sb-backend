@@ -60,15 +60,10 @@ Update `DATABASE_URL`, `JWT_SECRET_KEY`, and `GOOGLE_CLIENT_ID`.
 
 4. Start MySQL, then run migrations.
 
-Default local database settings:
+Default local database setting:
 
 ```env
-MYSQL_USER=root
-MYSQL_PASSWORD=root
-MYSQL_HOST=127.0.0.1
-MYSQL_PORT=3306
-MYSQL_DB=storybook
-DATABASE_URL=mysql+aiomysql://root:root@127.0.0.1:3306/storybook
+DATABASE_URL=mysql+asyncmy://root:root@127.0.0.1:3306/storybook
 ```
 
 ```bash

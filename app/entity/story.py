@@ -77,9 +77,8 @@ class Story(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     current_step: Mapped[str | None] = mapped_column(String(50), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # JSON storage for complete story data
+    # JSON storage for workflow planning data
     story_plan_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    story_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     image_plan_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # Relationships

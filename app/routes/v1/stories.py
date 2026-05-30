@@ -53,6 +53,7 @@ async def generate_story(
     4. Image Plan Generation
     5. Image Plan Validation (optional)
     6. Image Generation (DALL-E)
+    7. Narration Generation
     """
     service = StoryService(session)
 

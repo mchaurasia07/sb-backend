@@ -18,10 +18,17 @@ class ChildBookRepository:
         await self.session.flush()
         return child_book
 
-    async def get_for_child(self, child_id: UUID, child_book_id: UUID) -> ChildBook | None:
-        result = await self.session.execute(
-            select(ChildBook).where(ChildBook.id == child_book_id, ChildBook.child_id == child_id)
-        )
+    async def get_for_child(
+        self,
+        child_id: UUID,
+        child_book_id: UUID,
+        *,
+        for_update: bool = False,
+    ) -> ChildBook | None:
+        query = select(ChildBook).where(ChildBook.id == child_book_id, ChildBook.child_id == child_id)
+        if for_update:
+            query = query.with_for_update()
+        result = await self.session.execute(query)
         return result.scalar_one_or_none()
 
     async def get_by_child_story(
@@ -68,6 +75,10 @@ class ChildBookRepository:
     async def delete(self, child_book: ChildBook) -> None:
         await self.session.delete(child_book)
         await self.session.flush()
+
+    async def update(self, child_book: ChildBook) -> ChildBook:
+        await self.session.flush()
+        return child_book
 
     async def delete_by_story(self, *, story_id: UUID, story_type: str) -> None:
         await self.session.execute(

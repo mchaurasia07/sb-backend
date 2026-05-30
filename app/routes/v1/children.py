@@ -1,11 +1,12 @@
 from datetime import date
+import logging
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, File, Form, Query, Request, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, Form, Query, Request, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db_session
+from app.core.database import AsyncSessionLocal, get_db_session
 from app.core.dependencies import get_current_user
 from app.entity.user import User
 from app.model.request.character import CharacterGenerationRequest
@@ -16,16 +17,103 @@ from app.model.request.child import (
     ChildProfileUpdateRequest,
     ChildUsernameUpdateRequest,
 )
+from app.model.request.child_book import ChildBookProgressUpdateRequest, ChildBookStatusUpdateRequest
 from app.model.request.generic_story import AddCustomStoryToChildRequest, AddGenericStoryToChildRequest
+from app.model.response.child_activity import ChildActivityResponse
 from app.model.response.child_book import ChildBookResponse
 from app.model.response.character import CharacterGenerationResponse
 from app.model.response.child import ActiveChildResponse, ChildProfileResponse, ChildUsernameAvailabilityResponse
 from app.model.response.common import ApiResponse, PaginatedResponse, success_response
 from app.service.character_service import CharacterService
-from app.service.child_book_service import ChildBookService
+from app.service.child_activity_service import ChildActivityService
+from app.service.child_book_service import ChildBookActivityEvent, ChildBookService
 from app.service.child_service import ChildService
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+async def record_child_activity_background(event: ChildBookActivityEvent) -> None:
+    async with AsyncSessionLocal() as session:
+        try:
+            await ChildActivityService(session).record_activity(
+                child_id=event.child_id,
+                activity_name=event.activity_name,
+                activity_type=event.activity_type,
+                resource_name=event.resource_name,
+                resource_id=event.resource_id,
+                resource_type=event.resource_type,
+                description=event.description,
+                metadata=event.metadata,
+                occurred_at=event.occurred_at,
+            )
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            logger.exception("Failed to record child activity: child_id=%s activity=%s", event.child_id, event.activity_name)
+
+
+async def update_child_book_status_background(
+    *,
+    user_id: UUID,
+    child_id: UUID,
+    child_book_id: UUID,
+    payload: ChildBookStatusUpdateRequest,
+) -> None:
+    async with AsyncSessionLocal() as session:
+        try:
+            result = await ChildBookService(session).update_status(
+                current_user=user_id,
+                child_id=child_id,
+                child_book_id=child_book_id,
+                payload=payload,
+            )
+            if result.activity_event is not None:
+                await ChildActivityService(session).record_activity(
+                    child_id=result.activity_event.child_id,
+                    activity_name=result.activity_event.activity_name,
+                    activity_type=result.activity_event.activity_type,
+                    resource_name=result.activity_event.resource_name,
+                    resource_id=result.activity_event.resource_id,
+                    resource_type=result.activity_event.resource_type,
+                    description=result.activity_event.description,
+                    metadata=result.activity_event.metadata,
+                    occurred_at=result.activity_event.occurred_at,
+                )
+                await session.commit()
+        except Exception:
+            await session.rollback()
+            logger.exception(
+                "Failed to update child book status: user_id=%s child_id=%s child_book_id=%s",
+                user_id,
+                child_id,
+                child_book_id,
+            )
+
+
+async def update_child_book_progress_background(
+    *,
+    user_id: UUID,
+    child_id: UUID,
+    child_book_id: UUID,
+    payload: ChildBookProgressUpdateRequest,
+) -> None:
+    async with AsyncSessionLocal() as session:
+        try:
+            await ChildBookService(session).update_progress(
+                current_user=user_id,
+                child_id=child_id,
+                child_book_id=child_book_id,
+                payload=payload,
+            )
+        except Exception:
+            await session.rollback()
+            logger.exception(
+                "Failed to update child book progress: user_id=%s child_id=%s child_book_id=%s",
+                user_id,
+                child_id,
+                child_book_id,
+            )
 
 
 @router.post("", response_model=ApiResponse[ChildProfileResponse], status_code=status.HTTP_201_CREATED)
@@ -140,6 +228,25 @@ async def list_child_books(
     return success_response(data, "Child books fetched successfully")
 
 
+@router.get("/{child_id}/activities", response_model=ApiResponse[PaginatedResponse[ChildActivityResponse]])
+async def list_child_activities(
+    child_id: UUID,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    activity_type: str | None = Query(default=None),
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[PaginatedResponse[ChildActivityResponse]]:
+    data = await ChildActivityService(session).list_for_child(
+        user_id=current_user.id,
+        child_id=child_id,
+        page=page,
+        page_size=page_size,
+        activity_type=activity_type,
+    )
+    return success_response(data, "Child activities fetched successfully")
+
+
 @router.post(
     "/{child_id}/books/generic",
     response_model=ApiResponse[ChildBookResponse],
@@ -178,6 +285,50 @@ async def add_custom_story_to_child(
         language=payload.language,
     )
     return success_response(data, "Custom story added to child successfully")
+
+
+@router.patch(
+    "/{child_id}/books/{child_book_id}/status",
+    response_model=ApiResponse[None],
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def update_child_book_status(
+    child_id: UUID,
+    child_book_id: UUID,
+    payload: ChildBookStatusUpdateRequest,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+) -> ApiResponse[None]:
+    background_tasks.add_task(
+        update_child_book_status_background,
+        user_id=current_user.id,
+        child_id=child_id,
+        child_book_id=child_book_id,
+        payload=payload,
+    )
+    return success_response(None, "Child book status update accepted")
+
+
+@router.patch(
+    "/{child_id}/books/{child_book_id}/progress",
+    response_model=ApiResponse[None],
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def update_child_book_progress(
+    child_id: UUID,
+    child_book_id: UUID,
+    payload: ChildBookProgressUpdateRequest,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+) -> ApiResponse[None]:
+    background_tasks.add_task(
+        update_child_book_progress_background,
+        user_id=current_user.id,
+        child_id=child_id,
+        child_book_id=child_book_id,
+        payload=payload,
+    )
+    return success_response(None, "Child book progress update accepted")
 
 
 @router.delete("/{child_id}/books/{child_book_id}", response_model=ApiResponse[None])

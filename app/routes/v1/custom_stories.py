@@ -1,4 +1,3 @@
-from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -20,10 +19,6 @@ async def list_custom_stories(
     child_id: UUID = Query(..., description="Child profile ID whose custom stories should be returned."),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    status_filter: Literal["PENDING", "IN_PROGRESS", "COMPLETED", "FAILED"] | None = Query(
-        default=None,
-        alias="status",
-    ),
     auth: AuthContext = Depends(get_auth_context),
     session: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[PaginatedResponse[StoryCatalogResponse]]:
@@ -32,7 +27,7 @@ async def list_custom_stories(
         child_id=child_id,
         page=page,
         page_size=page_size,
-        status_filter=status_filter,
+        status_filter="COMPLETED",
     )
     return success_response(data, "Custom stories retrieved successfully")
 

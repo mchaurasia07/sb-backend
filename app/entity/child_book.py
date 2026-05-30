@@ -35,5 +35,9 @@ class ChildBook(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="not_started")
     last_page_read: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_page_read_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reading_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reading_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reading_started_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    reading_completed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
 
     child = relationship("ChildProfile", foreign_keys=[child_id])
