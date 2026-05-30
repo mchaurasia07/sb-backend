@@ -13,7 +13,6 @@ class ChildProfileResponse(BaseModel):
     gender: str | None
     avatar_image_url: str | None
     character_image_url: str | None = None
-    character_metadata: dict | None = None
     child_user_id: str
     child_password: str
     active: bool

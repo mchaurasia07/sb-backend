@@ -43,8 +43,9 @@ class VerifyEmailOtpRequest(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    identifier: str = Field(description="Email address or phone number")
+    identifier: str = Field(description="Email address, phone number, or child_user_id")
     password: str = Field(min_length=1, max_length=128)
+    child_login: bool = Field(default=False, description="Set to true for child profile login")
 
 
 class ChildLoginRequest(BaseModel):

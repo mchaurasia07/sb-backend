@@ -80,7 +80,10 @@ class AuthService:
         logger.info("email_verified", user_id=str(user.id))
         return UserResponse.model_validate(user)
 
-    async def login(self, payload: LoginRequest) -> AuthTokenResponse:
+    async def login(self, payload: LoginRequest) -> AuthTokenResponse | ChildLoginResponse:
+        if payload.child_login:
+            return await self._handle_child_login(payload)
+
         user = await self.users.get_by_email_or_phone(payload.identifier)
         if user is None or user.password_hash is None:
             raise AuthException("Invalid credentials", status.HTTP_401_UNAUTHORIZED, "INVALID_CREDENTIALS")
@@ -97,6 +100,19 @@ class AuthService:
 
     async def child_login(self, payload: ChildLoginRequest) -> ChildLoginResponse:
         child_user_id = payload.child_user_id.strip().lower()
+        child = await self.children.get_active_by_child_user_id(child_user_id)
+        if child is None or payload.password != child.child_password:
+            raise AuthException("Invalid child credentials", status.HTTP_401_UNAUTHORIZED, "INVALID_CHILD_CREDENTIALS")
+
+        access_token = create_child_access_token(child.id, child.user_id)
+        return ChildLoginResponse(
+            access_token=access_token,
+            child=ChildProfileResponse.model_validate(child),
+            parent_user_id=child.user_id,
+        )
+
+    async def _handle_child_login(self, payload: LoginRequest) -> ChildLoginResponse:
+        child_user_id = payload.identifier.strip().lower()
         child = await self.children.get_active_by_child_user_id(child_user_id)
         if child is None or payload.password != child.child_password:
             raise AuthException("Invalid child credentials", status.HTTP_401_UNAUTHORIZED, "INVALID_CHILD_CREDENTIALS")

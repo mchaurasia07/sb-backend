@@ -5,8 +5,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
-from app.core.dependencies import get_current_user
-from app.entity.user import User
+from app.core.dependencies import get_auth_context, AuthContext
 from app.model.response.common import ApiResponse, PaginatedResponse, success_response
 from app.model.response.story_catalog import StoryCatalogResponse
 from app.model.response.story_content import StoryContentResponse
@@ -25,11 +24,11 @@ async def list_custom_stories(
         default=None,
         alias="status",
     ),
-    current_user: User = Depends(get_current_user),
+    auth: AuthContext = Depends(get_auth_context),
     session: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[PaginatedResponse[StoryCatalogResponse]]:
     data = await StoryCatalogService(session).list_custom_by_child_paginated(
-        user_id=current_user.id,
+        user_id=auth.user_id,
         child_id=child_id,
         page=page,
         page_size=page_size,
@@ -46,11 +45,11 @@ async def list_custom_stories(
 async def get_custom_story_content(
     story_id: UUID,
     language: str = Query("en", min_length=2, max_length=16),
-    current_user: User = Depends(get_current_user),
+    auth: AuthContext = Depends(get_auth_context),
     session: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[StoryContentResponse]:
     data = await StoryService(session).get_story_content(
-        user_id=current_user.id,
+        user_id=auth.user_id,
         story_id=story_id,
         language=language,
     )

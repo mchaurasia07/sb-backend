@@ -84,8 +84,8 @@ class Settings(BaseSettings):
     @field_validator("DATABASE_URL")
     @classmethod
     def validate_async_database_url(cls, value: str) -> str:
-        if not value.startswith("mysql+aiomysql://"):
-            raise ValueError("DATABASE_URL must use mysql+aiomysql://")
+        if not value.startswith("mysql+asyncmy://"):
+            raise ValueError("DATABASE_URL must use mysql+asyncmy://")
         return value
 
     @field_validator("SMTP_FROM_EMAIL")

@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, get_auth_context, AuthContext
 from app.entity.user import User
 from app.model.request.generic_story import GenericStoryCreateRequest, GenericStoryUpdateRequest
 from app.model.response.common import ApiResponse, PaginatedResponse, success_response
@@ -57,7 +57,7 @@ async def list_generic_stories(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     status_filter: Literal["active", "inactive"] | None = Query(default=None, alias="status"),
-    _: User = Depends(get_current_user),
+    _: AuthContext = Depends(get_auth_context),
     session: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[PaginatedResponse[StoryCatalogResponse]]:
     data = await StoryCatalogService(session).list_generic_paginated(
@@ -76,7 +76,7 @@ async def list_generic_stories(
 async def get_generic_story_content(
     generic_story_id: UUID,
     language: str = Query("en", min_length=2, max_length=16),
-    _: User = Depends(get_current_user),
+    _: AuthContext = Depends(get_auth_context),
     session: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[StoryContentResponse]:
     data = await GenericStoryService(session).get_content(generic_story_id, language=language)
@@ -87,7 +87,7 @@ async def get_generic_story_content(
 async def get_generic_story(
     generic_story_id: UUID,
     language: str = Query("en", min_length=2, max_length=16),
-    _: User = Depends(get_current_user),
+    _: AuthContext = Depends(get_auth_context),
     session: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[GenericStoryResponse]:
     data = await GenericStoryService(session).get(generic_story_id, language=language)

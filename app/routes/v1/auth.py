@@ -50,11 +50,12 @@ async def verify_email_otp(
     return success_response(data, "Email verified successfully")
 
 
-@router.post("/login", response_model=ApiResponse[AuthTokenResponse])
+@router.post("/login", response_model=ApiResponse[AuthTokenResponse | ChildLoginResponse])
 @limiter.limit("20/minute")
-async def login(request: Request, payload: LoginRequest, session: AsyncSession = Depends(get_db_session)) -> ApiResponse[AuthTokenResponse]:
+async def login(request: Request, payload: LoginRequest, session: AsyncSession = Depends(get_db_session)) -> ApiResponse[AuthTokenResponse | ChildLoginResponse]:
     data = await AuthService(session).login(payload)
-    return success_response(data, "Login successful")
+    message = "Child login successful" if payload.child_login else "Login successful"
+    return success_response(data, message)
 
 
 @router.post("/child-login", response_model=ApiResponse[ChildLoginResponse])
