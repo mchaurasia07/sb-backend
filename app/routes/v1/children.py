@@ -7,7 +7,8 @@ from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, Form, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import AsyncSessionLocal, get_db_session
-from app.core.dependencies import get_current_user
+from app.core.dependencies import AuthContext, get_auth_context, get_current_user
+from app.core.exceptions import AuthException
 from app.entity.user import User
 from app.model.request.character import CharacterGenerationRequest
 from app.model.request.child import (
@@ -31,6 +32,14 @@ from app.service.child_service import ChildService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def resolve_book_update_user_id(auth: AuthContext, child_id: UUID) -> UUID:
+    if auth.is_child:
+        if auth.child_id != child_id:
+            raise AuthException("Child token cannot update another child profile", status_code=403, code="CHILD_ACCESS_DENIED")
+        return auth.user_id
+    return auth.user_id
 
 
 async def record_child_activity_background(event: ChildBookActivityEvent) -> None:
@@ -297,11 +306,12 @@ async def update_child_book_status(
     child_book_id: UUID,
     payload: ChildBookStatusUpdateRequest,
     background_tasks: BackgroundTasks,
-    current_user: User = Depends(get_current_user),
+    auth: AuthContext = Depends(get_auth_context),
 ) -> ApiResponse[None]:
+    user_id = resolve_book_update_user_id(auth, child_id)
     background_tasks.add_task(
         update_child_book_status_background,
-        user_id=current_user.id,
+        user_id=user_id,
         child_id=child_id,
         child_book_id=child_book_id,
         payload=payload,
@@ -319,11 +329,12 @@ async def update_child_book_progress(
     child_book_id: UUID,
     payload: ChildBookProgressUpdateRequest,
     background_tasks: BackgroundTasks,
-    current_user: User = Depends(get_current_user),
+    auth: AuthContext = Depends(get_auth_context),
 ) -> ApiResponse[None]:
+    user_id = resolve_book_update_user_id(auth, child_id)
     background_tasks.add_task(
         update_child_book_progress_background,
-        user_id=current_user.id,
+        user_id=user_id,
         child_id=child_id,
         child_book_id=child_book_id,
         payload=payload,

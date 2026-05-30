@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     API_V1_PREFIX: str
 
     DATABASE_URL: str
+    DB_POOL_PRE_PING: bool
+    DB_POOL_SIZE: int
+    DB_MAX_OVERFLOW: int
+    DB_POOL_RECYCLE_SECONDS: int
 
     JWT_SECRET_KEY: str = Field(min_length=32)
     JWT_ALGORITHM: str

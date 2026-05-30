@@ -12,12 +12,14 @@ class Base(DeclarativeBase):
 
 engine = create_async_engine(
     settings.DATABASE_URL,
-    pool_pre_ping=False,
-    pool_size=10,
-    max_overflow=20,
+    pool_pre_ping=settings.DB_POOL_PRE_PING,
+    pool_size=settings.DB_POOL_SIZE,
+    max_overflow=settings.DB_MAX_OVERFLOW,
     echo=settings.DEBUG,
-    pool_recycle=3600,
+    pool_recycle=settings.DB_POOL_RECYCLE_SECONDS,
 )
+if settings.DATABASE_URL.startswith("mysql+asyncmy://"):
+    engine.sync_engine.dialect._send_false_to_ping = True
 
 AsyncSessionLocal = async_sessionmaker(
     bind=engine,

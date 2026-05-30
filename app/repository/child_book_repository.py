@@ -2,8 +2,11 @@ from uuid import UUID
 
 from sqlalchemy import Select, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.entity.child_book import ChildBook
+from app.entity.generic_story import GenericStory
+from app.entity.story import Story, StoryStatus
 
 
 class ChildBookRepository:
@@ -71,6 +74,68 @@ class ChildBookRepository:
             .limit(page_size)
         )
         return list(result.scalars().all()), int(total or 0)
+
+    async def list_generic_library_paginated(
+        self,
+        *,
+        child_id: UUID,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[tuple[ChildBook, GenericStory]], int]:
+        filters = [
+            ChildBook.child_id == child_id,
+            ChildBook.story_type == "generic",
+            GenericStory.status == "active",
+        ]
+        count_query = (
+            select(func.count())
+            .select_from(ChildBook)
+            .join(GenericStory, GenericStory.id == ChildBook.story_id)
+            .where(*filters)
+        )
+        query = (
+            select(ChildBook, GenericStory)
+            .join(GenericStory, GenericStory.id == ChildBook.story_id)
+            .where(*filters)
+            .order_by(ChildBook.created_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+        total = await self.session.scalar(count_query)
+        result = await self.session.execute(query)
+        return list(result.tuples().all()), int(total or 0)
+
+    async def list_custom_library_paginated(
+        self,
+        *,
+        child_id: UUID,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[tuple[ChildBook, Story]], int]:
+        filters = [
+            ChildBook.child_id == child_id,
+            ChildBook.story_type == "custom",
+            Story.child_id == child_id,
+            Story.status == StoryStatus.COMPLETED,
+        ]
+        count_query = (
+            select(func.count())
+            .select_from(ChildBook)
+            .join(Story, Story.id == ChildBook.story_id)
+            .where(*filters)
+        )
+        query = (
+            select(ChildBook, Story)
+            .join(Story, Story.id == ChildBook.story_id)
+            .options(selectinload(Story.pages), selectinload(Story.contents))
+            .where(*filters)
+            .order_by(ChildBook.created_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+        total = await self.session.scalar(count_query)
+        result = await self.session.execute(query)
+        return list(result.tuples().all()), int(total or 0)
 
     async def delete(self, child_book: ChildBook) -> None:
         await self.session.delete(child_book)
