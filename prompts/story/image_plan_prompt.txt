@@ -351,6 +351,15 @@ Every page must contain:
 
 # OUTPUT FORMAT (STRICT JSON ONLY)
 
+# OUTPUT SIZE LIMITS
+
+Keep the JSON compact so it can be parsed reliably:
+- Every string field should be 8-22 words unless the field is image_prompt.
+- Every image_prompt should be 70-110 words.
+- Every array should contain at most 3 items.
+- Do not include repeated warnings, explanations, markdown, or extra fields.
+- Put repeated identity/outfit details in character_consistency, then reference them briefly in each image_prompt.
+
 {
   "character_consistency": {
     "name": "string",

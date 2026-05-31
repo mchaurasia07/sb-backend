@@ -204,8 +204,6 @@ class StoryNarrationService:
         )
 
         for i, page in enumerate(pages):
-            page = self._remove_page_fields(page)
-            pages[i] = page
             page_number = page.get("page_number", i + 1)
             text = page.get("text", "").strip()
 
@@ -216,12 +214,15 @@ class StoryNarrationService:
             if (
                 not settings.GOOGLE_TTS_SKIP_CALL
                 and not overwrite
+                and page.get("audio_url")
                 and page.get("duration")
                 and self._has_sentence_timestamps(page)
             ):
                 logger.info("Narration timing exists, skipping: source=%s story_id=%s language=%s page=%s", source, story_id, language, page_number)
                 continue
 
+            page = self._remove_page_fields(page)
+            pages[i] = page
             enriched_page = await self._generate_page_narration(
                 page,
                 story_id=story_id,
@@ -275,8 +276,7 @@ class StoryNarrationService:
             tone=tone,
             emotion=emotion,
         )
-        print(f"\n--- TTS PROMPT story_id={story_id} language={language} page={page_number} ---\n{tts_prompt}\n--- END TTS PROMPT ---\n")
-        logger.info("TTS prompt for story_id=%s language=%s page=%s:\n%s", story_id, language, page_number, tts_prompt)
+        logger.debug("Built TTS prompt for story_id=%s language=%s page=%s", story_id, language, page_number)
 
         if settings.GOOGLE_TTS_SKIP_CALL:
             enriched_page = self._remove_page_fields(page_dict)

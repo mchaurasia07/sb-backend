@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -56,6 +57,7 @@ class StoryStepResponse(BaseModel):
     status: str
     retry_count: int
     error_message: str | None
+    usage: dict[str, Any] | None = None
     started_at: datetime | None
     completed_at: datetime | None
     created_at: datetime

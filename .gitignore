@@ -84,3 +84,6 @@ temp/
 # Poetry
 poetry.lock
 .venv/Lib/site-packages/anyio/_backends/__pycache__/__init__.cpython-312.pyc
+.env
+/photo/
+/audio/

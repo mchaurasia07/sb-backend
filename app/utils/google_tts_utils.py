@@ -94,8 +94,8 @@ class GoogleTTSProvider:
 
         pcm_bytes = self._request_tts_audio(prompt)
         wav_bytes = self._pcm_to_wav(pcm_bytes)
-        duration = self._estimate_duration(text, pace)
-        logger.info("Gemini TTS synthesis complete: pcm=%s bytes, estimated %.2fs", len(pcm_bytes), duration)
+        duration = self._pcm_duration_seconds(pcm_bytes)
+        logger.info("Gemini TTS synthesis complete: pcm=%s bytes, duration %.2fs", len(pcm_bytes), duration)
         return wav_bytes, duration
 
     def build_prompt(
@@ -207,6 +207,13 @@ class GoogleTTSProvider:
             wav_file.setframerate(cls.SAMPLE_RATE_HZ)
             wav_file.writeframes(pcm_bytes)
         return buffer.getvalue()
+
+    @classmethod
+    def _pcm_duration_seconds(cls, pcm_bytes: bytes) -> float:
+        bytes_per_second = cls.SAMPLE_RATE_HZ * cls.CHANNELS * cls.SAMPLE_WIDTH_BYTES
+        if bytes_per_second <= 0:
+            return 0.0
+        return len(pcm_bytes) / bytes_per_second
 
     @staticmethod
     def _estimate_duration(text: str, pace: str) -> float:

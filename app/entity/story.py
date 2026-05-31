@@ -1,7 +1,7 @@
 from enum import Enum
 from uuid import UUID
 
-from sqlalchemy import Enum as SAEnum, ForeignKey, Index, JSON, String, Text, UniqueConstraint, Uuid
+from sqlalchemy import Boolean, Enum as SAEnum, ForeignKey, Index, JSON, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -79,7 +79,9 @@ class Story(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     # JSON storage for workflow planning data
     story_plan_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    story_plan_validated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
     image_plan_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    image_plan_validated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
 
     # Relationships
     user = relationship("User", foreign_keys=[user_id])

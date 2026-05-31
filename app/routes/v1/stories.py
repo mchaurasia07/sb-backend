@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-async def execute_story_workflow_background(story_id: UUID, user_id: UUID) -> None:
+async def execute_story_workflow_background(story_id: UUID, user_id: UUID, resume: bool = False) -> None:
     """Background task that executes story generation workflow.
 
     Creates new database session since background tasks don't share request session.
@@ -27,7 +27,7 @@ async def execute_story_workflow_background(story_id: UUID, user_id: UUID) -> No
             logger.info(f"[BACKGROUND] Created session, initializing service")
             service = StoryService(session)
             logger.info(f"[BACKGROUND] Service initialized, executing workflow")
-            await service.execute_workflow(story_id, flags=StoryGenerationFlags())
+            await service.execute_workflow(story_id, flags=StoryGenerationFlags(), resume=resume)
             logger.info(f"[BACKGROUND] Workflow completed successfully for story {story_id}")
         except Exception as e:
             logger.error(f"[BACKGROUND] Workflow failed for story {story_id}")
@@ -52,7 +52,7 @@ async def generate_story(
     3. Story Text Generation
     4. Image Plan Generation
     5. Image Plan Validation (optional)
-    6. Image Generation (DALL-E)
+    6. Image Generation
     7. Narration Generation
     """
     service = StoryService(session)
@@ -70,6 +70,38 @@ async def generate_story(
 
     logger.info(f"Story {story_response.id} generation started in background")
     return success_response(story_response, "Story generation started successfully")
+
+
+@router.post("/{story_id}/retry", response_model=ApiResponse[StoryStatusResponse], status_code=status.HTTP_202_ACCEPTED)
+async def retry_story_generation(
+    story_id: UUID,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[StoryStatusResponse]:
+    """Retry a failed story generation workflow from the last saved checkpoint."""
+    service = StoryService(session)
+    data = await service.retry_story_async(current_user.id, story_id)
+    background_tasks.add_task(execute_story_workflow_background, story_id, current_user.id, True)
+    logger.info("Story %s retry accepted", story_id)
+    return success_response(data, "Story generation retry accepted")
+
+
+@router.post("/{story_id}/recover", response_model=ApiResponse[StoryStatusResponse])
+async def recover_story_generation(
+    story_id: UUID,
+    stale_after_minutes: int = Query(15, ge=1, le=1440),
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[StoryStatusResponse]:
+    """Recover a stale in-progress story so it can be retried from checkpoint."""
+    service = StoryService(session)
+    data = await service.recover_story_async(
+        current_user.id,
+        story_id,
+        stale_after_minutes=stale_after_minutes,
+    )
+    return success_response(data, "Story recovery checked successfully")
 
 
 @router.get("/{story_id}/status", response_model=ApiResponse[StoryStatusResponse])

@@ -310,6 +310,7 @@ Format your response as a clear description list."""
             last_empty_message = "Empty response from Google API"
 
             for attempt in range(1, max_attempts + 1):
+                safety_settings = kwargs.get("safety_settings")
                 response = await self.client.aio.models.generate_content(
                     model=self.text_model,
                     contents=prompt,
@@ -317,6 +318,7 @@ Format your response as a clear description list."""
                         max_output_tokens=kwargs.get("max_tokens", 36000),
                         temperature=kwargs.get("temperature", 0.7),
                         response_mime_type=response_mime_type,
+                        safety_settings=safety_settings,
                     ),
                 )
 
@@ -462,6 +464,8 @@ Format your response as a clear description list."""
                     ),
                 )
                 image_bytes, response_text = self._extract_image_from_content_response(response)
+                usage_metadata = getattr(response, "usage_metadata", None)
+                usage = usage_metadata.model_dump() if hasattr(usage_metadata, "model_dump") else None
             except AppException as exc:
                 if exc.code != "EMPTY_RESPONSE":
                     raise
@@ -517,6 +521,7 @@ Format your response as a clear description list."""
                         consistency_reference.mime_type if consistency_reference is not None else None
                     ),
                     "image_response_text": response_text,
+                    "usage": usage,
                 },
             )
 
@@ -601,6 +606,8 @@ Format your response as a clear description list."""
                 ),
             )
             image_bytes, response_text = self._extract_image_from_content_response(response)
+            usage_metadata = getattr(response, "usage_metadata", None)
+            usage = usage_metadata.model_dump() if hasattr(usage_metadata, "model_dump") else None
             return ImageGenerationResult(
                 image_bytes=image_bytes,
                 prompt_used=prompt,
@@ -610,6 +617,7 @@ Format your response as a clear description list."""
                     "mode": "gemini_image",
                     "aspect_ratio": kwargs.get("aspect_ratio", "1:1"),
                     "image_response_text": response_text,
+                    "usage": usage,
                 },
             )
 

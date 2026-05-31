@@ -3,7 +3,7 @@ from io import BytesIO
 import json
 import logging
 import re
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
@@ -29,6 +29,7 @@ from app.service.ai.factory import get_ai_provider
 from app.service.image_storage_service import image_storage_service
 from app.service.plan_validator import PlanValidator
 from app.service.image_plan_validator import ImagePlanValidator
+from app.service.story_input_safety_service import StoryInputSafetyService
 from app.service.story_narration_service import StoryNarrationService
 from app.utils.prompt_loader import load_prompt, render_prompt
 
@@ -75,6 +76,27 @@ def _looks_truncated_json(text: str) -> bool:
 def _compact_json(data: Any) -> str:
     """Serialize prompt context without pretty-print whitespace."""
     return json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+
+
+def _workflow_usage(result: Any, *, output_text: str | None = None) -> dict[str, Any]:
+    metadata = result.metadata or {}
+    usage = {
+        "provider": metadata.get("provider"),
+        "model": getattr(result, "model", None),
+        "finish_reason": metadata.get("finish_reason"),
+        "usage": metadata.get("usage"),
+        "prompt_chars": len(getattr(result, "prompt_used", "") or ""),
+    }
+    if output_text is not None:
+        usage["output_chars"] = len(output_text)
+    return {key: value for key, value in usage.items() if value is not None}
+
+
+def _with_workflow_usage(payload: dict[str, Any], usage: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **payload,
+        "_workflow_usage": usage,
+    }
 
 
 def _safe_prompt_value(value: str | None, default: str = "") -> str:
@@ -208,6 +230,17 @@ class StoryService:
     """Orchestrates the story generation workflow."""
 
     MAX_RETRIES = 3
+    PLAN_MAX_TOKENS = 14000
+    STORY_MAX_TOKENS_BY_AGE = {
+        "2-4": 4000,
+        "5-7": 8000,
+        "8-12": 12000,
+    }
+    IMAGE_PLAN_MAX_TOKENS_BY_AGE = {
+        "2-4": 16000,
+        "5-7": 24000,
+        "8-12": 32000,
+    }
 
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -226,6 +259,39 @@ class StoryService:
             self._ai_provider = get_ai_provider()
         return self._ai_provider
 
+    @classmethod
+    def _story_max_tokens(cls, age_group: str) -> int:
+        value = getattr(age_group, "value", str(age_group))
+        return cls.STORY_MAX_TOKENS_BY_AGE.get(value, cls.STORY_MAX_TOKENS_BY_AGE["5-7"])
+
+    @classmethod
+    def _image_plan_max_tokens(cls, age_group: str) -> int:
+        value = getattr(age_group, "value", str(age_group))
+        return cls.IMAGE_PLAN_MAX_TOKENS_BY_AGE.get(value, cls.IMAGE_PLAN_MAX_TOKENS_BY_AGE["5-7"])
+
+    async def _set_current_step(self, story: Story, step_name: StoryStepName) -> None:
+        story.status = StoryStatus.IN_PROGRESS
+        story.current_step = step_name.value
+        await self.stories.update(story)
+        await self.session.commit()
+
+    async def _persist_story_content(self, story: Story, story_json: dict[str, Any]) -> None:
+        await self.stories.upsert_content(
+            story,
+            language=DEFAULT_STORY_LANGUAGE,
+            story_json=story_json,
+        )
+        await self.session.commit()
+
+    async def _load_existing_story_json(self, story: Story) -> dict[str, Any] | None:
+        content = await self.stories.get_content_by_story_and_language(
+            story_id=story.id,
+            language=DEFAULT_STORY_LANGUAGE,
+        )
+        if content and isinstance(content.story_json, dict) and content.story_json.get("pages"):
+            return content.story_json
+        return None
+
     async def generate_story_async(
         self,
         user_id: UUID,
@@ -237,6 +303,8 @@ class StoryService:
 
         Background task will execute the workflow asynchronously.
         """
+        await StoryInputSafetyService().validate(payload)
+
         # Validate child exists and belongs to user
         child = await self.children.get_for_user(user_id, child_id)
         if child is None:
@@ -286,10 +354,87 @@ class StoryService:
             updated_at=story.updated_at,
         )
 
+    async def retry_story_async(self, user_id: UUID, story_id: UUID) -> StoryStatusResponse:
+        """Mark a failed story ready for a resumable background retry."""
+        story = await self.stories.get_for_user_for_update(user_id, story_id)
+        if story is None:
+            raise NotFoundException("Story not found")
+
+        if story.status == StoryStatus.IN_PROGRESS:
+            raise AppException(
+                "Story generation is already in progress",
+                code="STORY_ALREADY_IN_PROGRESS",
+            )
+        if story.status == StoryStatus.COMPLETED:
+            raise AppException(
+                "Completed stories cannot be retried",
+                code="STORY_ALREADY_COMPLETED",
+            )
+
+        story.status = StoryStatus.PENDING
+        story.current_step = None
+        story.error_message = None
+        await self.stories.update(story)
+        await self.session.commit()
+        return StoryStatusResponse(
+            story_id=story.id,
+            status=story.status.value,
+            current_step=story.current_step,
+            error_message=story.error_message,
+            updated_at=story.updated_at,
+        )
+
+    async def recover_story_async(
+        self,
+        user_id: UUID,
+        story_id: UUID,
+        *,
+        stale_after_minutes: int = 15,
+    ) -> StoryStatusResponse:
+        """Mark a stale in-progress story as failed so the UI can retry it."""
+        story = await self.stories.get_for_user_for_update(user_id, story_id)
+        if story is None:
+            raise NotFoundException("Story not found")
+
+        if story.status != StoryStatus.IN_PROGRESS:
+            return StoryStatusResponse(
+                story_id=story.id,
+                status=story.status.value,
+                current_step=story.current_step,
+                error_message=story.error_message,
+                updated_at=story.updated_at,
+            )
+
+        updated_at = story.updated_at
+        if updated_at.tzinfo is None:
+            updated_at = updated_at.replace(tzinfo=UTC)
+        age = datetime.now(UTC) - updated_at
+        if age < timedelta(minutes=stale_after_minutes):
+            raise AppException(
+                f"Story is still active. Recover is allowed after {stale_after_minutes} minutes without updates.",
+                code="STORY_NOT_STALE",
+            )
+
+        story.status = StoryStatus.FAILED
+        story.current_step = None
+        story.error_message = (
+            f"Story workflow was recovered after being stuck in progress for {int(age.total_seconds() // 60)} minutes"
+        )
+        await self.stories.update(story)
+        await self.session.commit()
+        return StoryStatusResponse(
+            story_id=story.id,
+            status=story.status.value,
+            current_step=story.current_step,
+            error_message=story.error_message,
+            updated_at=story.updated_at,
+        )
+
     async def execute_workflow(
         self,
         story_id: UUID,
         flags: StoryGenerationFlags = None,
+        resume: bool = False,
     ) -> Story:
         """Execute the story generation workflow.
 
@@ -300,65 +445,108 @@ class StoryService:
             flags = StoryGenerationFlags()
 
         logger.info(f"[WORKFLOW] Fetching story {story_id} from database")
-        story = await self.stories.get_by_id(story_id)
+        story = await self.stories.get_by_id_for_update(story_id)
         if story is None:
             logger.error(f"[WORKFLOW] Story {story_id} not found")
             raise NotFoundException(f"Story {story_id} not found")
+        if story.status == StoryStatus.IN_PROGRESS:
+            logger.warning("Story %s is already in progress; skipping duplicate workflow runner", story_id)
+            return story
+        story.status = StoryStatus.IN_PROGRESS
+        story.error_message = None
+        await self.stories.update(story)
+        await self.session.commit()
 
-        logger.info(f"[WORKFLOW] Story found, starting execution")
+        logger.info(f"[WORKFLOW] Story found, starting execution resume={resume}")
         try:
             # Step 1: Story Plan Generation
-            story.status = StoryStatus.IN_PROGRESS
-            story.current_step = StoryStepName.STORY_PLAN_GENERATION.value
-            await self.stories.update(story)
-            logger.info(f"Story {story_id}: Starting step 1 - Story Plan Generation")
-
-            story_plan = await self._step_generate_plan(story, flags)
+            if (
+                resume
+                and story.story_plan_validated
+                and isinstance(story.story_plan_json, dict)
+                and story.story_plan_json.get("pages")
+            ):
+                story_plan = story.story_plan_json
+                logger.info("Story %s: Reusing existing validated story plan checkpoint", story_id)
+            else:
+                await self._set_current_step(story, StoryStepName.STORY_PLAN_GENERATION)
+                logger.info(f"Story {story_id}: Starting step 1 - Story Plan Generation")
+                story_plan = await self._step_generate_plan(story, flags)
+                story.story_plan_json = story_plan
+                story.story_plan_validated = False
+                await self.stories.update(story)
+                await self.session.commit()
 
             # Step 2: Story Plan Validation (with retries)
-            story.current_step = StoryStepName.STORY_PLAN_VALIDATION.value
-            await self.stories.update(story)
+            await self._set_current_step(story, StoryStepName.STORY_PLAN_VALIDATION)
             logger.info(f"Story {story_id}: Starting step 2 - Story Plan Validation")
 
             story_plan = await self._step_validate_plan(story, story_plan, flags)
-
-            # Step 3: Story Generation
-            story.current_step = StoryStepName.STORY_GENERATION.value
-            await self.stories.update(story)
-            logger.info(f"Story {story_id}: Starting step 3 - Story Generation")
-
-            story_json = await self._step_generate_story(story, story_plan, flags)
-            self._apply_story_metadata(story, story_plan, story_json)
+            story.story_plan_json = story_plan
+            story.story_plan_validated = True
             await self.stories.update(story)
             await self.session.commit()
 
-            # Step 4: Image Plan Generation
-            story.current_step = StoryStepName.IMAGE_PLAN_GENERATION.value
-            await self.stories.update(story)
-            logger.info(f"Story {story_id}: Starting step 4 - Image Plan Generation")
+            # Step 3: Story Generation
+            story_json = await self._load_existing_story_json(story) if resume else None
+            if story_json is not None:
+                logger.info("Story %s: Reusing existing story JSON checkpoint", story_id)
+                self._apply_story_metadata(story, story_plan, story_json)
+                await self.stories.update(story)
+                await self.session.commit()
+            else:
+                await self._set_current_step(story, StoryStepName.STORY_GENERATION)
+                logger.info(f"Story {story_id}: Starting step 3 - Story Generation")
+                story_json = await self._step_generate_story(story, story_plan, flags)
+                self._apply_story_metadata(story, story_plan, story_json)
+                await self.stories.update(story)
+                await self._persist_story_content(story, story_json)
 
-            image_plan = await self._step_generate_image_plan(story, story_plan, story_json, flags)
+            # Step 4: Image Plan Generation
+            if (
+                resume
+                and story.image_plan_validated
+                and isinstance(story.image_plan_json, dict)
+                and story.image_plan_json.get("pages")
+            ):
+                image_plan = story.image_plan_json
+                logger.info("Story %s: Reusing existing validated image plan checkpoint", story_id)
+            else:
+                await self._set_current_step(story, StoryStepName.IMAGE_PLAN_GENERATION)
+                logger.info(f"Story {story_id}: Starting step 4 - Image Plan Generation")
+                image_plan = await self._step_generate_image_plan(story, story_plan, story_json, flags)
+                story.image_plan_json = image_plan
+                story.image_plan_validated = False
+                await self.stories.update(story)
+                await self.session.commit()
 
             # Step 5: Image Plan Validation (optional, can skip)
             if not flags.skip_validation:
-                story.current_step = StoryStepName.IMAGE_PLAN_VALIDATION.value
-                await self.stories.update(story)
+                await self._set_current_step(story, StoryStepName.IMAGE_PLAN_VALIDATION)
                 logger.info(f"Story {story_id}: Starting step 5 - Image Plan Validation")
                 image_plan = await self._step_validate_image_plan(story, image_plan, story_json, flags)
+                story.image_plan_json = image_plan
+                story.image_plan_validated = True
+                await self.stories.update(story)
+                await self.session.commit()
+            else:
+                story.image_plan_validated = True
+                await self.stories.update(story)
+                await self.session.commit()
 
             # Step 6: Image Generation
             if not flags.skip_image_generation:
-                story.current_step = StoryStepName.IMAGE_GENERATION.value
-                await self.stories.update(story)
+                await self._set_current_step(story, StoryStepName.IMAGE_GENERATION)
                 logger.info(f"Story {story_id}: Starting step 6 - Image Generation")
                 await self._step_generate_images(story, story_json, image_plan, flags)
             else:
                 logger.info(f"Story {story_id}: Skipping image generation (test mode)")
                 await self._create_pages_without_images(story, story_json)
+                await self.session.commit()
 
             # Step 7: Narration Generation
-            story.current_step = StoryStepName.NARRATION_GENERATION.value
-            await self.stories.update(story)
+            story_json = await self._load_existing_story_json(story) or story_json
+            await self._set_current_step(story, StoryStepName.NARRATION_GENERATION)
             logger.info(f"Story {story_id}: Starting step 7 - Narration Generation")
             story_json = await self._step_generate_narration(story, story_json)
 
@@ -368,11 +556,7 @@ class StoryService:
             self._apply_story_metadata(story, story_plan, story_json)
             story.story_plan_json = story_plan
             story.image_plan_json = image_plan
-            await self.stories.upsert_content(
-                story,
-                language=DEFAULT_STORY_LANGUAGE,
-                story_json=story_json,
-            )
+            await self.stories.upsert_content(story, language=DEFAULT_STORY_LANGUAGE, story_json=story_json)
             await self.stories.update(story)
             await self.session.commit()
 
@@ -396,12 +580,14 @@ class StoryService:
         step.prompt = json.dumps(
             {
                 "language": DEFAULT_STORY_LANGUAGE,
-                "overwrite": True,
+                "overwrite": False,
                 "source": "story_workflow",
                 "page_count": len(story_json.get("pages", [])),
             },
             indent=2,
         )
+        await self.story_steps.update(step)
+        await self.session.commit()
 
         try:
             narration_service = StoryNarrationService(self.session)
@@ -409,7 +595,7 @@ class StoryService:
                 story_json,
                 story_id=story.id,
                 language=DEFAULT_STORY_LANGUAGE,
-                overwrite=True,
+                overwrite=False,
                 source="story_workflow",
             )
 
@@ -433,6 +619,26 @@ class StoryService:
                 "narrated_page_count": len(narrated_pages),
                 "total_duration": round(total_duration, 2),
                 "tts_skipped": settings.GOOGLE_TTS_SKIP_CALL,
+                "_workflow_usage": {
+                    "provider": "google",
+                    "model": settings.GOOGLE_TTS_MODEL,
+                    "voice": settings.GOOGLE_TTS_VOICE,
+                    "page_count": len(pages),
+                    "audio_page_count": len(
+                        [
+                            page
+                            for page in pages
+                            if isinstance(page, dict) and not page.get("tts_skipped") and page.get("audio_url")
+                        ]
+                    ),
+                    "total_text_chars": sum(
+                        len(page.get("text") or "")
+                        for page in pages
+                        if isinstance(page, dict)
+                    ),
+                    "total_duration": round(total_duration, 2),
+                    "note": "Gemini TTS token usage is not returned by the current REST response.",
+                },
             }
             step.status = StepStatus.COMPLETED
             step.completed_at = datetime.utcnow()
@@ -536,12 +742,14 @@ class StoryService:
         step.prompt = prompt
         step.status = StepStatus.IN_PROGRESS
         step.started_at = datetime.utcnow()
+        await self.story_steps.update(step)
+        await self.session.commit()
 
         try:
             # Call LLM
             result = await self.ai_provider.generate_text(
                 prompt,
-                max_tokens=12000,
+                max_tokens=self.PLAN_MAX_TOKENS,
                 temperature=0.4,
                 response_format={"type": "json_object"},
             )
@@ -562,13 +770,24 @@ class StoryService:
                     logger.warning(f"Story {story.id}: Recovered JSON after repair (original error: {str(e)})")
                 except json.JSONDecodeError as repair_error:
                     logger.error(f"Story {story.id}: Repair failed - {str(repair_error)}")
+                    finish_reason = _finish_reason(result)
+                    if _is_token_limit_finish(result) or _looks_truncated_json(result.text):
+                        raise AppException(
+                            "Story plan generation returned incomplete JSON. "
+                            f"Finish reason: {finish_reason or 'unknown'}. "
+                            "Please retry; the workflow will regenerate the plan.",
+                            code="INCOMPLETE_LLM_JSON",
+                        )
                     raise AppException(
                         f"Invalid JSON from LLM (even after repair): {str(repair_error)}. Original: {str(e)}",
                         code="INVALID_LLM_JSON",
                     )
 
             story_plan["source_inputs"] = source_inputs
-            step.response = story_plan
+            step.response = _with_workflow_usage(
+                story_plan,
+                _workflow_usage(result, output_text=result.text),
+            )
             step.status = StepStatus.COMPLETED
             step.completed_at = datetime.utcnow()
             await self.story_steps.update(step)
@@ -595,6 +814,7 @@ class StoryService:
         step = await self.story_steps.create(story.id, StoryStepName.STORY_PLAN_VALIDATION)
         step.status = StepStatus.IN_PROGRESS
         step.started_at = datetime.utcnow()
+        retry_usages: list[dict[str, Any]] = []
 
         for attempt in range(1, self.MAX_RETRIES + 1):
             step.retry_count = attempt - 1
@@ -609,7 +829,13 @@ class StoryService:
             if result.ok:
                 step.status = StepStatus.COMPLETED
                 step.completed_at = datetime.utcnow()
-                step.response = {"valid": True}
+                step.response = {
+                    "valid": True,
+                    "_workflow_usage": {
+                        "validator": "local",
+                        "retry_text_generations": retry_usages,
+                    },
+                }
                 await self.story_steps.update(step)
                 await self.session.commit()
                 logger.info(f"Story {story.id}: Plan validation passed on attempt {attempt}")
@@ -623,7 +849,8 @@ class StoryService:
                 # Regenerate with errors as feedback
                 await self.session.commit()
                 try:
-                    plan = await self._retry_plan_generation(story, plan, result.errors, attempt)
+                    plan, usage = await self._retry_plan_generation(story, plan, result.errors, attempt)
+                    retry_usages.append(usage)
                 except Exception as e:
                     logger.error(f"Story {story.id}: Failed to regenerate plan on attempt {attempt}: {str(e)}")
                     step.status = StepStatus.FAILED
@@ -645,6 +872,13 @@ class StoryService:
         step.status = StepStatus.FAILED
         step.error_message = error_msg
         step.completed_at = datetime.utcnow()
+        step.response = {
+            "valid": False,
+            "_workflow_usage": {
+                "validator": "local",
+                "retry_text_generations": retry_usages,
+            },
+        }
         await self.story_steps.update(step)
         await self.session.commit()
 
@@ -656,7 +890,7 @@ class StoryService:
 
     async def _retry_plan_generation(
         self, story: Story, previous_plan: dict[str, Any], errors: list[str], attempt: int
-    ) -> dict[str, Any]:
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Regenerate story plan with validation errors as feedback."""
         logger.info(f"Story {story.id}: Regenerating plan (attempt {attempt + 1}) with error feedback")
 
@@ -691,7 +925,7 @@ class StoryService:
 
         result = await self.ai_provider.generate_text(
             enhanced_prompt,
-            max_tokens=12000,
+            max_tokens=self.PLAN_MAX_TOKENS,
             temperature=0.4,
             response_format={"type": "json_object"},
         )
@@ -717,7 +951,7 @@ class StoryService:
                 )
 
         new_plan["source_inputs"] = source_inputs
-        return new_plan
+        return new_plan, _workflow_usage(result, output_text=result.text)
 
     async def _step_generate_story(
         self, story: Story, plan: dict[str, Any], flags: StoryGenerationFlags
@@ -730,11 +964,13 @@ class StoryService:
         template = load_prompt("prompts/story/story_generation_prompt.txt")
         prompt = template.replace("{story_plan_json}", json.dumps(plan, indent=2))
         step.prompt = prompt
+        await self.story_steps.update(step)
+        await self.session.commit()
 
         try:
             result = await self.ai_provider.generate_text(
                 prompt,
-                max_tokens=36000,
+                max_tokens=self._story_max_tokens(story.age_group),
                 temperature=0.7,
                 response_format={"type": "json_object"},
             )
@@ -746,7 +982,10 @@ class StoryService:
 
             story_json = _normalize_story_output(raw_story_json, plan, story)
 
-            step.response = story_json
+            step.response = _with_workflow_usage(
+                story_json,
+                _workflow_usage(result, output_text=result.text),
+            )
             step.status = StepStatus.COMPLETED
             step.completed_at = datetime.utcnow()
             await self.story_steps.update(step)
@@ -785,11 +1024,13 @@ class StoryService:
         prompt = prompt.replace("{child_age_label}", character_context["child_age_label"])
         prompt = prompt.replace("{child_age_visual_guidance}", character_context["child_age_visual_guidance"])
         step.prompt = prompt
+        await self.story_steps.update(step)
+        await self.session.commit()
 
         try:
             result = await self.ai_provider.generate_text(
                 prompt,
-                max_tokens=36000,
+                max_tokens=self._image_plan_max_tokens(story.age_group),
                 temperature=0.2,
                 response_format={"type": "json_object"},
             )
@@ -831,7 +1072,10 @@ class StoryService:
                         code="INVALID_LLM_JSON",
                     )
 
-            step.response = image_plan
+            step.response = _with_workflow_usage(
+                image_plan,
+                _workflow_usage(result, output_text=result.text),
+            )
             step.status = StepStatus.COMPLETED
             step.completed_at = datetime.utcnow()
             await self.story_steps.update(step)
@@ -859,12 +1103,19 @@ class StoryService:
         step.status = StepStatus.IN_PROGRESS
         step.started_at = datetime.utcnow()
 
+        image_plan = self._normalize_image_plan(image_plan)
         result = self.image_plan_validator.validate(image_plan, story_json=story_json)
 
         if result.ok:
             step.status = StepStatus.COMPLETED
             step.completed_at = datetime.utcnow()
-            step.response = {"valid": True}
+            step.response = {
+                "valid": True,
+                "_workflow_usage": {
+                    "validator": "local",
+                    "token_usage": None,
+                },
+            }
             await self.story_steps.update(step)
             await self.session.commit()
             logger.info(f"Story {story.id}: Image plan validation passed")
@@ -875,12 +1126,43 @@ class StoryService:
         step.status = StepStatus.FAILED
         step.error_message = "; ".join(result.errors)
         step.completed_at = datetime.utcnow()
+        step.response = {
+            "valid": False,
+            "_workflow_usage": {
+                "validator": "local",
+                "token_usage": None,
+            },
+        }
         await self.story_steps.update(step)
         await self.session.commit()
         raise AppException(
             f"Image plan validation failed: {'; '.join(result.errors)}",
             code="IMAGE_PLAN_VALIDATION_FAILED",
         )
+
+    @staticmethod
+    def _normalize_image_plan(image_plan: dict[str, Any]) -> dict[str, Any]:
+        pages = image_plan.get("pages") if isinstance(image_plan, dict) else None
+        if not isinstance(pages, list):
+            return image_plan
+
+        for page in pages:
+            if not isinstance(page, dict):
+                continue
+
+            continuity_anchors = page.get("continuity_anchors")
+            if isinstance(continuity_anchors, list):
+                page["continuity_anchors"] = {
+                    "must_keep": [str(item) for item in continuity_anchors[:3]],
+                    "must_not_change": [],
+                }
+            elif isinstance(continuity_anchors, str):
+                page["continuity_anchors"] = {
+                    "must_keep": [continuity_anchors],
+                    "must_not_change": [],
+                }
+
+        return image_plan
 
     async def _step_generate_images(
         self,
@@ -896,6 +1178,8 @@ class StoryService:
 
         # Store image plan as prompt for audit trail
         step.prompt = json.dumps(image_plan, indent=2)
+        await self.story_steps.update(step)
+        await self.session.commit()
 
         try:
             pages = story_json.get("pages", [])
@@ -924,7 +1208,18 @@ class StoryService:
             generated_image_prompts: list[dict[str, Any]] = []
 
             # Generate cover image
-            if cover and cover.get("image_prompt"):
+            existing_cover = await self.story_pages.get_by_story_page(story.id, 0)
+            if existing_cover and existing_cover.image_url:
+                logger.info("Story %s: Reusing existing cover image", story.id)
+                generated_image_prompts.append(
+                    {
+                        "page_type": "cover",
+                        "page_number": 0,
+                        "image_url": existing_cover.image_url,
+                        "skipped_existing": True,
+                    }
+                )
+            elif cover and cover.get("image_prompt"):
                 logger.info(f"Story {story.id}: Generating cover image")
                 cover_prompt = self._render_story_image_prompt(
                     image_generation_template,
@@ -954,6 +1249,9 @@ class StoryService:
                         "rendered_prompt": cover_prompt,
                         "provider_prompt_used": cover_bytes.prompt_used,
                         "used_character_reference": True,
+                        "model": cover_bytes.model,
+                        "provider": (cover_bytes.metadata or {}).get("provider"),
+                        "usage": (cover_bytes.metadata or {}).get("usage"),
                     }
                 )
                 cover_image_bytes = self._crop_image_bytes_to_aspect_ratio(
@@ -966,7 +1264,7 @@ class StoryService:
                     "cover.png",
                     "",  # base_url will be added by storage service
                 )
-                await self.story_pages.create_page(
+                await self.story_pages.upsert_page(
                     story.id,
                     page_number=0,
                     page_type="cover",
@@ -979,6 +1277,19 @@ class StoryService:
             for img_page in image_pages:
                 page_num = img_page.get("page_number", 0)
                 if img_page.get("image_prompt") and page_num > 0:
+                    existing_page = await self.story_pages.get_by_story_page(story.id, page_num)
+                    if existing_page and existing_page.image_url:
+                        logger.info("Story %s: Reusing existing image for page %s", story.id, page_num)
+                        generated_image_prompts.append(
+                            {
+                                "page_type": "page",
+                                "page_number": page_num,
+                                "image_url": existing_page.image_url,
+                                "skipped_existing": True,
+                            }
+                        )
+                        continue
+
                     logger.info(f"Story {story.id}: Generating image for page {page_num}")
                     page_prompt = self._render_story_image_prompt(
                         image_generation_template,
@@ -1008,6 +1319,9 @@ class StoryService:
                             "rendered_prompt": page_prompt,
                             "provider_prompt_used": image_bytes.prompt_used,
                             "used_character_reference": True,
+                            "model": image_bytes.model,
+                            "provider": (image_bytes.metadata or {}).get("provider"),
+                            "usage": (image_bytes.metadata or {}).get("usage"),
                         }
                     )
                     page_image_bytes = self._crop_image_bytes_to_aspect_ratio(
@@ -1024,7 +1338,7 @@ class StoryService:
                     # Find corresponding story page
                     if page_num <= len(pages):
                         story_page = pages[page_num - 1]
-                        await self.story_pages.create_page(
+                        await self.story_pages.upsert_page(
                             story.id,
                             page_number=page_num,
                             page_type="page",
@@ -1034,7 +1348,19 @@ class StoryService:
                         )
 
             # Generate back cover image
-            if back_cover and back_cover.get("image_prompt"):
+            back_cover_page_number = len(pages) + 1
+            existing_back_cover = await self.story_pages.get_by_story_page(story.id, back_cover_page_number)
+            if existing_back_cover and existing_back_cover.image_url:
+                logger.info("Story %s: Reusing existing back cover image", story.id)
+                generated_image_prompts.append(
+                    {
+                        "page_type": "back_cover",
+                        "page_number": back_cover_page_number,
+                        "image_url": existing_back_cover.image_url,
+                        "skipped_existing": True,
+                    }
+                )
+            elif back_cover and back_cover.get("image_prompt"):
                 logger.info(f"Story {story.id}: Generating back cover image")
                 back_cover_prompt = self._render_story_image_prompt(
                     image_generation_template,
@@ -1057,13 +1383,16 @@ class StoryService:
                 generated_image_prompts.append(
                     {
                         "page_type": "back_cover",
-                        "page_number": len(pages) + 1,
+                        "page_number": back_cover_page_number,
                         "target_aspect_ratio": settings.STORY_BACK_COVER_ASPECT_RATIO,
                         "image_size": settings.STORY_BACK_COVER_IMAGE_SIZE,
                         "source_image_prompt": back_cover.get("image_prompt"),
                         "rendered_prompt": back_cover_prompt,
                         "provider_prompt_used": back_cover_bytes.prompt_used,
                         "used_character_reference": True,
+                        "model": back_cover_bytes.model,
+                        "provider": (back_cover_bytes.metadata or {}).get("provider"),
+                        "usage": (back_cover_bytes.metadata or {}).get("usage"),
                     }
                 )
                 back_cover_image_bytes = self._crop_image_bytes_to_aspect_ratio(
@@ -1076,9 +1405,9 @@ class StoryService:
                     "back_cover.png",
                     "",
                 )
-                await self.story_pages.create_page(
+                await self.story_pages.upsert_page(
                     story.id,
-                    page_number=len(pages) + 1,
+                    page_number=back_cover_page_number,
                     page_type="back_cover",
                     text="",
                     image_prompt=back_cover.get("image_prompt"),
@@ -1096,6 +1425,28 @@ class StoryService:
                 "character_image_url": child.character_image_url,
                 "child_age_label": character_context["child_age_label"],
                 "rendered_image_prompts": generated_image_prompts,
+                "_workflow_usage": {
+                    "provider": "google",
+                    "image_items": len(generated_image_prompts),
+                    "generated_image_count": len(
+                        [item for item in generated_image_prompts if not item.get("skipped_existing")]
+                    ),
+                    "skipped_existing_image_count": len(
+                        [item for item in generated_image_prompts if item.get("skipped_existing")]
+                    ),
+                    "models": sorted(
+                        {
+                            str(item.get("model"))
+                            for item in generated_image_prompts
+                            if item.get("model")
+                        }
+                    ),
+                    "usage": [
+                        item.get("usage")
+                        for item in generated_image_prompts
+                        if item.get("usage")
+                    ],
+                },
             }
             step.status = StepStatus.COMPLETED
             step.completed_at = datetime.utcnow()
@@ -1283,7 +1634,7 @@ class StoryService:
         """Create story pages without images (for testing)."""
         pages = story_json.get("pages", [])
         for idx, page in enumerate(pages):
-            await self.story_pages.create_page(
+            await self.story_pages.upsert_page(
                 story.id,
                 page_number=idx + 1,
                 page_type="page",
@@ -1545,4 +1896,24 @@ class StoryService:
             raise NotFoundException("Story not found")
 
         steps = await self.story_steps.list_by_story(story_id)
-        return [StoryStepResponse.model_validate(s) for s in steps]
+        return [
+            StoryStepResponse(
+                id=step.id,
+                step_name=step.step_name.value if hasattr(step.step_name, "value") else str(step.step_name),
+                status=step.status.value if hasattr(step.status, "value") else str(step.status),
+                retry_count=step.retry_count,
+                error_message=step.error_message,
+                usage=self._step_usage(step.response),
+                started_at=step.started_at,
+                completed_at=step.completed_at,
+                created_at=step.created_at,
+            )
+            for step in steps
+        ]
+
+    @staticmethod
+    def _step_usage(response: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not isinstance(response, dict):
+            return None
+        usage = response.get("_workflow_usage")
+        return usage if isinstance(usage, dict) else None

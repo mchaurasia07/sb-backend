@@ -15,10 +15,17 @@ logger = get_logger(__name__)
 class AppException(Exception):
     """Base application exception with API-safe metadata."""
 
-    def __init__(self, message: str, status_code: int = status.HTTP_400_BAD_REQUEST, code: str = "APP_ERROR"):
+    def __init__(
+        self,
+        message: str,
+        status_code: int = status.HTTP_400_BAD_REQUEST,
+        code: str = "APP_ERROR",
+        details: Any = None,
+    ):
         self.message = message
         self.status_code = status_code
         self.code = code
+        self.details = details
         super().__init__(message)
 
 
@@ -48,7 +55,7 @@ def error_response(message: str, status_code: int, code: str, details: Any = Non
 
 
 async def app_exception_handler(_: Request, exc: AppException) -> JSONResponse:
-    return error_response(exc.message, exc.status_code, exc.code)
+    return error_response(exc.message, exc.status_code, exc.code, exc.details)
 
 
 async def validation_exception_handler(_: Request, exc: RequestValidationError) -> JSONResponse:

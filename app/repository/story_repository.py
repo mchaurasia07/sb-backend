@@ -47,12 +47,28 @@ class StoryRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_for_user_for_update(self, user_id: UUID, story_id: UUID) -> Story | None:
+        result = await self.session.execute(
+            select(Story)
+            .where(Story.id == story_id, Story.user_id == user_id)
+            .with_for_update()
+        )
+        return result.scalar_one_or_none()
+
     async def get_by_id(self, story_id: UUID) -> Story | None:
         """Retrieve story by ID (no user check, used in background tasks)."""
         result = await self.session.execute(
             select(Story)
             .options(selectinload(Story.pages), selectinload(Story.contents))
             .where(Story.id == story_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_id_for_update(self, story_id: UUID) -> Story | None:
+        result = await self.session.execute(
+            select(Story)
+            .where(Story.id == story_id)
+            .with_for_update()
         )
         return result.scalar_one_or_none()
 
