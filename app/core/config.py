@@ -44,14 +44,26 @@ class Settings(BaseSettings):
     SMTP_TIMEOUT_SECONDS: float
 
     # Storage Configuration - supports both relative and absolute paths
-    STORAGE_BASE_PATH: str = Field(default=".", description="Base path used when storage roots are relative")
     MEDIA_ROOT: str = Field(description="Absolute or relative path for image storage")
     MEDIA_URL_PREFIX: str
     IMAGE_MAX_UPLOAD_BYTES: int
+    IMAGE_STORAGE_PROVIDER: str = "r2"
+
+    # Cloudflare R2 image storage.
+    CLOUDFLARE_R2_ACCOUNT_ID: str = ""
+    CLOUDFLARE_R2_ACCESS_KEY_ID: str = ""
+    CLOUDFLARE_R2_SECRET_ACCESS_KEY: str = ""
+    CLOUDFLARE_R2_BUCKET_NAME: str = ""
+    CLOUDFLARE_R2_PUBLIC_BASE_URL: str = ""
+    CLOUDFLARE_R2_IMAGE_KEY_PREFIX: str = "photo"
+    CLOUDFLARE_R2_REGION: str = "auto"
+    CLOUDFLARE_R2_CACHE_CONTROL: str = "public, max-age=31536000, immutable"
 
     # Audio Storage Configuration
     AUDIO_ROOT: str = Field(description="Absolute or relative path for audio storage")
     AUDIO_URL_PREFIX: str
+    AUDIO_STORAGE_PROVIDER: str = "local"
+    CLOUDFLARE_R2_AUDIO_KEY_PREFIX: str = "audio"
 
     # AI Provider Selection
     AI_PROVIDER: str  # Options: "openai", "google"
@@ -120,22 +132,20 @@ class Settings(BaseSettings):
         return [origin.strip() for origin in self.BACKEND_CORS_ORIGINS.split(",") if origin.strip()]
 
     @cached_property
-    def storage_base_path(self) -> Path:
-        return Path(self.STORAGE_BASE_PATH).expanduser().resolve()
-
-    @cached_property
     def media_root_path(self) -> Path:
-        return self._resolve_storage_path(self.MEDIA_ROOT)
+        return Path(self.MEDIA_ROOT).expanduser().resolve()
 
     @cached_property
     def audio_root_path(self) -> Path:
-        return self._resolve_storage_path(self.AUDIO_ROOT)
+        return Path(self.AUDIO_ROOT).expanduser().resolve()
 
-    def _resolve_storage_path(self, configured_path: str) -> Path:
-        path = Path(configured_path).expanduser()
-        if path.is_absolute():
-            return path.resolve()
-        return (self.storage_base_path / path).resolve()
+    @cached_property
+    def cloudflare_r2_endpoint_url(self) -> str:
+        return f"https://{self.CLOUDFLARE_R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+
+    @cached_property
+    def cloudflare_r2_image_key_prefix(self) -> str:
+        return self.CLOUDFLARE_R2_IMAGE_KEY_PREFIX.strip("/")
 
 
 settings = Settings()  # type: ignore[call-arg]

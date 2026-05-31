@@ -21,6 +21,7 @@ class StoryPageContentResponse(BaseModel):
     page_number: int | None = None
     speech_narration: SpeechNarrationResponse | None = None
     text: str | None = None
+    image_url: str | None = None
     tts_prompt: str | None = None
     tts_skipped: bool | None = None
     tts_model: str | None = None
@@ -46,6 +47,8 @@ class StoryJsonContentResponse(BaseModel):
     summary: str | None = None
     theme: str | None = None
     art_style: str | None = None
+    cover_image_url: str | None = None
+    back_cover_image_url: str | None = None
     pages: list[StoryPageContentResponse] = Field(default_factory=list)
     moral: StoryMoralContentResponse | None = None
 

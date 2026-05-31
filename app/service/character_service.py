@@ -1,5 +1,6 @@
 from datetime import datetime, UTC
 from pathlib import Path
+import tempfile
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,7 +12,7 @@ from app.model.request.character import CharacterGenerationRequest
 from app.model.response.character import CharacterGenerationResponse
 from app.repository.child_repository import ChildRepository
 from app.service.ai.factory import get_ai_provider
-from app.service.image_storage_service import image_storage_service
+from app.service.image_storage_provider import get_image_storage_service
 from app.utils.prompt_loader import load_and_render_prompt
 
 logger = get_logger(__name__)
@@ -77,35 +78,40 @@ class CharacterService:
                 code="NO_PHOTO",
             )
 
-        # Extract local file path from public URL
-        photo_path = self._resolve_photo_path(child.avatar_image_url)
+        photo_path = await self._materialize_reference_photo(child.avatar_image_url)
 
         # Generate character image using AI provider
-        logger.info(f"Calling {provider_name} AI provider to generate character image from {photo_path.name}")
-        character_prompt = load_and_render_prompt(
-            "prompts/character_generation.txt",
-            {
-                "additional_context": payload.additional_context or "",
-                "child_age_label": self._child_age_label(child),
-                "child_age_visual_guidance": self._age_visual_guidance(child.age),
-            },
-        )
-        logger.info(f"Character Generation Prompt:\n{character_prompt}")
+        try:
+            logger.info(f"Calling {provider_name} AI provider to generate character image from {photo_path.name}")
+            character_prompt = load_and_render_prompt(
+                "prompts/character_generation.txt",
+                {
+                    "additional_context": payload.additional_context or "",
+                    "child_age_label": self._child_age_label(child),
+                    "child_age_visual_guidance": self._age_visual_guidance(child.age),
+                },
+            )
+            logger.info(f"Character Generation Prompt:\n{character_prompt}")
 
-        image_result = await ai_service.create_character_from_photo(
-            reference_image_path=photo_path,
-            prompt=character_prompt,
-            size=settings.CHARACTER_IMAGE_SIZE,
-            quality=settings.CHARACTER_IMAGE_QUALITY,
-            child_age_label=self._child_age_label(child),
-            child_age_visual_guidance=self._age_visual_guidance(child.age),
-        )
+            image_result = await ai_service.create_character_from_photo(
+                reference_image_path=photo_path,
+                prompt=character_prompt,
+                size=settings.CHARACTER_IMAGE_SIZE,
+                quality=settings.CHARACTER_IMAGE_QUALITY,
+                child_age_label=self._child_age_label(child),
+                child_age_visual_guidance=self._age_visual_guidance(child.age),
+            )
+        finally:
+            try:
+                photo_path.unlink(missing_ok=True)
+            except OSError:
+                logger.warning("Failed to remove temporary reference photo: %s", photo_path)
 
         logger.info(f"Successfully generated character image using {image_result.model}")
 
         # Save generated character image
         logger.info("Saving character image to storage")
-        character_url = await image_storage_service.save_character_image(
+        character_url = await get_image_storage_service().save_character_image(
             parent_id=child.user_id,
             child_id=child.id,
             image_bytes=image_result.image_bytes,
@@ -160,6 +166,17 @@ class CharacterService:
             character_image_url=character_url,
             character_description=clean_description,
         )
+
+    @staticmethod
+    async def _materialize_reference_photo(url_or_path: str) -> Path:
+        image_bytes = await get_image_storage_service().get_image_bytes(url_or_path)
+        suffix = Path(url_or_path.split("?", 1)[0]).suffix.lower()
+        if suffix not in {".jpg", ".jpeg", ".png", ".webp"}:
+            suffix = ".png"
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
+            temp_file.write(image_bytes)
+            return Path(temp_file.name)
 
     @staticmethod
     def _extract_clean_description(analysis_text: str) -> str:
@@ -220,50 +237,3 @@ class CharacterService:
                 "and no teenage features"
             )
         return "teen-appropriate but still child-safe proportions, matching the profile photo and not adult features"
-
-    @staticmethod
-    def _resolve_photo_path(url_or_path: str) -> Path:
-        """Resolve photo path from public URL or local path.
-
-        Args:
-            url_or_path: Either a public URL or local file path
-
-        Returns:
-            Path object pointing to the file
-
-        Raises:
-            AppException: If path cannot be resolved or file doesn't exist
-        """
-        # If it's a URL, extract the relative path
-        if url_or_path.startswith("http"):
-            # Extract path after /photo/
-            parts = url_or_path.split(settings.MEDIA_URL_PREFIX + "/")
-            if len(parts) == 2:
-                relative_path = parts[1]
-                file_path = settings.media_root_path / relative_path
-            else:
-                raise AppException("Invalid photo URL format", code="INVALID_URL")
-        else:
-            file_path = Path(url_or_path)
-
-        # Resolve to absolute path
-        file_path = file_path.resolve()
-
-        # Verify path is within media root
-        media_root = settings.media_root_path
-        try:
-            file_path.relative_to(media_root)
-        except ValueError:
-            raise AppException(
-                "Photo file must be in media directory",
-                code="INVALID_PATH",
-            )
-
-        if not file_path.exists():
-            raise AppException(
-                f"Photo file not found: {file_path}",
-                code="FILE_NOT_FOUND",
-            )
-
-        logger.info(f"Resolved photo path: {file_path}")
-        return file_path

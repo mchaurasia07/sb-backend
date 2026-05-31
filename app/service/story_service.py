@@ -4,9 +4,7 @@ import json
 import logging
 import re
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any
-from urllib.parse import unquote, urlparse
 from uuid import UUID
 
 from PIL import Image, UnidentifiedImageError
@@ -26,7 +24,7 @@ from app.repository.story_step_repository import StoryStepRepository
 from app.repository.story_page_repository import StoryPageRepository
 from app.service.ai.base import AIProvider
 from app.service.ai.factory import get_ai_provider
-from app.service.image_storage_service import image_storage_service
+from app.service.image_storage_provider import get_image_storage_service
 from app.service.plan_validator import PlanValidator
 from app.service.image_plan_validator import ImagePlanValidator
 from app.service.story_input_safety_service import StoryInputSafetyService
@@ -259,6 +257,55 @@ class StoryService:
             self._ai_provider = get_ai_provider()
         return self._ai_provider
 
+    @staticmethod
+    def _current_ai_config() -> dict[str, str | None]:
+        provider = settings.AI_PROVIDER.strip().lower()
+        if provider == "google":
+            return {
+                "ai_provider": provider,
+                "text_model": settings.GOOGLE_TEXT_MODEL,
+                "image_model": settings.GOOGLE_IMAGE_MODEL,
+                "reference_image_model": settings.GOOGLE_REFERENCE_IMAGE_MODEL,
+            }
+        if provider == "openai":
+            return {
+                "ai_provider": provider,
+                "text_model": settings.OPENAI_TEXT_MODEL,
+                "image_model": settings.OPENAI_IMAGE_MODEL,
+                "reference_image_model": settings.OPENAI_IMAGE_MODEL,
+            }
+        return {
+            "ai_provider": provider,
+            "text_model": None,
+            "image_model": None,
+            "reference_image_model": None,
+        }
+
+    async def _ensure_story_ai_config(self, story: Story) -> None:
+        """Persist provider/model choices once so retries do not drift with env changes."""
+        if story.ai_provider:
+            self._ai_provider = get_ai_provider(story.ai_provider)
+            return
+
+        config = self._current_ai_config()
+        story.ai_provider = config["ai_provider"]
+        story.text_model = config["text_model"]
+        story.image_model = config["image_model"]
+        story.reference_image_model = config["reference_image_model"]
+        await self.stories.update(story)
+        await self.session.commit()
+        self._ai_provider = get_ai_provider(story.ai_provider)
+
+    @staticmethod
+    def _story_image_model_kwargs(story: Story) -> dict[str, str]:
+        kwargs: dict[str, str] = {}
+        if story.reference_image_model:
+            kwargs["model"] = story.reference_image_model
+            kwargs["reference_image_model"] = story.reference_image_model
+        if story.image_model:
+            kwargs["image_model"] = story.image_model
+        return kwargs
+
     @classmethod
     def _story_max_tokens(cls, age_group: str) -> int:
         value = getattr(age_group, "value", str(age_group))
@@ -331,6 +378,7 @@ class StoryService:
             learning_goal=payload.learning_goal,
             context=payload.context,
             event_description=payload.event_description,
+            **self._current_ai_config(),
         )
         await self.session.commit()
 
@@ -452,6 +500,7 @@ class StoryService:
         if story.status == StoryStatus.IN_PROGRESS:
             logger.warning("Story %s is already in progress; skipping duplicate workflow runner", story_id)
             return story
+        await self._ensure_story_ai_config(story)
         story.status = StoryStatus.IN_PROGRESS
         story.error_message = None
         await self.stories.update(story)
@@ -542,6 +591,7 @@ class StoryService:
             else:
                 logger.info(f"Story {story_id}: Skipping image generation (test mode)")
                 await self._create_pages_without_images(story, story_json)
+                await self._persist_story_content(story, story_json)
                 await self.session.commit()
 
             # Step 7: Narration Generation
@@ -1202,9 +1252,11 @@ class StoryService:
                     code="NO_CHARACTER_IMAGE",
                 )
 
-            avatar_image_base64 = self._load_image_as_base64(child.avatar_image_url)
-            character_image_base64 = self._load_image_as_base64(child.character_image_url)
+            image_storage = get_image_storage_service()
+            avatar_image_base64 = await self._load_image_as_base64(child.avatar_image_url)
+            character_image_base64 = await self._load_image_as_base64(child.character_image_url)
             character_context = self._build_character_reference_context(child)
+            image_model_kwargs = self._story_image_model_kwargs(story)
             generated_image_prompts: list[dict[str, Any]] = []
 
             # Generate cover image
@@ -1219,6 +1271,7 @@ class StoryService:
                         "skipped_existing": True,
                     }
                 )
+                story_json["cover_image_url"] = existing_cover.image_url
             elif cover and cover.get("image_prompt"):
                 logger.info(f"Story {story.id}: Generating cover image")
                 cover_prompt = self._render_story_image_prompt(
@@ -1235,6 +1288,7 @@ class StoryService:
                     consistency_reference_image_base64=character_image_base64,
                     child_age_label=character_context["child_age_label"],
                     child_age_visual_guidance=character_context["child_age_visual_guidance"],
+                    **image_model_kwargs,
                     size=settings.STORY_COVER_IMAGE_SIZE,
                     quality=settings.STORY_IMAGE_QUALITY,
                     aspect_ratio=settings.STORY_COVER_ASPECT_RATIO,
@@ -1258,7 +1312,7 @@ class StoryService:
                     cover_bytes.image_bytes,
                     settings.STORY_COVER_ASPECT_RATIO,
                 )
-                cover_url = await image_storage_service.save_story_image(
+                cover_url = await image_storage.save_story_image(
                     story.id,
                     cover_image_bytes,
                     "cover.png",
@@ -1272,6 +1326,7 @@ class StoryService:
                     image_prompt=cover.get("image_prompt"),
                     image_url=cover_url,
                 )
+                story_json["cover_image_url"] = cover_url
 
             # Generate page images
             for img_page in image_pages:
@@ -1288,6 +1343,7 @@ class StoryService:
                                 "skipped_existing": True,
                             }
                         )
+                        self._set_story_json_page_image_url(story_json, page_num, existing_page.image_url)
                         continue
 
                     logger.info(f"Story {story.id}: Generating image for page {page_num}")
@@ -1305,6 +1361,7 @@ class StoryService:
                         consistency_reference_image_base64=character_image_base64,
                         child_age_label=character_context["child_age_label"],
                         child_age_visual_guidance=character_context["child_age_visual_guidance"],
+                        **image_model_kwargs,
                         size=settings.STORY_PAGE_IMAGE_SIZE,
                         quality=settings.STORY_IMAGE_QUALITY,
                         aspect_ratio=settings.STORY_PAGE_ASPECT_RATIO,
@@ -1328,7 +1385,7 @@ class StoryService:
                         image_bytes.image_bytes,
                         settings.STORY_PAGE_ASPECT_RATIO,
                     )
-                    image_url = await image_storage_service.save_story_image(
+                    image_url = await image_storage.save_story_image(
                         story.id,
                         page_image_bytes,
                         f"page_{page_num}.png",
@@ -1346,6 +1403,7 @@ class StoryService:
                             image_prompt=img_page.get("image_prompt"),
                             image_url=image_url,
                         )
+                        self._set_story_json_page_image_url(story_json, page_num, image_url)
 
             # Generate back cover image
             back_cover_page_number = len(pages) + 1
@@ -1360,6 +1418,7 @@ class StoryService:
                         "skipped_existing": True,
                     }
                 )
+                story_json["back_cover_image_url"] = existing_back_cover.image_url
             elif back_cover and back_cover.get("image_prompt"):
                 logger.info(f"Story {story.id}: Generating back cover image")
                 back_cover_prompt = self._render_story_image_prompt(
@@ -1376,6 +1435,7 @@ class StoryService:
                     consistency_reference_image_base64=character_image_base64,
                     child_age_label=character_context["child_age_label"],
                     child_age_visual_guidance=character_context["child_age_visual_guidance"],
+                    **image_model_kwargs,
                     size=settings.STORY_BACK_COVER_IMAGE_SIZE,
                     quality=settings.STORY_IMAGE_QUALITY,
                     aspect_ratio=settings.STORY_BACK_COVER_ASPECT_RATIO,
@@ -1399,7 +1459,7 @@ class StoryService:
                     back_cover_bytes.image_bytes,
                     settings.STORY_BACK_COVER_ASPECT_RATIO,
                 )
-                back_cover_url = await image_storage_service.save_story_image(
+                back_cover_url = await image_storage.save_story_image(
                     story.id,
                     back_cover_image_bytes,
                     "back_cover.png",
@@ -1413,6 +1473,7 @@ class StoryService:
                     image_prompt=back_cover.get("image_prompt"),
                     image_url=back_cover_url,
                 )
+                story_json["back_cover_image_url"] = back_cover_url
 
             # Store image generation results in response for audit trail
             step.response = {
@@ -1426,7 +1487,9 @@ class StoryService:
                 "child_age_label": character_context["child_age_label"],
                 "rendered_image_prompts": generated_image_prompts,
                 "_workflow_usage": {
-                    "provider": "google",
+                    "provider": story.ai_provider or settings.AI_PROVIDER,
+                    "image_model": story.image_model,
+                    "reference_image_model": story.reference_image_model,
                     "image_items": len(generated_image_prompts),
                     "generated_image_count": len(
                         [item for item in generated_image_prompts if not item.get("skipped_existing")]
@@ -1451,6 +1514,7 @@ class StoryService:
             step.status = StepStatus.COMPLETED
             step.completed_at = datetime.utcnow()
             await self.story_steps.update(step)
+            await self._persist_story_content(story, story_json)
             await self.session.commit()
 
             logger.info(f"Story {story.id}: All images generated successfully")
@@ -1581,54 +1645,22 @@ class StoryService:
         return compact_story_plan, compact_story_json
 
     @staticmethod
-    def _load_image_as_base64(url_or_path: str) -> str:
+    async def _load_image_as_base64(url_or_path: str) -> str:
         """Resolve a media image URL/path and return raw base64 image data."""
-        image_path = StoryService._resolve_media_path(url_or_path)
-        image_bytes = image_path.read_bytes()
+        image_bytes = await get_image_storage_service().get_image_bytes(url_or_path)
         if not image_bytes:
-            raise AppException(f"Image file is empty: {image_path}", code="EMPTY_IMAGE")
+            raise AppException("Image file is empty", code="EMPTY_IMAGE")
         return base64.standard_b64encode(image_bytes).decode("utf-8")
 
     @staticmethod
-    def _resolve_media_path(url_or_path: str) -> Path:
-        """Resolve local app media URLs to files under MEDIA_ROOT."""
-        raw_value = str(url_or_path)
-        parsed = urlparse(raw_value)
-        media_prefix = settings.MEDIA_URL_PREFIX.rstrip("/") + "/"
-
-        if parsed.scheme in {"http", "https"}:
-            url_path = unquote(parsed.path)
-            if not url_path.startswith(media_prefix):
-                raise AppException("Image URL must point to app media storage", code="INVALID_IMAGE_URL")
-            relative_path = url_path[len(media_prefix) :]
-            file_path = settings.media_root_path / relative_path
-        elif raw_value.startswith(media_prefix):
-            relative_path = raw_value[len(media_prefix) :]
-            file_path = settings.media_root_path / relative_path
-        else:
-            file_path = Path(raw_value)
-
-        file_path = file_path.resolve()
-        media_root = settings.media_root_path
-        try:
-            file_path.relative_to(media_root)
-        except ValueError:
-            raise AppException("Image file must be in media directory", code="INVALID_IMAGE_PATH")
-
-        if not file_path.exists() and file_path.name == "child_character.png":
-            legacy_path = file_path.with_name("character.png")
-            if legacy_path.exists():
-                file_path = legacy_path
-
-        if not file_path.exists() and file_path.name == "character.png":
-            legacy_path = file_path.with_name("child_character.png")
-            if legacy_path.exists():
-                file_path = legacy_path
-
-        if not file_path.exists():
-            raise AppException(f"Image file not found: {file_path}", code="FILE_NOT_FOUND")
-
-        return file_path
+    def _set_story_json_page_image_url(story_json: dict[str, Any], page_number: int, image_url: str) -> None:
+        pages = story_json.get("pages")
+        if not isinstance(pages, list):
+            return
+        for page in pages:
+            if isinstance(page, dict) and page.get("page_number") == page_number:
+                page["image_url"] = image_url
+                return
 
     async def _create_pages_without_images(self, story: Story, story_json: dict[str, Any]) -> None:
         """Create story pages without images (for testing)."""

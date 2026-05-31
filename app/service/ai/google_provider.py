@@ -483,7 +483,7 @@ Format your response as a clear description list."""
                 )
                 fallback_result = await self.generate_image(
                     fallback_prompt,
-                    model=kwargs.get("fallback_image_model") or kwargs.get("image_model") or self.image_model,
+                    model=kwargs.get("fallback_image_model") or model,
                     aspect_ratio=kwargs.get("aspect_ratio", "1:1"),
                     output_mime_type=kwargs.get("output_mime_type", "image/jpeg"),
                 )

@@ -20,6 +20,7 @@ class StoryCatalogResponse(BaseModel):
     reading_time_minutes: int | None = None
     character_type: str | None = None
     total_pages: int | None = None
+    cover_image_url: str | None = None
     available_languages: list[str] = Field(default_factory=list)
     status: str
     created_at: datetime

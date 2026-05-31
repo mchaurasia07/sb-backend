@@ -1,6 +1,7 @@
 import asyncio
 from pathlib import Path
 from uuid import UUID
+from urllib.parse import unquote, urlparse
 
 from fastapi import UploadFile, status
 
@@ -123,6 +124,16 @@ class ImageStorageService:
         public_path = f"{settings.MEDIA_URL_PREFIX}/stories/{story_id}/{filename}"
         return f"{public_base_url}{public_path}"
 
+    async def get_image_bytes(self, url_or_path: str) -> bytes:
+        file_path = self._resolve_media_path(url_or_path)
+        try:
+            content = await asyncio.to_thread(file_path.read_bytes)
+        except OSError as exc:
+            raise AppException(f"Failed to read image file: {file_path}", code="IMAGE_READ_FAILED") from exc
+        if not content:
+            raise AppException(f"Image file is empty: {file_path}", code="EMPTY_IMAGE")
+        return content
+
     def _get_extension(self, photo: UploadFile) -> str:
         if photo.content_type in self.allowed_content_types:
             return self.allowed_content_types[photo.content_type]
@@ -131,6 +142,45 @@ class ImageStorageService:
             status.HTTP_400_BAD_REQUEST,
             "UNSUPPORTED_IMAGE_TYPE",
         )
+
+    @staticmethod
+    def _resolve_media_path(url_or_path: str) -> Path:
+        raw_value = str(url_or_path)
+        parsed = urlparse(raw_value)
+        media_prefix = settings.MEDIA_URL_PREFIX.rstrip("/") + "/"
+
+        if parsed.scheme in {"http", "https"}:
+            url_path = unquote(parsed.path)
+            if not url_path.startswith(media_prefix):
+                raise AppException("Image URL must point to app media storage", code="INVALID_IMAGE_URL")
+            relative_path = url_path[len(media_prefix) :]
+            file_path = settings.media_root_path / relative_path
+        elif raw_value.startswith(media_prefix):
+            relative_path = raw_value[len(media_prefix) :]
+            file_path = settings.media_root_path / relative_path
+        else:
+            file_path = Path(raw_value)
+
+        file_path = file_path.resolve()
+        try:
+            file_path.relative_to(settings.media_root_path)
+        except ValueError:
+            raise AppException("Image file must be in media directory", code="INVALID_IMAGE_PATH")
+
+        if not file_path.exists() and file_path.name == "child_character.png":
+            legacy_path = file_path.with_name("character.png")
+            if legacy_path.exists():
+                file_path = legacy_path
+
+        if not file_path.exists() and file_path.name == "character.png":
+            legacy_path = file_path.with_name("child_character.png")
+            if legacy_path.exists():
+                file_path = legacy_path
+
+        if not file_path.exists():
+            raise AppException(f"Image file not found: {file_path}", code="FILE_NOT_FOUND")
+
+        return file_path
 
 
 image_storage_service = ImageStorageService()

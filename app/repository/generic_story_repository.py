@@ -81,7 +81,7 @@ class GenericStoryRepository:
         page_size: int,
         status: str | None = None,
     ) -> tuple[list[GenericStory], int]:
-        query: Select[tuple[GenericStory]] = select(GenericStory)
+        query: Select[tuple[GenericStory]] = select(GenericStory).options(selectinload(GenericStory.contents))
         count_query = select(func.count()).select_from(GenericStory)
 
         if status:

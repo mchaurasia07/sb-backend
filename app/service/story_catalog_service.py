@@ -15,6 +15,36 @@ def _enum_value(value) -> str | None:
     return getattr(value, "value", str(value))
 
 
+def _content_for_language(contents, language: str):
+    normalized_language = language.strip().lower()
+    return next(
+        (
+            content
+            for content in (contents or [])
+            if str(getattr(content, "language", "")).lower() == normalized_language
+        ),
+        None,
+    )
+
+
+def _story_json_cover_image_url(story_json: dict) -> str | None:
+    if not isinstance(story_json, dict):
+        return None
+
+    cover = story_json.get("cover") if isinstance(story_json.get("cover"), dict) else {}
+    value = (
+        story_json.get("cover_image_url")
+        or story_json.get("coverImageUrl")
+        or story_json.get("cover_image")
+        or story_json.get("coverImage")
+        or story_json.get("image_url")
+        or story_json.get("imageUrl")
+        or cover.get("image_url")
+        or cover.get("imageUrl")
+    )
+    return str(value) if value else None
+
+
 class StoryCatalogService:
     """Shared metadata mappers for generic and custom story list APIs."""
 
@@ -85,6 +115,11 @@ class StoryCatalogService:
 
     @staticmethod
     def _generic_to_catalog(story, *, available_languages: list[str]) -> StoryCatalogResponse:
+        default_content = _content_for_language(
+            getattr(story, "contents", []),
+            DEFAULT_GENERIC_STORY_LANGUAGE,
+        )
+        story_json = default_content.story_json if default_content and isinstance(default_content.story_json, dict) else {}
         return StoryCatalogResponse(
             id=story.id,
             story_type="generic",
@@ -98,6 +133,7 @@ class StoryCatalogService:
             reading_time_minutes=story.reading_time_minutes,
             character_type=story.character_type,
             total_pages=story.total_pages,
+            cover_image_url=_story_json_cover_image_url(story_json) or story.cover_image,
             available_languages=available_languages or [DEFAULT_GENERIC_STORY_LANGUAGE],
             status=story.status,
             created_at=story.created_at,
@@ -130,6 +166,8 @@ class StoryCatalogService:
             reading_time_minutes=None,
             character_type=None,
             total_pages=len(pages) or len(json_pages) or None,
+            cover_image_url=_story_json_cover_image_url(story_json)
+            or next((page.image_url for page in pages if page.page_type == "cover"), None),
             available_languages=available_languages or ["en"],
             status=_enum_value(story.status) or "",
             created_at=story.created_at,

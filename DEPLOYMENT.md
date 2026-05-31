@@ -11,19 +11,45 @@ The application uses configurable storage paths for images and audio files. This
 Configure these in your `.env` file:
 
 ```bash
-# Storage base for relative roots
-STORAGE_BASE_PATH=/var/storybook
-
 # Image Storage
-MEDIA_ROOT=images
+MEDIA_ROOT=/var/storybook/images
 MEDIA_URL_PREFIX=/photo
+IMAGE_STORAGE_PROVIDER=r2
+
+# Cloudflare R2 image storage
+CLOUDFLARE_R2_ACCOUNT_ID=
+CLOUDFLARE_R2_ACCESS_KEY_ID=
+CLOUDFLARE_R2_SECRET_ACCESS_KEY=
+CLOUDFLARE_R2_BUCKET_NAME=
+CLOUDFLARE_R2_PUBLIC_BASE_URL=
+CLOUDFLARE_R2_IMAGE_KEY_PREFIX=photo
+CLOUDFLARE_R2_REGION=auto
+CLOUDFLARE_R2_CACHE_CONTROL=public, max-age=31536000, immutable
 
 # Audio Storage
-AUDIO_ROOT=audio
+AUDIO_ROOT=/var/storybook/audio
 AUDIO_URL_PREFIX=/audio
+AUDIO_STORAGE_PROVIDER=local
+CLOUDFLARE_R2_AUDIO_KEY_PREFIX=audio
 ```
 
-You can also set `MEDIA_ROOT` and `AUDIO_ROOT` to absolute paths. Absolute paths are used directly; relative paths are resolved under `STORAGE_BASE_PATH`.
+Use absolute paths for production. Relative `MEDIA_ROOT` and `AUDIO_ROOT` values are resolved from the app working directory.
+
+For Cloudflare R2 image storage, create an R2 bucket and S3 API token in Cloudflare, then set:
+
+```bash
+IMAGE_STORAGE_PROVIDER=r2
+AUDIO_STORAGE_PROVIDER=r2
+CLOUDFLARE_R2_ACCOUNT_ID=your_account_id
+CLOUDFLARE_R2_ACCESS_KEY_ID=your_r2_access_key
+CLOUDFLARE_R2_SECRET_ACCESS_KEY=your_r2_secret
+CLOUDFLARE_R2_BUCKET_NAME=your_bucket
+CLOUDFLARE_R2_PUBLIC_BASE_URL=https://media.yourdomain.com
+CLOUDFLARE_R2_IMAGE_KEY_PREFIX=photo
+CLOUDFLARE_R2_AUDIO_KEY_PREFIX=audio
+```
+
+R2 media keys keep the same logical structure as local storage, for example `photo/{parent_id}/{child_id}/profile.jpg`, `photo/stories/{story_id}/cover.png`, and `audio/stories/{story_id}/{language}/page_1.wav`.
 
 ### Linux VM Deployment Steps
 
@@ -53,10 +79,9 @@ nano .env
 
 Update these critical settings:
 ```bash
-# Use a stable storage base path
-STORAGE_BASE_PATH=/var/storybook
-MEDIA_ROOT=images
-AUDIO_ROOT=audio
+# Use stable absolute storage paths
+MEDIA_ROOT=/var/storybook/images
+AUDIO_ROOT=/var/storybook/audio
 
 # Update database connection
 DATABASE_URL=mysql+asyncmy://user:password@localhost:3306/storybook

@@ -1,9 +1,7 @@
 """Story narration generation service."""
 
-import asyncio
 from copy import deepcopy
 import logging
-from pathlib import Path
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +10,7 @@ from app.core.config import settings
 from app.core.exceptions import AppException, NotFoundException
 from app.repository.generic_story_repository import GenericStoryRepository
 from app.repository.story_repository import StoryRepository
+from app.service.story_audio_storage_provider import get_story_audio_storage_service
 from app.utils.google_tts_utils import GoogleTTSProvider
 from app.utils.word_timestamps import generate_word_timestamps
 
@@ -33,7 +32,7 @@ class StoryNarrationService:
         self.generic_stories = GenericStoryRepository(session)
         self.stories = StoryRepository(session)
         self.tts_provider = GoogleTTSProvider()
-        self.audio_root = settings.audio_root_path
+        self.audio_storage = get_story_audio_storage_service()
 
     async def generate_narration(
         self,
@@ -297,7 +296,12 @@ class StoryNarrationService:
             tone=tone,
             emotion=emotion,
         )
-        file_path = await self._save_audio_file(audio_bytes, story_id, language, page_number)
+        audio_url = await self.audio_storage.save_story_page_audio(
+            story_id=story_id,
+            language=language,
+            page_number=page_number,
+            audio_bytes=audio_bytes,
+        )
         word_timestamps = generate_word_timestamps(text, duration)
 
         enriched_page = self._remove_page_fields(page_dict)
@@ -305,7 +309,7 @@ class StoryNarrationService:
         enriched_page["tts_skipped"] = False
         enriched_page["tts_model"] = settings.GOOGLE_TTS_MODEL
         enriched_page["tts_voice"] = settings.GOOGLE_TTS_VOICE
-        enriched_page["audio_url"] = self._audio_url(story_id, language, page_number)
+        enriched_page["audio_url"] = audio_url
         enriched_page["duration"] = round(duration, 2)
         enriched_page["word_timestamps"] = word_timestamps
 
@@ -313,7 +317,7 @@ class StoryNarrationService:
             "Page narration complete: language=%s page=%s file=%s duration=%.2fs timestamps=%s",
             language,
             page_number,
-            file_path,
+            audio_url,
             duration,
             len(word_timestamps),
         )
@@ -337,20 +341,3 @@ class StoryNarrationService:
         word_count = len(text.split())
         timestamp_count = len(timestamps)
         return timestamp_count < max(2, word_count // 2)
-
-    async def _save_audio_file(self, audio_bytes: bytes, story_id: UUID, language: str, page_number: int) -> Path:
-        story_dir = self.audio_root / str(story_id) / language
-        story_dir.mkdir(parents=True, exist_ok=True)
-
-        file_path = story_dir / f"page_{page_number}.wav"
-        try:
-            await asyncio.to_thread(file_path.write_bytes, audio_bytes)
-            logger.info("Saved audio file: %s", file_path)
-            return file_path
-        except IOError:
-            logger.exception("Failed to save audio file: %s", file_path)
-            raise
-
-    @staticmethod
-    def _audio_url(story_id: UUID, language: str, page_number: int) -> str:
-        return f"{settings.AUDIO_URL_PREFIX}/{story_id}/{language}/page_{page_number}.wav"

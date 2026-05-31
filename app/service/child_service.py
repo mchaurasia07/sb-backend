@@ -16,7 +16,7 @@ from app.model.request.child import (
 from app.model.response.child import ActiveChildResponse, ChildProfileResponse, ChildUsernameAvailabilityResponse
 from app.repository.child_repository import ChildRepository
 from app.repository.user_repository import UserRepository
-from app.service.image_storage_service import image_storage_service
+from app.service.image_storage_provider import get_image_storage_service
 
 
 class ChildService:
@@ -77,7 +77,7 @@ class ChildService:
             child_user_id=child_user_id,
             child_password=self._default_child_password(payload.dob),
         )
-        child.avatar_image_url = await image_storage_service.save_child_profile_photo(
+        child.avatar_image_url = await get_image_storage_service().save_child_profile_photo(
             current_user.id,
             child.id,
             photo,

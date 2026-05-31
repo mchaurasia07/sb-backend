@@ -83,6 +83,12 @@ class Story(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     image_plan_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     image_plan_validated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
 
+    # AI configuration locked at story creation so retries use the same provider/models.
+    ai_provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    text_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    image_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    reference_image_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
     # Relationships
     user = relationship("User", foreign_keys=[user_id])
     child = relationship("ChildProfile", foreign_keys=[child_id])
