@@ -33,7 +33,7 @@ class StoryNarrationService:
         self.generic_stories = GenericStoryRepository(session)
         self.stories = StoryRepository(session)
         self.tts_provider = GoogleTTSProvider()
-        self.audio_root = Path(settings.AUDIO_ROOT)
+        self.audio_root = settings.audio_root_path
 
     async def generate_narration(
         self,

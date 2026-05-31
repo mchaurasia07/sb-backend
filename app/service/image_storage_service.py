@@ -29,7 +29,7 @@ class ImageStorageService:
         public_base_url: str,
     ) -> str:
         extension = self._get_extension(photo)
-        directory = Path(settings.MEDIA_ROOT) / str(parent_id) / str(child_id)
+        directory = settings.media_root_path / str(parent_id) / str(child_id)
         directory.mkdir(parents=True, exist_ok=True)
 
         file_path = directory / f"profile{extension}"
@@ -68,7 +68,7 @@ class ImageStorageService:
         Raises:
             AppException: If save operation fails
         """
-        directory = Path(settings.MEDIA_ROOT) / str(parent_id) / str(child_id)
+        directory = settings.media_root_path / str(parent_id) / str(child_id)
         directory.mkdir(parents=True, exist_ok=True)
 
         file_path = directory / "character.png"
@@ -106,7 +106,7 @@ class ImageStorageService:
         Raises:
             AppException: If save operation fails
         """
-        directory = Path(settings.MEDIA_ROOT) / "stories" / str(story_id)
+        directory = settings.media_root_path / "stories" / str(story_id)
         directory.mkdir(parents=True, exist_ok=True)
 
         file_path = directory / filename

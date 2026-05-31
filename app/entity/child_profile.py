@@ -13,7 +13,7 @@ class ChildProfile(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     __tablename__ = "child_profiles"
     __table_args__ = (
-        CheckConstraint("age >= 0 AND age <= 18", name="ck_child_profiles_age_range"),
+        CheckConstraint("age >= 0 AND age <= 12", name="ck_child_profiles_age_range"),
         Index("ix_child_profiles_user_id", "user_id"),
         Index("ix_child_profiles_child_user_id", "child_user_id", unique=True),
     )

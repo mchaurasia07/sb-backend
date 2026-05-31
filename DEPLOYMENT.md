@@ -11,14 +11,19 @@ The application uses configurable storage paths for images and audio files. This
 Configure these in your `.env` file:
 
 ```bash
-# Image Storage (absolute path recommended for production)
-MEDIA_ROOT=/var/storybook/images
+# Storage base for relative roots
+STORAGE_BASE_PATH=/var/storybook
+
+# Image Storage
+MEDIA_ROOT=images
 MEDIA_URL_PREFIX=/photo
 
-# Audio Storage (absolute path recommended for production)
-AUDIO_ROOT=/var/storybook/audio
+# Audio Storage
+AUDIO_ROOT=audio
 AUDIO_URL_PREFIX=/audio
 ```
+
+You can also set `MEDIA_ROOT` and `AUDIO_ROOT` to absolute paths. Absolute paths are used directly; relative paths are resolved under `STORAGE_BASE_PATH`.
 
 ### Linux VM Deployment Steps
 
@@ -48,9 +53,10 @@ nano .env
 
 Update these critical settings:
 ```bash
-# Use absolute paths
-MEDIA_ROOT=/var/storybook/images
-AUDIO_ROOT=/var/storybook/audio
+# Use a stable storage base path
+STORAGE_BASE_PATH=/var/storybook
+MEDIA_ROOT=images
+AUDIO_ROOT=audio
 
 # Update database connection
 DATABASE_URL=mysql+asyncmy://user:password@localhost:3306/storybook
@@ -257,7 +263,7 @@ sudo journalctl -u storybook-backend --no-pager | tail -50
 
 # Test configuration
 source .venv/bin/activate
-python -c "from app.core.config import settings; print(settings.MEDIA_ROOT)"
+python -c "from app.core.config import settings; print(settings.media_root_path); print(settings.audio_root_path)"
 ```
 
 ## Security Checklist

@@ -240,7 +240,7 @@ class CharacterService:
             parts = url_or_path.split(settings.MEDIA_URL_PREFIX + "/")
             if len(parts) == 2:
                 relative_path = parts[1]
-                file_path = Path(settings.MEDIA_ROOT) / relative_path
+                file_path = settings.media_root_path / relative_path
             else:
                 raise AppException("Invalid photo URL format", code="INVALID_URL")
         else:
@@ -250,7 +250,7 @@ class CharacterService:
         file_path = file_path.resolve()
 
         # Verify path is within media root
-        media_root = Path(settings.MEDIA_ROOT).resolve()
+        media_root = settings.media_root_path
         try:
             file_path.relative_to(media_root)
         except ValueError:

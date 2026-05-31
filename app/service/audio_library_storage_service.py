@@ -46,7 +46,7 @@ class AudioLibraryStorageService:
         audio_extension = self._extension(audio_file, self.audio_content_types, "UNSUPPORTED_AUDIO_TYPE")
         image_extension = self._extension(image_file, self.image_content_types, "UNSUPPORTED_IMAGE_TYPE")
 
-        directory = Path(settings.AUDIO_ROOT) / "audio_lib" / str(audio_id)
+        directory = settings.audio_root_path / "audio_lib" / str(audio_id)
         directory.mkdir(parents=True, exist_ok=True)
 
         audio_path = directory / f"audio{audio_extension}"
@@ -60,7 +60,7 @@ class AudioLibraryStorageService:
         return audio_url, image_url
 
     async def delete_generic_audio_directory(self, audio_id: UUID) -> None:
-        directory = Path(settings.AUDIO_ROOT) / "audio_lib" / str(audio_id)
+        directory = settings.audio_root_path / "audio_lib" / str(audio_id)
         if directory.exists():
             await asyncio.to_thread(shutil.rmtree, directory)
 

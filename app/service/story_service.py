@@ -1601,15 +1601,15 @@ class StoryService:
             if not url_path.startswith(media_prefix):
                 raise AppException("Image URL must point to app media storage", code="INVALID_IMAGE_URL")
             relative_path = url_path[len(media_prefix) :]
-            file_path = Path(settings.MEDIA_ROOT) / relative_path
+            file_path = settings.media_root_path / relative_path
         elif raw_value.startswith(media_prefix):
             relative_path = raw_value[len(media_prefix) :]
-            file_path = Path(settings.MEDIA_ROOT) / relative_path
+            file_path = settings.media_root_path / relative_path
         else:
             file_path = Path(raw_value)
 
         file_path = file_path.resolve()
-        media_root = Path(settings.MEDIA_ROOT).resolve()
+        media_root = settings.media_root_path
         try:
             file_path.relative_to(media_root)
         except ValueError:

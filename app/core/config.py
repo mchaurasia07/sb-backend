@@ -1,4 +1,5 @@
 from functools import cached_property
+from pathlib import Path
 
 from pydantic import AnyUrl, Field, field_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
@@ -43,6 +44,7 @@ class Settings(BaseSettings):
     SMTP_TIMEOUT_SECONDS: float
 
     # Storage Configuration - supports both relative and absolute paths
+    STORAGE_BASE_PATH: str = Field(default=".", description="Base path used when storage roots are relative")
     MEDIA_ROOT: str = Field(description="Absolute or relative path for image storage")
     MEDIA_URL_PREFIX: str
     IMAGE_MAX_UPLOAD_BYTES: int
@@ -116,6 +118,24 @@ class Settings(BaseSettings):
     @cached_property
     def cors_origins(self) -> list[str | AnyUrl]:
         return [origin.strip() for origin in self.BACKEND_CORS_ORIGINS.split(",") if origin.strip()]
+
+    @cached_property
+    def storage_base_path(self) -> Path:
+        return Path(self.STORAGE_BASE_PATH).expanduser().resolve()
+
+    @cached_property
+    def media_root_path(self) -> Path:
+        return self._resolve_storage_path(self.MEDIA_ROOT)
+
+    @cached_property
+    def audio_root_path(self) -> Path:
+        return self._resolve_storage_path(self.AUDIO_ROOT)
+
+    def _resolve_storage_path(self, configured_path: str) -> Path:
+        path = Path(configured_path).expanduser()
+        if path.is_absolute():
+            return path.resolve()
+        return (self.storage_base_path / path).resolve()
 
 
 settings = Settings()  # type: ignore[call-arg]

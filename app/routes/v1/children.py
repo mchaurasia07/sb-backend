@@ -135,7 +135,7 @@ async def create_child_profile(
     first_name: str = Form(..., min_length=1, max_length=60),
     last_name: str = Form(..., min_length=1, max_length=60),
     dob: date = Form(...),
-    age: int = Form(..., ge=0, le=18),
+    age: int = Form(..., ge=0, le=12),
     gender: str | None = Form(default=None, max_length=32),
     photo: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
