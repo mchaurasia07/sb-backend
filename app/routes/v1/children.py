@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import AsyncSessionLocal, get_db_session
 from app.core.dependencies import AuthContext, get_auth_context, get_current_user
 from app.core.exceptions import AuthException
+from app.entity.generic_audio import GenericAudioLanguage
 from app.entity.user import User
 from app.model.request.character import CharacterGenerationRequest
 from app.model.request.child import (
@@ -19,6 +20,8 @@ from app.model.request.child import (
     ChildUsernameUpdateRequest,
 )
 from app.model.request.child_book import ChildBookProgressUpdateRequest, ChildBookStatusUpdateRequest
+from app.model.request.generic_audio import AddGenericAudioToChildRequest
+from app.model.response.child_audio import ChildAudioResponse
 from app.model.request.generic_story import AddCustomStoryToChildRequest, AddGenericStoryToChildRequest
 from app.model.response.child_activity import ChildActivityResponse
 from app.model.response.child_book import ChildBookResponse
@@ -27,6 +30,7 @@ from app.model.response.child import ActiveChildResponse, ChildProfileResponse, 
 from app.model.response.common import ApiResponse, PaginatedResponse, success_response
 from app.service.character_service import CharacterService
 from app.service.child_activity_service import ChildActivityService
+from app.service.child_audio_service import ChildAudioService
 from app.service.child_book_service import ChildBookActivityEvent, ChildBookService
 from app.service.child_service import ChildService
 
@@ -256,6 +260,44 @@ async def list_child_activities(
     return success_response(data, "Child activities fetched successfully")
 
 
+@router.get("/{child_id}/audios", response_model=ApiResponse[PaginatedResponse[ChildAudioResponse]])
+async def list_child_audios(
+    child_id: UUID,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    language: GenericAudioLanguage | None = Query(default=None),
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[PaginatedResponse[ChildAudioResponse]]:
+    data = await ChildAudioService(session).list_for_child(
+        current_user=current_user,
+        child_id=child_id,
+        page=page,
+        page_size=page_size,
+        language=language,
+    )
+    return success_response(data, "Child audios fetched successfully")
+
+
+@router.post(
+    "/{child_id}/audios",
+    response_model=ApiResponse[ChildAudioResponse],
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_generic_audio_to_child(
+    child_id: UUID,
+    payload: AddGenericAudioToChildRequest,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[ChildAudioResponse]:
+    data = await ChildAudioService(session).add_generic_audio(
+        current_user=current_user,
+        child_id=child_id,
+        audio_id=payload.audio_id,
+    )
+    return success_response(data, "Generic audio added to child successfully")
+
+
 @router.post(
     "/{child_id}/books/generic",
     response_model=ApiResponse[ChildBookResponse],
@@ -355,6 +397,21 @@ async def delete_child_book(
         child_book_id=child_book_id,
     )
     return success_response(None, "Child book deleted successfully")
+
+
+@router.delete("/{child_id}/audios/{child_audio_id}", response_model=ApiResponse[None])
+async def delete_child_audio(
+    child_id: UUID,
+    child_audio_id: UUID,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[None]:
+    await ChildAudioService(session).delete_child_audio(
+        current_user=current_user,
+        child_id=child_id,
+        child_audio_id=child_audio_id,
+    )
+    return success_response(None, "Child audio deleted successfully")
 
 
 @router.post("/{child_id}/generate-character", response_model=ApiResponse[CharacterGenerationResponse])
