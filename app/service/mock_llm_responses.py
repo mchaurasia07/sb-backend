@@ -14,7 +14,7 @@ def get_mock_story_plan(child_name: str = "Emma", age_group: str = "5-7") -> dic
         page_count = 12
         age_band = "Advanced"
     else:  # Default to 5-7 (Early Reader)
-        page_count = 8
+        page_count = 10
         age_band = "Early Reader"
 
     plan = {
@@ -23,9 +23,27 @@ def get_mock_story_plan(child_name: str = "Emma", age_group: str = "5-7") -> dic
         "age_band": age_band,
         "global_visual_style": "soft pastel watercolor with hand-drawn charcoal outlines",
         "summary": f"Join {child_name} on an exciting adventure where they discover courage and kindness. With a helpful companion, {child_name} overcomes challenges and learns valuable lessons.",
+        "theme": "adventure",
+        "learning_goal": "personal growth",
         "moral_theme": "courage and kindness",
         "setting": "a magical garden kingdom with rolling hills and sparkling streams",
         "tone": "whimsical and adventurous",
+        "visual_bible": {
+            "style": "soft pastel watercolor with hand-drawn charcoal outlines",
+            "hero": {
+                "name": child_name,
+                "appearance": f"A curious and brave {child_name} with bright eyes.",
+                "outfit": "adventure-ready colorful outfit",
+                "signature_item": "a magical compass",
+            },
+            "companion": {
+                "name": "Luna",
+                "appearance": "A wise and friendly owl with silver feathers and kind eyes.",
+            },
+            "father": {"appearance": ""},
+            "mother": {"appearance": ""},
+            "recurring_characters": [],
+        },
         "characters": [
             {
                 "name": child_name,
@@ -188,6 +206,26 @@ def get_mock_story_plan(child_name: str = "Emma", age_group: str = "5-7") -> dic
         ],
     }
 
+    while len(plan["pages"]) < page_count:
+        next_page = len(plan["pages"]) + 1
+        plan["pages"].append(
+            {
+                "page_number": next_page,
+                "story_role": "resolution" if next_page == page_count else "build",
+                "scene_description": f"Emma and Luna continue through the magical garden on step {next_page}",
+                "child_action": "Emma keeps going with courage and kindness",
+                "learning_goal_integration": "Shows steady personal growth through action",
+                "mood": "hopeful determination",
+                "visual_continuity_notes": "Emma keeps the compass and Luna stays nearby",
+            }
+        )
+
+    for page in plan["pages"]:
+        page["characters_present"] = page.get("characters_present") or [child_name, "Luna"]
+        page["emotional_beat"] = page.get("emotional_beat") or page.get("mood") or "wonder"
+        visual_note = page.get("visual_continuity_notes")
+        page["continuity_requirements"] = page.get("continuity_requirements") or ([visual_note] if visual_note else [])
+
     # Trim pages to match page_count if needed
     if len(plan["pages"]) > page_count:
         plan["pages"] = plan["pages"][:page_count]
@@ -238,6 +276,18 @@ def get_mock_story_json(child_name: str = "Emma", story_pages_count: int = 8) ->
 
     # Trim pages to match story_pages_count
     pages = base_pages[:story_pages_count]
+    while len(pages) < story_pages_count:
+        page_number = len(pages) + 1
+        pages.append(
+            {
+                "page_number": page_number,
+                "emotion": "joy" if page_number == story_pages_count else "determination",
+                "text": (
+                    f"Emma and Luna took one more careful step through the garden. Emma used what she had learned, "
+                    f"kept her courage close, and helped the magic grow brighter on page {page_number}."
+                ),
+            }
+        )
 
     return {
         "title": f"{child_name}'s Amazing Adventure",
@@ -255,58 +305,11 @@ def get_mock_image_plan(story_pages_count: int = 8) -> dict[str, Any]:
             {
                 "page_number": i,
                 "story_role": "introduction" if i == 1 else ("resolution" if i == story_pages_count else "escalation"),
-                "scene_goal": f"Show story moment {i} with clear emotional progression.",
-                "character_state": {
-                    "expression": "bright and curious",
-                    "pose": "active storybook pose",
-                    "outfit_visibility": "colorful adventure outfit clearly visible",
-                    "prop_interaction": "holding magical compass",
-                },
-                "companion_state": {
-                    "present": True,
-                    "action": "Luna stays close beside Emma",
-                    "emotion": "supportive and cheerful",
-                    "position_relative_to_child": "slightly behind Emma",
-                },
-                "environment": {
-                    "primary_location": "magical garden",
-                    "foreground_elements": ["soft grass", "small flowers"],
-                    "midground_elements": ["Emma", "Luna"],
-                    "background_elements": ["glowing trees", "storybook sky"],
-                    "surface_texture": "lush green grass",
-                    "weather": "clear",
-                    "time_of_day": "warm afternoon",
-                },
-                "camera": {
-                    "shot_type": "medium storybook shot",
-                    "angle": "eye-level",
-                    "focus_subject": "Emma",
-                    "composition": "centered child-safe storybook composition",
-                },
-                "lighting": {
-                    "style": "cinematic soft lighting",
-                    "intensity": "medium",
-                    "color_temperature": "warm",
-                },
-                "emotion_arc": {
-                    "primary_emotion": "wonder",
-                    "energy_level": "medium",
-                    "scene_tension": "gentle",
-                },
-                "continuity_anchors": {
-                    "must_keep": ["colorful outfit", "magical compass", "Luna's silver feathers"],
-                    "must_not_change": ["Emma's outfit", "Emma's hairstyle", "Luna's golden bell"],
-                },
-                "generation_hints": {
-                    "style_strength": "high",
-                    "character_consistency_priority": "maximum",
-                    "detail_level": "medium-high",
-                    "render_quality": "ultra",
-                },
-                "visual_continuity_check": (
-                    f"Page {i}: Emma (colorful outfit, compass) and Luna "
-                    "(silver feathers, golden bell) present, consistent styling throughout"
-                ),
+                "visual_importance": "climax" if i == story_pages_count - 1 else "medium",
+                "emotion": "wonder",
+                "scene_action": f"Emma and Luna act out story moment {i}.",
+                "environment": "magical garden",
+                "characters_present": ["Emma", "Luna"],
                 "image_prompt": (
                     f"Page {i}: High-quality 3D Pixar-style children's illustration, cinematic lighting, "
                     "Emma in colorful adventure outfit with compass, Luna the silver owl with golden bell, "
@@ -317,41 +320,26 @@ def get_mock_image_plan(story_pages_count: int = 8) -> dict[str, Any]:
         )
 
     return {
-        "character_consistency": {
-            "name": "Emma",
-            "anchor_traits": "Curious young girl with bright eyes, wearing colorful adventure outfit, carrying a magical compass",
-            "locked_visual_identity": {
-                "hair": "brown shoulder-length hair",
-                "face_shape": "round friendly face",
-                "eye_color": "bright brown eyes",
-                "skin_tone": "warm medium skin tone",
+        "visual_bible": {
+            "hero": {
+                "appearance": "Curious young girl with bright eyes and a round friendly face",
                 "outfit": "colorful adventure outfit",
                 "signature_item": "magical compass",
             },
+            "companion": {
+                "appearance": "Luna the silver owl with a small golden bell",
+            },
+            "recurring_characters": [],
         },
         "cover": {
-            "title_text": "Emma's Amazing Adventure",
-            "title_position": "top area",
-            "hero_pose": "Emma standing excited with compass",
-            "primary_color_palette": ["bright green", "gold", "sky blue"],
-            "iconic_story_element": "magical compass",
-            "structured": {
-                "character": "Emma excited with compass, Luna nearby",
-                "action": "adventure ready, looking forward",
-                "environment": "magical garden entrance",
-                "mood": "joyful anticipation",
-            },
+            "visual_focus": "Emma standing excited with compass",
+            "emotion": "joyful anticipation",
             "image_prompt": "Storybook cover design: 'Emma's Amazing Adventure' - Large bold playful typography. Emma standing excited with compass, Luna perched nearby, magical garden backdrop, Pixar 3D style, bright colors, high contrast",
         },
         "pages": pages,
         "back_cover": {
+            "emotion": "peaceful triumph",
             "image_prompt": "Back cover: Emma and Luna under stars, magical garden healed and glowing in background, peaceful satisfied mood, watercolor Pixar style, child-friendly, calm resolution scene",
-            "structured": {
-                "character": "Emma and Luna peaceful",
-                "action": "looking at healed garden",
-                "environment": "magical garden at night with stars",
-                "mood": "peaceful triumph",
-            },
         },
     }
 

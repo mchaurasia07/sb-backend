@@ -11,34 +11,17 @@ class ImagePlanValidationResult:
 
 
 class ImagePlanValidator:
-    """Semantic validator for an image plan generated from a story JSON.
+    """Semantic validator for the Image Planner JSON schema."""
 
-    This validator is intentionally tolerant of extra fields so the image plan
-    schema can evolve over time.
-    """
-
-    _REQUIRED_CHARACTER_IDENTITY_KEYS = {
-        "hair",
-        "face_shape",
-        "eye_color",
-        "skin_tone",
-        "outfit",
-        "signature_item",
-    }
-    _REQUIRED_STRUCTURED_KEYS = {"character", "action", "environment", "mood"}
+    _VALID_VISUAL_IMPORTANCE = {"low", "medium", "high", "climax"}
     _REQUIRED_PAGE_KEYS = {
         "page_number",
         "story_role",
-        "scene_goal",
-        "character_state",
-        "companion_state",
+        "visual_importance",
+        "emotion",
+        "scene_action",
         "environment",
-        "camera",
-        "lighting",
-        "emotion_arc",
-        "continuity_anchors",
-        "generation_hints",
-        "visual_continuity_check",
+        "characters_present",
         "image_prompt",
     }
 
@@ -55,47 +38,10 @@ class ImagePlanValidator:
                 errors=["Story JSON must include a non-empty `pages` array for image planning."],
             )
 
-        expected_page_numbers: list[int] = []
-        for idx, page in enumerate(story_pages):
-            if not isinstance(page, dict):
-                errors.append(f"story.pages[{idx}] must be an object.")
-                continue
-            page_number = page.get("page_number")
-            if not isinstance(page_number, int) or page_number <= 0:
-                errors.append(f"story.pages[{idx}].page_number must be a positive integer.")
-                continue
-            expected_page_numbers.append(page_number)
-
-        if expected_page_numbers:
-            expected = list(range(1, len(story_pages) + 1))
-            if expected_page_numbers != expected:
-                errors.append("Story pages must be sequential and ordered with page_number 1..N.")
-        else:
-            expected_page_numbers = list(range(1, len(story_pages) + 1))
-
-        character_consistency = image_plan.get("character_consistency")
-        if not isinstance(character_consistency, dict):
-            errors.append("Missing or invalid `character_consistency` (must be an object).")
-        else:
-            name = character_consistency.get("name")
-            anchor_traits = character_consistency.get("anchor_traits")
-            locked_visual_identity = character_consistency.get("locked_visual_identity")
-            if not isinstance(name, str) or not name.strip():
-                errors.append("character_consistency.name must be a non-empty string.")
-            if not isinstance(anchor_traits, str) or not anchor_traits.strip():
-                errors.append("character_consistency.anchor_traits must be a non-empty string.")
-            if not isinstance(locked_visual_identity, dict):
-                errors.append("character_consistency.locked_visual_identity must be an object.")
-            else:
-                self._validate_required_strings(
-                    locked_visual_identity,
-                    self._REQUIRED_CHARACTER_IDENTITY_KEYS,
-                    "character_consistency.locked_visual_identity",
-                    errors,
-                )
-
+        expected_page_numbers = self._story_page_numbers(story_pages, errors)
+        self._validate_visual_bible(image_plan.get("visual_bible"), errors)
         self._validate_cover(image_plan.get("cover"), errors)
-        self._validate_item(image_plan.get("back_cover"), "back_cover", errors)
+        self._validate_back_cover(image_plan.get("back_cover"), errors)
 
         pages = image_plan.get("pages")
         if not isinstance(pages, list) or not pages:
@@ -118,49 +64,84 @@ class ImagePlanValidator:
             else:
                 actual_page_numbers.append(page_number)
 
-            self._validate_required_string(page, "story_role", f"pages[{idx}]", errors)
-            self._validate_required_string(page, "scene_goal", f"pages[{idx}]", errors)
-            self._validate_required_string(page, "visual_continuity_check", f"pages[{idx}]", errors)
-            self._validate_required_string(page, "image_prompt", f"pages[{idx}]", errors)
+            for field in ("story_role", "emotion", "scene_action", "environment", "image_prompt"):
+                self._validate_required_string(page, field, f"pages[{idx}]", errors)
 
-            self._validate_object(page, "character_state", f"pages[{idx}]", errors)
-            self._validate_object(page, "companion_state", f"pages[{idx}]", errors)
-            self._validate_object(page, "environment", f"pages[{idx}]", errors)
-            self._validate_object(page, "camera", f"pages[{idx}]", errors)
-            self._validate_object(page, "lighting", f"pages[{idx}]", errors)
-            self._validate_object(page, "emotion_arc", f"pages[{idx}]", errors)
-            self._validate_object(page, "continuity_anchors", f"pages[{idx}]", errors)
-            self._validate_object(page, "generation_hints", f"pages[{idx}]", errors)
+            visual_importance = page.get("visual_importance")
+            if not isinstance(visual_importance, str) or visual_importance.strip() not in self._VALID_VISUAL_IMPORTANCE:
+                errors.append(f"pages[{idx}].visual_importance must be one of: {', '.join(sorted(self._VALID_VISUAL_IMPORTANCE))}.")
 
-        if actual_page_numbers:
-            if actual_page_numbers != expected_page_numbers:
-                errors.append("Image plan pages must match story pages exactly (page_number 1..N).")
+            self._validate_string_array(page, "characters_present", f"pages[{idx}]", errors, allow_empty=True)
+
+        if actual_page_numbers and actual_page_numbers != expected_page_numbers:
+            errors.append("Image plan pages must match story pages exactly (page_number 1..N).")
 
         return ImagePlanValidationResult(ok=(len(errors) == 0), errors=errors)
 
-    def _validate_cover(self, item: Any, errors: list[str]) -> None:
-        self._validate_item(item, "cover", errors)
-        if not isinstance(item, dict):
+    def _story_page_numbers(self, story_pages: list[Any], errors: list[str]) -> list[int]:
+        page_numbers: list[int] = []
+        for idx, page in enumerate(story_pages):
+            if not isinstance(page, dict):
+                errors.append(f"story.pages[{idx}] must be an object.")
+                continue
+            page_number = page.get("page_number")
+            if not isinstance(page_number, int) or page_number <= 0:
+                errors.append(f"story.pages[{idx}].page_number must be a positive integer.")
+                continue
+            page_numbers.append(page_number)
+
+        if page_numbers:
+            expected = list(range(1, len(story_pages) + 1))
+            if page_numbers != expected:
+                errors.append("Story pages must be sequential and ordered with page_number 1..N.")
+                return expected
+            return page_numbers
+        return list(range(1, len(story_pages) + 1))
+
+    def _validate_visual_bible(self, visual_bible: Any, errors: list[str]) -> None:
+        if not isinstance(visual_bible, dict):
+            errors.append("Missing or invalid `visual_bible` (must be an object).")
             return
-        for field in ["title_text", "title_position", "hero_pose", "iconic_story_element"]:
-            self._validate_required_string(item, field, "cover", errors)
 
-        primary_color_palette = item.get("primary_color_palette")
-        if not isinstance(primary_color_palette, list) or not primary_color_palette:
-            errors.append("cover.primary_color_palette must be a non-empty array.")
-
-    def _validate_item(self, item: Any, label: str, errors: list[str]) -> None:
-        if not isinstance(item, dict):
-            errors.append(f"Missing or invalid `{label}` (must be an object).")
-            return
-
-        self._validate_required_string(item, "image_prompt", label, errors)
-
-        structured = item.get("structured")
-        if not isinstance(structured, dict):
-            errors.append(f"{label}.structured must be an object.")
+        hero = visual_bible.get("hero")
+        if not isinstance(hero, dict):
+            errors.append("visual_bible.hero must be an object.")
         else:
-            self._validate_required_strings(structured, self._REQUIRED_STRUCTURED_KEYS, f"{label}.structured", errors)
+            for field in ("appearance", "outfit", "signature_item"):
+                self._validate_required_string(hero, field, "visual_bible.hero", errors)
+
+        companion = visual_bible.get("companion")
+        if companion is not None:
+            if not isinstance(companion, dict):
+                errors.append("visual_bible.companion must be an object.")
+            else:
+                appearance = companion.get("appearance")
+                if appearance is not None and (not isinstance(appearance, str) or not appearance.strip()):
+                    errors.append("visual_bible.companion.appearance must be a non-empty string when provided.")
+
+        recurring = visual_bible.get("recurring_characters")
+        if recurring is None:
+            return
+        if not isinstance(recurring, list):
+            errors.append("visual_bible.recurring_characters must be an array.")
+            return
+        for idx, character in enumerate(recurring):
+            if not isinstance(character, dict):
+                errors.append(f"visual_bible.recurring_characters[{idx}] must be an object.")
+
+    def _validate_cover(self, cover: Any, errors: list[str]) -> None:
+        if not isinstance(cover, dict):
+            errors.append("Missing or invalid `cover` (must be an object).")
+            return
+        for field in ("visual_focus", "emotion", "image_prompt"):
+            self._validate_required_string(cover, field, "cover", errors)
+
+    def _validate_back_cover(self, back_cover: Any, errors: list[str]) -> None:
+        if not isinstance(back_cover, dict):
+            errors.append("Missing or invalid `back_cover` (must be an object).")
+            return
+        for field in ("emotion", "image_prompt"):
+            self._validate_required_string(back_cover, field, "back_cover", errors)
 
     def _validate_required_string(
         self,
@@ -173,26 +154,25 @@ class ImagePlanValidator:
         if not isinstance(value, str) or not value.strip():
             errors.append(f"{label}.{field} must be a non-empty string.")
 
-    def _validate_required_strings(
-        self,
-        obj: dict[str, Any],
-        fields: set[str],
-        label: str,
-        errors: list[str],
-    ) -> None:
-        for field in sorted(fields):
-            self._validate_required_string(obj, field, label, errors)
-
-    def _validate_object(
+    def _validate_string_array(
         self,
         obj: dict[str, Any],
         field: str,
         label: str,
         errors: list[str],
+        *,
+        allow_empty: bool,
     ) -> None:
         value = obj.get(field)
-        if value is not None and not isinstance(value, dict):
-            errors.append(f"{label}.{field} must be an object.")
+        if not isinstance(value, list):
+            errors.append(f"{label}.{field} must be an array.")
+            return
+        if not allow_empty and not value:
+            errors.append(f"{label}.{field} must be a non-empty array.")
+            return
+        for item_idx, item in enumerate(value):
+            if not isinstance(item, str) or not item.strip():
+                errors.append(f"{label}.{field}[{item_idx}] must be a non-empty string.")
 
 
 class ImagePlanValidationError(RuntimeError):

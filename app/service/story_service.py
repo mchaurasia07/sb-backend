@@ -30,6 +30,7 @@ from app.service.image_plan_validator import ImagePlanValidator
 from app.service.story_input_safety_service import StoryInputSafetyService
 from app.service.story_completion_email_service import StoryCompletionEmailService
 from app.service.story_narration_service import StoryNarrationService
+from app.service.story_narration_profile import build_page_narration, normalize_page_emotion
 from app.utils.prompt_loader import load_prompt, render_prompt
 
 logger = logging.getLogger(__name__)
@@ -133,33 +134,11 @@ def _story_moral_text(story_json: dict[str, Any]) -> str | None:
     return _first_non_empty(moral, story_json.get("moral_theme"))
 
 
-def _normalize_speech_narration(value: Any, fallback: dict[str, str] | None = None) -> dict[str, str]:
-    data = value if isinstance(value, dict) else {}
-    fallback = fallback or {}
-    return {
-        "tone": _first_non_empty(data.get("tone"), fallback.get("tone"), "warm, magical, gentle"),
-        "pace": _first_non_empty(data.get("pace"), fallback.get("pace"), "medium"),
-        "emotion": _first_non_empty(data.get("emotion"), fallback.get("emotion"), "wonder"),
-        "voice_style": _first_non_empty(data.get("voice_style"), fallback.get("voice_style"), "storybook narrator"),
-    }
-
-
 def _normalize_story_output(raw_story_json: dict[str, Any], plan: dict[str, Any], story: Story) -> dict[str, Any]:
     """Coerce LLM story output into the canonical story_json contract."""
     source_inputs = plan.get("source_inputs") or _story_source_inputs(story)
     raw_moral = raw_story_json.get("moral")
-    raw_speech_narration = raw_moral.get("speech_narration") if isinstance(raw_moral, dict) else None
     raw_moral_text = raw_moral.get("text") if isinstance(raw_moral, dict) else raw_moral
-
-    moral_speech_narration = _normalize_speech_narration(
-        raw_speech_narration,
-        {
-            "tone": _first_non_empty(plan.get("tone"), "warm, magical, gentle"),
-            "pace": "medium",
-            "emotion": "wonder",
-            "voice_style": "storybook narrator",
-        },
-    )
 
     pages = []
     for idx, page in enumerate(raw_story_json.get("pages") or []):
@@ -168,19 +147,24 @@ def _normalize_story_output(raw_story_json: dict[str, Any], plan: dict[str, Any]
         text = _first_non_empty(page.get("text"), page.get("narration_sample"))
         if not text:
             continue
+        emotion = normalize_page_emotion(page.get("emotion"))
         pages.append(
             {
                 "page_number": len(pages) + 1,
-                "speech_narration": _normalize_speech_narration(
-                    page.get("speech_narration"),
-                    moral_speech_narration,
-                ),
                 "text": text,
+                "emotion": emotion,
+                "narration": build_page_narration(emotion, story.age_group),
             }
         )
 
     if not pages:
         raise AppException("Story generation returned no valid pages", code="INVALID_STORY_JSON")
+    expected_page_count = len(plan.get("pages") or [])
+    if expected_page_count and len(pages) != expected_page_count:
+        raise AppException(
+            f"Story generation returned {len(pages)} pages; expected {expected_page_count}",
+            code="STORY_PAGE_COUNT_MISMATCH",
+        )
 
     return {
         "title": _first_non_empty(raw_story_json.get("title"), plan.get("title"), "Untitled"),
@@ -198,10 +182,7 @@ def _normalize_story_output(raw_story_json: dict[str, Any], plan: dict[str, Any]
         ) or "",
         "summary": _first_non_empty(raw_story_json.get("summary"), plan.get("summary")) or "",
         "pages": pages,
-        "moral": {
-            "speech_narration": moral_speech_narration,
-            "text": _first_non_empty(raw_moral_text, raw_story_json.get("moral_theme"), plan.get("moral_theme")) or "",
-        },
+        "moral": _first_non_empty(raw_moral_text, raw_story_json.get("moral_theme"), plan.get("moral_theme")) or "",
     }
 
 
@@ -774,21 +755,16 @@ class StoryService:
         # Extract detailed character metadata for consistent visual anchor
         character_context = self._build_character_reference_context(child)
 
-        # Render template using safe string replacement to avoid format() issues with JSON
-        prompt = template
-        prompt = prompt.replace("{age_group}", story.age_group.value)
-        prompt = prompt.replace("{first_name}", child.first_name or "Child")
-        prompt = prompt.replace("{gender}", child.gender or "neutral")
-        prompt = prompt.replace("{theme}", _safe_prompt_value(theme))
-        prompt = prompt.replace("{hobby}", hobby)
-        prompt = prompt.replace("{learning_goal}", _safe_prompt_value(source_inputs["learning_goal"]))
-        prompt = prompt.replace("{story_context}", _safe_prompt_value(source_inputs["context"], "none"))
-        prompt = prompt.replace("{moral}", "kindness and courage")
-        prompt = prompt.replace("{pages}", str(pages))
-        prompt = prompt.replace("{custom_character}", "false")
-        # Escape newlines and quotes in character info to prevent prompt injection
-        safe_character_info = character_context["character_description"].replace("\n", " ").replace('"', '\\"')
-        prompt = prompt.replace("{character_description}", safe_character_info)
+        prompt = self._render_story_plan_prompt(
+            template,
+            story=story,
+            child=child,
+            source_inputs=source_inputs,
+            theme=theme,
+            hobby=hobby,
+            pages=pages,
+            character_context=character_context,
+        )
 
         # Create step record
         step = await self.story_steps.create(story.id, StoryStepName.STORY_PLAN_GENERATION)
@@ -958,22 +934,17 @@ class StoryService:
         hobby = self._get_hobby_for_age_group(story.age_group)
         character_context = self._build_character_reference_context(child)
 
-        # Add error feedback to prompt using safe string replacement
         error_feedback = "\n".join([f"- {err}" for err in errors])
-        enhanced_prompt = template
-        enhanced_prompt = enhanced_prompt.replace("{age_group}", story.age_group.value)
-        enhanced_prompt = enhanced_prompt.replace("{first_name}", child.first_name or "Child")
-        enhanced_prompt = enhanced_prompt.replace("{gender}", child.gender or "neutral")
-        enhanced_prompt = enhanced_prompt.replace("{theme}", _safe_prompt_value(theme))
-        enhanced_prompt = enhanced_prompt.replace("{hobby}", hobby)
-        enhanced_prompt = enhanced_prompt.replace("{learning_goal}", _safe_prompt_value(source_inputs["learning_goal"]))
-        enhanced_prompt = enhanced_prompt.replace("{story_context}", _safe_prompt_value(source_inputs["context"], "none"))
-        enhanced_prompt = enhanced_prompt.replace("{moral}", "kindness and courage")
-        enhanced_prompt = enhanced_prompt.replace("{pages}", str(pages))
-        enhanced_prompt = enhanced_prompt.replace("{custom_character}", "false")
-        # Escape newlines and quotes in character info to prevent prompt injection
-        safe_character_info = character_context["character_description"].replace("\n", " ").replace('"', '\\"')
-        enhanced_prompt = enhanced_prompt.replace("{character_description}", safe_character_info)
+        enhanced_prompt = self._render_story_plan_prompt(
+            template,
+            story=story,
+            child=child,
+            source_inputs=source_inputs,
+            theme=theme,
+            hobby=hobby,
+            pages=pages,
+            character_context=character_context,
+        )
         enhanced_prompt += f"\n\nPREVIOUS VALIDATION ERRORS (fix these):\n{error_feedback}"
 
         result = await self.ai_provider.generate_text(
@@ -1015,7 +986,8 @@ class StoryService:
         step.started_at = datetime.utcnow()
 
         template = load_prompt("prompts/story/story_generation_prompt.txt")
-        prompt = template.replace("{story_plan_json}", json.dumps(plan, indent=2))
+        prompt_plan = self._build_story_generation_context(plan)
+        prompt = template.replace("{story_plan_json}", _compact_json(prompt_plan))
         step.prompt = prompt
         await self.story_steps.update(step)
         await self.session.commit()
@@ -1074,6 +1046,7 @@ class StoryService:
         prompt = template.replace("{story_plan_json}", _compact_json(compact_story_plan))
         prompt = prompt.replace("{story_json}", _compact_json(compact_story_json))
         prompt = prompt.replace("{character_description}", character_context["character_description"])
+        prompt = prompt.replace("{character_profile}", character_context["character_description"])
         prompt = prompt.replace("{child_age_label}", character_context["child_age_label"])
         prompt = prompt.replace("{child_age_visual_guidance}", character_context["child_age_visual_guidance"])
         step.prompt = prompt
@@ -1195,26 +1168,6 @@ class StoryService:
 
     @staticmethod
     def _normalize_image_plan(image_plan: dict[str, Any]) -> dict[str, Any]:
-        pages = image_plan.get("pages") if isinstance(image_plan, dict) else None
-        if not isinstance(pages, list):
-            return image_plan
-
-        for page in pages:
-            if not isinstance(page, dict):
-                continue
-
-            continuity_anchors = page.get("continuity_anchors")
-            if isinstance(continuity_anchors, list):
-                page["continuity_anchors"] = {
-                    "must_keep": [str(item) for item in continuity_anchors[:3]],
-                    "must_not_change": [],
-                }
-            elif isinstance(continuity_anchors, str):
-                page["continuity_anchors"] = {
-                    "must_keep": [continuity_anchors],
-                    "must_not_change": [],
-                }
-
         return image_plan
 
     async def _step_generate_images(
@@ -1239,7 +1192,7 @@ class StoryService:
             cover = image_plan.get("cover", {})
             back_cover = image_plan.get("back_cover", {})
             image_pages = image_plan.get("pages", [])
-            character_consistency = image_plan.get("character_consistency", {})
+            visual_bible = image_plan.get("visual_bible", {})
             image_generation_template = load_prompt("prompts/story/image_generation_prompt.txt")
             child = await self.children.get_for_user(story.user_id, story.child_id)
             if child is None:
@@ -1279,11 +1232,12 @@ class StoryService:
                 logger.info(f"Story {story.id}: Generating cover image")
                 cover_prompt = self._render_story_image_prompt(
                     image_generation_template,
-                    character_consistency,
+                    visual_bible,
                     cover.get("image_prompt"),
                     character_context,
                     page_type="cover",
                     target_aspect_ratio=settings.STORY_COVER_ASPECT_RATIO,
+                    page_data=cover,
                 )
                 cover_bytes = await self.ai_provider.create_story_image(
                     cover_prompt,
@@ -1352,11 +1306,12 @@ class StoryService:
                     logger.info(f"Story {story.id}: Generating image for page {page_num}")
                     page_prompt = self._render_story_image_prompt(
                         image_generation_template,
-                        character_consistency,
+                        visual_bible,
                         img_page.get("image_prompt"),
                         character_context,
                         page_type="story_page",
                         target_aspect_ratio=settings.STORY_PAGE_ASPECT_RATIO,
+                        page_data=img_page,
                     )
                     image_bytes = await self.ai_provider.create_story_image(
                         page_prompt,
@@ -1426,11 +1381,12 @@ class StoryService:
                 logger.info(f"Story {story.id}: Generating back cover image")
                 back_cover_prompt = self._render_story_image_prompt(
                     image_generation_template,
-                    character_consistency,
+                    visual_bible,
                     back_cover.get("image_prompt"),
                     character_context,
                     page_type="back_cover",
                     target_aspect_ratio=settings.STORY_BACK_COVER_ASPECT_RATIO,
+                    page_data=back_cover,
                 )
                 back_cover_bytes = await self.ai_provider.create_story_image(
                     back_cover_prompt,
@@ -1571,17 +1527,20 @@ class StoryService:
     @staticmethod
     def _render_story_image_prompt(
         template: str,
-        character_consistency: dict[str, Any],
+        visual_bible: dict[str, Any],
         image_prompt: str,
         character_context: dict[str, str],
         page_type: str,
         target_aspect_ratio: str,
+        page_data: dict[str, Any] | None = None,
     ) -> str:
         """Render the final story image prompt with consistency context."""
         return render_prompt(
             template,
             {
-                "character_consistency_json": character_consistency,
+                "visual_bible": visual_bible,
+                "page_data": page_data or {"image_prompt": image_prompt},
+                "character_consistency_json": visual_bible,
                 "character_reference_metadata": character_context["character_description"],
                 "child_age_label": character_context["child_age_label"],
                 "child_age_visual_guidance": character_context["child_age_visual_guidance"],
@@ -1592,53 +1551,157 @@ class StoryService:
         )
 
     @staticmethod
+    def _render_story_plan_prompt(
+        template: str,
+        *,
+        story: Story,
+        child: Any,
+        source_inputs: dict[str, str],
+        theme: str,
+        hobby: str,
+        pages: int,
+        character_context: dict[str, str],
+    ) -> str:
+        """Render the story planner template for first attempt and retry."""
+        character_profile = StoryService._build_story_planner_character_profile(child, character_context)
+        return render_prompt(
+            template,
+            {
+                "age_group": story.age_group.value,
+                "first_name": child.first_name or "Child",
+                "gender": child.gender or "neutral",
+                "theme": _safe_prompt_value(theme),
+                "hobby": hobby,
+                "learning_goal": _safe_prompt_value(source_inputs["learning_goal"]),
+                "story_context": _safe_prompt_value(source_inputs["context"], "none"),
+                "moral": "kindness and courage",
+                "pages": pages,
+                "custom_character": False,
+                "character_profile_json": character_profile,
+                "character_profile": character_profile,
+                "character_description": character_context["character_description"],
+            },
+        )
+
+    @staticmethod
+    def _build_story_planner_character_profile(child: Any, character_context: dict[str, str]) -> dict[str, Any]:
+        """Build the character-profile input expected by the new planner prompt."""
+        metadata = child.character_metadata if isinstance(child.character_metadata, dict) else {}
+        return {
+            "age": child.age,
+            "gender": child.gender or "",
+            "name": child.first_name or "Child",
+            "profile_summary": character_context["character_description"],
+            "child_age_label": character_context["child_age_label"],
+            "age_visual_guidance": character_context["child_age_visual_guidance"],
+            "generated_character": {
+                "image_url": child.character_image_url or "",
+                "description": metadata.get("description") or character_context["character_description"],
+                "style": metadata.get("style") or "premium semi-realistic 3D storybook",
+            },
+        }
+
+    @staticmethod
+    def _build_story_generation_context(story_plan: dict[str, Any]) -> dict[str, Any]:
+        """Build a compact story-plan context with only fields needed for narration."""
+        def text(value: Any) -> str:
+            return value.strip() if isinstance(value, str) else ""
+
+        pages = []
+        for page in story_plan.get("pages", []):
+            if not isinstance(page, dict):
+                continue
+
+            characters_present = page.get("characters_present")
+            if isinstance(characters_present, list):
+                characters_present = [
+                    character
+                    for character in characters_present
+                    if isinstance(character, str) and character.strip()
+                ]
+            else:
+                characters_present = []
+
+            pages.append(
+                {
+                    "page_number": page.get("page_number"),
+                    "story_role": text(page.get("story_role")),
+                    "scene_description": text(page.get("scene_description")),
+                    "characters_present": characters_present,
+                    "emotional_beat": text(page.get("emotional_beat")),
+                    "learning_goal_integration": text(page.get("learning_goal_integration")),
+                    "continuity_requirements": page.get("continuity_requirements")
+                    if isinstance(page.get("continuity_requirements"), list)
+                    else [],
+                }
+            )
+
+        return {
+            "title": text(story_plan.get("title")),
+            "summary": text(story_plan.get("summary")),
+            "theme": text(story_plan.get("theme")),
+            "learning_goal": text(story_plan.get("learning_goal")),
+            "moral_theme": text(story_plan.get("moral_theme")),
+            "setting": text(story_plan.get("setting")),
+            "tone": text(story_plan.get("tone")),
+            "visual_bible": story_plan.get("visual_bible") if isinstance(story_plan.get("visual_bible"), dict) else {},
+            "pages": pages,
+        }
+
+    @staticmethod
     def _build_image_plan_context(
         story_plan: dict[str, Any],
         story_json: dict[str, Any],
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Build a compact prompt context with only fields needed for image planning."""
+        def text(value: Any) -> str:
+            return value.strip() if isinstance(value, str) else ""
+
         compact_plan_pages = []
         for page in story_plan.get("pages", []):
             if not isinstance(page, dict):
                 continue
 
-            page_number = page.get("page_number")
+            characters_present = page.get("characters_present")
+            if isinstance(characters_present, list):
+                characters_present = [
+                    character
+                    for character in characters_present
+                    if isinstance(character, str) and character.strip()
+                ]
+            else:
+                characters_present = []
+
+            continuity_requirements = page.get("continuity_requirements")
+            if not isinstance(continuity_requirements, list):
+                continuity_requirements = []
+
             compact_plan_pages.append(
                 {
-                    "page_number": page_number,
-                    "story_role": page.get("story_role"),
-                    "scene_description": page.get("scene_description"),
-                    "child_action": page.get("child_action"),
-                    "learning_goal_integration": page.get("learning_goal_integration"),
-                    "environment": page.get("environment"),
-                    "mood": page.get("mood"),
-                    "visual_continuity_notes": page.get("visual_continuity_notes"),
-                    "base_image_prompt": page.get("image_gen_prompt"),
+                    "page_number": page.get("page_number"),
+                    "story_role": text(page.get("story_role")),
+                    "scene_description": text(page.get("scene_description")),
+                    "characters_present": characters_present,
+                    "child_action": text(page.get("child_action")),
+                    "emotional_beat": text(page.get("emotional_beat")),
+                    "continuity_requirements": continuity_requirements,
                 }
             )
 
         compact_story_plan = {
-            "source_inputs": story_plan.get("source_inputs"),
-            "title": story_plan.get("title"),
-            "final_page_count": story_plan.get("final_page_count"),
-            "age_band": story_plan.get("age_band"),
-            "global_visual_style": story_plan.get("global_visual_style"),
-            "summary": story_plan.get("summary"),
-            "moral_theme": story_plan.get("moral_theme"),
-            "setting": story_plan.get("setting"),
-            "tone": story_plan.get("tone"),
-            "characters": story_plan.get("characters", []),
+            "title": text(story_plan.get("title")),
+            "setting": text(story_plan.get("setting")),
+            "tone": text(story_plan.get("tone")),
+            "visual_bible": story_plan.get("visual_bible") if isinstance(story_plan.get("visual_bible"), dict) else {},
             "pages": compact_plan_pages,
         }
 
         compact_story_json = {
-            "title": story_json.get("title"),
-            "summary": story_json.get("summary"),
-            "moral_theme": _story_moral_text(story_json),
             "pages": [
                 {
                     "page_number": page.get("page_number"),
-                    "text": page.get("text"),
+                    "emotion": text(page.get("emotion")),
+                    "text": text(page.get("text")),
                 }
                 for page in story_json.get("pages", [])
                 if isinstance(page, dict)

@@ -1,0 +1,62 @@
+from app.service.story_service_batch_service import BatchImageItem, StoryServiceBatchService
+from app.utils.google_tts_utils import GoogleTTSProvider
+
+
+def test_image_batch_payload_includes_new_page_data_shape():
+    page_data = {
+        "page_number": 1,
+        "story_role": "introduction",
+        "visual_importance": "medium",
+        "emotion": "wonder",
+        "scene_action": "Mira opens the moon map.",
+        "environment": "Moonlit library.",
+        "characters_present": ["Mira"],
+        "image_prompt": "Mira opens a glowing moon map in a moonlit library.",
+    }
+    item = BatchImageItem(
+        key="page_1",
+        page_type="page",
+        page_number=1,
+        page_data=page_data,
+        source_image_prompt=page_data["image_prompt"],
+        rendered_prompt='Visual Bible: {"hero":{}} Page Data: {"page_number":1}',
+        aspect_ratio="1:1",
+        image_size="1024x1024",
+        file_name="page_1.png",
+        text="Mira opened the moon map.",
+    )
+
+    payload = StoryServiceBatchService._image_item_payload(item)
+
+    assert payload["page_data"] == page_data
+    assert payload["rendered_prompt"] == item.rendered_prompt
+    assert "{visual_bible}" not in payload["rendered_prompt"]
+    assert "{page_data}" not in payload["rendered_prompt"]
+
+
+def test_audio_batch_items_use_page_narration_from_story_json():
+    service = StoryServiceBatchService.__new__(StoryServiceBatchService)
+    service.tts_provider = GoogleTTSProvider()
+    story_json = {
+        "pages": [
+            {
+                "page_number": 1,
+                "text": "Mira opened the moon map.",
+                "emotion": "triumph",
+                "narration": {
+                    "tone": "celebratory",
+                    "pace": "medium",
+                    "voice_style": "expressive cinematic storyteller",
+                },
+            }
+        ]
+    }
+
+    items = service._build_audio_items(story_json)
+
+    assert len(items) == 1
+    assert items[0].tone == "celebratory"
+    assert items[0].pace == "medium"
+    assert items[0].voice_style == "expressive cinematic storyteller"
+    assert items[0].emotion == "triumph"
+    assert "expressive cinematic storyteller" in items[0].prompt

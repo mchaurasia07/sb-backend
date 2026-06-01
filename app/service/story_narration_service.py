@@ -11,6 +11,7 @@ from app.core.exceptions import AppException, NotFoundException
 from app.repository.generic_story_repository import GenericStoryRepository
 from app.repository.story_repository import StoryRepository
 from app.service.story_audio_storage_provider import get_story_audio_storage_service
+from app.service.story_narration_profile import build_page_narration
 from app.utils.google_tts_utils import GoogleTTSProvider
 from app.utils.word_timestamps import generate_word_timestamps
 
@@ -252,11 +253,19 @@ class StoryNarrationService:
         if not text:
             raise ValueError(f"Page text is empty for page {page_number}")
 
+        narration = page_dict.get("narration") if isinstance(page_dict.get("narration"), dict) else {}
         speech_narration = page_dict.get("speech_narration") or default_speech_narration or {}
-        pace = speech_narration.get("pace", "medium")
-        voice_style = speech_narration.get("voice_style", "storybook narrator")
-        tone = speech_narration.get("tone", "warm, magical, gentle")
-        emotion = speech_narration.get("emotion", "wonder")
+        emotion = page_dict.get("emotion") or speech_narration.get("emotion", "wonder")
+        derived_narration = build_page_narration(emotion)
+        narration = {
+            "tone": narration.get("tone") or derived_narration["tone"],
+            "pace": narration.get("pace") or derived_narration["pace"],
+            "voice_style": narration.get("voice_style") or derived_narration["voice_style"],
+        }
+        page_dict["narration"] = narration
+        pace = narration["pace"]
+        voice_style = narration["voice_style"]
+        tone = narration["tone"]
 
         logger.info(
             "Generating TTS: story_id=%s language=%s page=%s pace=%s text_length=%s",

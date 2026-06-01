@@ -11,6 +11,12 @@ class SpeechNarrationResponse(BaseModel):
     voice_style: str | None = None
 
 
+class PageNarrationResponse(BaseModel):
+    tone: str | None = None
+    pace: str | None = None
+    voice_style: str | None = None
+
+
 class WordTimestampResponse(BaseModel):
     word: str
     start: float
@@ -20,6 +26,8 @@ class WordTimestampResponse(BaseModel):
 class StoryPageContentResponse(BaseModel):
     page_number: int | None = None
     speech_narration: SpeechNarrationResponse | None = None
+    emotion: str | None = None
+    narration: PageNarrationResponse | None = None
     text: str | None = None
     image_url: str | None = None
     tts_prompt: str | None = None

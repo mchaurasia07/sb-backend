@@ -32,6 +32,7 @@ from app.service.ai.google_provider import GoogleProvider
 from app.service.image_storage_provider import get_image_storage_service
 from app.service.story_audio_storage_provider import get_story_audio_storage_service
 from app.service.story_completion_email_service import StoryCompletionEmailService
+from app.service.story_narration_profile import build_page_narration
 from app.service.story_service import DEFAULT_STORY_LANGUAGE, StoryGenerationFlags, StoryService
 from app.utils.google_tts_utils import GoogleTTSProvider
 from app.utils.prompt_loader import load_prompt
@@ -45,6 +46,7 @@ class BatchImageItem:
     key: str
     page_type: str
     page_number: int
+    page_data: dict[str, Any]
     source_image_prompt: str
     rendered_prompt: str
     aspect_ratio: str
@@ -1326,7 +1328,7 @@ class StoryServiceBatchService:
         image_plan: dict[str, Any],
     ) -> list[BatchImageItem]:
         image_generation_template = load_prompt("prompts/story/image_generation_prompt.txt")
-        character_consistency = image_plan.get("character_consistency", {})
+        visual_bible = image_plan.get("visual_bible", {})
         child = await self.children.get_for_user(story.user_id, story.child_id)
         if child is None:
             raise NotFoundException("Child profile not found during batch image generation")
@@ -1346,14 +1348,16 @@ class StoryServiceBatchService:
                 key="cover",
                 page_type="cover",
                 page_number=0,
+                page_data=cover,
                 source_image_prompt=cover["image_prompt"],
                 rendered_prompt=StoryService._render_story_image_prompt(
                     image_generation_template,
-                    character_consistency,
+                    visual_bible,
                     cover["image_prompt"],
                     character_context,
                     page_type="cover",
                     target_aspect_ratio=settings.STORY_COVER_ASPECT_RATIO,
+                    page_data=cover,
                 ),
                 aspect_ratio=settings.STORY_COVER_ASPECT_RATIO,
                 image_size=settings.STORY_COVER_IMAGE_SIZE,
@@ -1377,14 +1381,16 @@ class StoryServiceBatchService:
                     key=f"page_{page_number}",
                     page_type="page",
                     page_number=page_number,
+                    page_data=img_page,
                     source_image_prompt=image_prompt,
                     rendered_prompt=StoryService._render_story_image_prompt(
                         image_generation_template,
-                        character_consistency,
+                        visual_bible,
                         image_prompt,
                         character_context,
                         page_type="story_page",
                         target_aspect_ratio=settings.STORY_PAGE_ASPECT_RATIO,
+                        page_data=img_page,
                     ),
                     aspect_ratio=settings.STORY_PAGE_ASPECT_RATIO,
                     image_size=settings.STORY_PAGE_IMAGE_SIZE,
@@ -1402,14 +1408,16 @@ class StoryServiceBatchService:
                 key="back_cover",
                 page_type="back_cover",
                 page_number=back_cover_page_number,
+                page_data=back_cover,
                 source_image_prompt=back_cover["image_prompt"],
                 rendered_prompt=StoryService._render_story_image_prompt(
                     image_generation_template,
-                    character_consistency,
+                    visual_bible,
                     back_cover["image_prompt"],
                     character_context,
                     page_type="back_cover",
                     target_aspect_ratio=settings.STORY_BACK_COVER_ASPECT_RATIO,
+                    page_data=back_cover,
                 ),
                 aspect_ratio=settings.STORY_BACK_COVER_ASPECT_RATIO,
                 image_size=settings.STORY_BACK_COVER_IMAGE_SIZE,
@@ -1599,11 +1607,19 @@ class StoryServiceBatchService:
             text = (page.get("text") or "").strip()
             if not text:
                 continue
+            narration = page.get("narration") if isinstance(page.get("narration"), dict) else {}
             speech = page.get("speech_narration") or default_speech_narration or {}
-            pace = speech.get("pace", "medium")
-            voice_style = speech.get("voice_style", "storybook narrator")
-            tone = speech.get("tone", "warm, magical, gentle")
-            emotion = speech.get("emotion", "wonder")
+            emotion = page.get("emotion") or speech.get("emotion", "wonder")
+            derived_narration = build_page_narration(emotion)
+            narration = {
+                "tone": narration.get("tone") or derived_narration["tone"],
+                "pace": narration.get("pace") or derived_narration["pace"],
+                "voice_style": narration.get("voice_style") or derived_narration["voice_style"],
+            }
+            page["narration"] = narration
+            pace = narration["pace"]
+            voice_style = narration["voice_style"]
+            tone = narration["tone"]
             prompt = self.tts_provider.build_prompt(
                 text,
                 pace=pace,
@@ -1754,6 +1770,7 @@ class StoryServiceBatchService:
             "key": item.key,
             "page_type": item.page_type,
             "page_number": item.page_number,
+            "page_data": item.page_data,
             "source_image_prompt": item.source_image_prompt,
             "rendered_prompt": item.rendered_prompt,
             "aspect_ratio": item.aspect_ratio,

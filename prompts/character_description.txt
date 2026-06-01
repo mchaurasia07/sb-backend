@@ -1,12 +1,34 @@
-Describe this illustrated character in detail to create a reference for consistent character appearance across story illustrations.
+Analyze the Master Character Reference Portrait.
 
-Character: {child_name}, Age {age}
+Extract a stable visual identity profile for future story illustration generation.
 
-Describe the character's appearance in detail including:
-- Physical appearance (face shape, eye color, hair color and style)
-- Distinctive visual features that make this character unique
-- Clothing and accessories
-- Overall art style and aesthetic
-- Color palette and styling
+Return ONLY valid JSON.
 
-Write a single detailed paragraph suitable for reference in future AI character generation prompts. Focus on specific visual details that would help recreate this character consistently.
+Schema:
+
+{
+"face_shape": "",
+"skin_tone": "",
+"eye_color": "",
+"eye_shape": "",
+"eyebrow_shape": "",
+"nose_shape": "",
+"mouth_description": "",
+"hair_color": "",
+"hair_style": "",
+"hair_length": "",
+"distinctive_features": []
+}
+
+Requirements:
+
+* Describe only visible visual features.
+* Do not infer personality.
+* Do not describe emotions.
+* Do not describe clothing.
+* Do not describe the background.
+* Do not describe camera angle.
+* Do not invent features that are not visible.
+* Keep values concise and objective.
+* distinctive_features should contain only stable identifying traits.
+* Return JSON only.

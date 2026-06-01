@@ -11,24 +11,13 @@ class PlanValidationResult:
 
 
 class PlanValidator:
-    """Semantic validator for story plans returned by an LLM.
+    """Semantic validator for the Story Planner JSON schema."""
 
-    This validator is intentionally tolerant of extra fields so the plan schema
-    can evolve over time.
-    """
-
-    _AGE_BAND_PAGE_RANGES: dict[str, tuple[int, int]] = {
-        "Toddler": (4, 6),
-        "Early Reader": (8, 10),
-        "Advanced": (10, 14),
+    _AGE_GROUP_PAGE_COUNTS: dict[str, int] = {
+        "2-4": 6,
+        "5-7": 10,
+        "8-12": 12,
     }
-
-    _AGE_GROUP_ALLOWED_BANDS: dict[str, set[str]] = {
-        "2-4": {"Toddler"},
-        "5-7": {"Early Reader"},
-        "8-12": {"Advanced"},
-    }
-
     def validate(
         self,
         plan: dict[str, Any],
@@ -41,109 +30,40 @@ class PlanValidator:
         if not isinstance(plan, dict):
             return PlanValidationResult(ok=False, errors=["Plan must be a JSON object."])
 
-        # --- Required top-level fields (from story_plan_prompt.txt schema)
-        title = plan.get("title")
-        age_band = plan.get("age_band")
-        final_page_count = plan.get("final_page_count")
-        summary = plan.get("summary")
-        moral_theme = plan.get("moral_theme")
-        setting = plan.get("setting")
-        tone = plan.get("tone")
-        characters = plan.get("characters")
-        pages = plan.get("pages")
-        plan_source_inputs = plan.get("source_inputs")
+        for field in ("title", "summary", "theme", "learning_goal", "moral_theme", "setting", "tone"):
+            self._validate_required_string(plan, field, "plan", errors)
 
-        if not isinstance(title, str) or not title.strip():
-            errors.append("Missing or invalid `title` (must be a non-empty string).")
-        if not isinstance(age_band, str) or not age_band.strip():
-            errors.append("Missing or invalid `age_band` (must be a non-empty string).")
-        else:
-            if age_band not in ("Toddler", "Early Reader", "Advanced"):
-                errors.append("Invalid `age_band` (must be 'Toddler', 'Early Reader', or 'Advanced').")
-        if not isinstance(final_page_count, int) or final_page_count <= 0:
-            errors.append("Missing or invalid `final_page_count` (must be a positive integer).")
-        if not isinstance(summary, str) or not summary.strip():
-            errors.append("Missing or invalid `summary` (must be a non-empty string).")
-        if not isinstance(moral_theme, str) or not moral_theme.strip():
-            errors.append("Missing or invalid `moral_theme` (must be a non-empty string).")
-        if not isinstance(setting, str) or not setting.strip():
-            errors.append("Missing or invalid `setting` (must be a non-empty string).")
-        if not isinstance(tone, str) or not tone.strip():
-            errors.append("Missing or invalid `tone` (must be a non-empty string).")
         if source_inputs is not None:
-            if not isinstance(plan_source_inputs, dict):
-                errors.append("Missing or invalid `source_inputs` (must be an object).")
-            else:
-                for field in ("category", "learning_goal", "context"):
-                    expected = source_inputs.get(field, "")
-                    actual = plan_source_inputs.get(field)
-                    if actual != expected:
-                        errors.append(
-                            f"`source_inputs.{field}` must match the request value exactly."
-                        )
-        if not isinstance(characters, list) or not characters:
-            errors.append("Missing or invalid `characters` (must be a non-empty array).")
+            self._validate_source_inputs(plan, source_inputs, errors)
+
+        self._validate_visual_bible(plan.get("visual_bible"), errors)
+
+        pages = plan.get("pages")
         if not isinstance(pages, list) or not pages:
             errors.append("Missing or invalid `pages` (must be a non-empty array).")
             return PlanValidationResult(ok=False, errors=errors)
 
-        # --- Characters required keys (from story_plan_prompt.txt schema)
-        if isinstance(characters, list):
-            for idx, character in enumerate(characters):
-                if not isinstance(character, dict):
-                    errors.append(f"characters[{idx}] must be an object.")
-                    continue
+        expected_count = self._AGE_GROUP_PAGE_COUNTS.get(self._enum_value(age_group))
+        if expected_count is not None and len(pages) != expected_count:
+            errors.append(f"`pages.length` must be {expected_count} for age_group={age_group}.")
 
-                name = character.get("name")
-                if not isinstance(name, str) or not name.strip():
-                    errors.append(f"characters[{idx}].name must be a non-empty string.")
-
-                role = character.get("role")
-                if not isinstance(role, str) or not role.strip():
-                    errors.append(f"characters[{idx}].role must be a non-empty string.")
-                else:
-                    valid_roles = {"hero", "companion", "supporter", "reframed_custom"}
-                    if role.strip() not in valid_roles:
-                        errors.append(f"characters[{idx}].role must be one of: {', '.join(valid_roles)}.")
-
-                anchor_description = character.get("anchor_description")
-                if not isinstance(anchor_description, str) or not anchor_description.strip():
-                    errors.append(f"characters[{idx}].anchor_description must be a non-empty string.")
-
-                visual_traits = character.get("visual_traits")
-                if not isinstance(visual_traits, dict):
-                    errors.append(f"characters[{idx}].visual_traits must be an object.")
-                    continue
-
-                hair = visual_traits.get("hair")
-                clothing = visual_traits.get("clothing")
-                signature_item = visual_traits.get("signature_item")
-                if not isinstance(hair, str) or not hair.strip():
-                    errors.append(f"characters[{idx}].visual_traits.hair must be a non-empty string.")
-                if not isinstance(clothing, str) or not clothing.strip():
-                    errors.append(f"characters[{idx}].visual_traits.clothing must be a non-empty string.")
-                if not isinstance(signature_item, str) or not signature_item.strip():
-                    errors.append(f"characters[{idx}].visual_traits.signature_item must be a non-empty string.")
-
-        # --- Page sequence + required keys (from story_plan_prompt.txt schema)
-        page_numbers_in_order: list[int] = []
+        page_numbers: list[int] = []
         required_page_keys = {
             "page_number",
             "story_role",
             "scene_description",
-            "narration_sample",
+            "characters_present",
             "child_action",
+            "emotional_beat",
             "learning_goal_integration",
-            "environment",
-            "mood",
-            "visual_continuity_notes",
+            "continuity_requirements",
         }
+
         for idx, page in enumerate(pages):
             if not isinstance(page, dict):
                 errors.append(f"pages[{idx}] must be an object.")
                 continue
 
-            # Check for missing required keys
             missing_keys = required_page_keys - set(page.keys())
             if missing_keys:
                 errors.append(f"pages[{idx}] missing required fields: {', '.join(sorted(missing_keys))}.")
@@ -152,61 +72,135 @@ class PlanValidator:
             if not isinstance(page_number, int) or page_number <= 0:
                 errors.append(f"pages[{idx}].page_number must be a positive integer.")
             else:
-                page_numbers_in_order.append(page_number)
+                page_numbers.append(page_number)
 
             story_role = page.get("story_role")
             if not isinstance(story_role, str) or not story_role.strip():
                 errors.append(f"pages[{idx}].story_role must be a non-empty string.")
             else:
-                valid_roles = {
-                    "introduction",
-                    "setup",
-                    "build",
-                    "conflict",
-                    "struggle",
-                    "escalation",
-                    "climax",
-                    "resolution",
-                }
-                if story_role.strip() not in valid_roles:
-                    errors.append(f"pages[{idx}].story_role must be one of: {', '.join(valid_roles)}.")
+                page["story_role"] = self._normalize_story_role(story_role)
 
-            # Validate string fields are non-empty
-            for field in ["scene_description", "narration_sample", "child_action", "learning_goal_integration", "mood", "visual_continuity_notes"]:
-                value = page.get(field)
-                if value is not None:
-                    if not isinstance(value, str) or not value.strip():
-                        errors.append(f"pages[{idx}].{field} must be a non-empty string.")
+            for field in ("scene_description", "child_action", "emotional_beat", "learning_goal_integration"):
+                self._validate_required_string(page, field, f"pages[{idx}]", errors)
+            self._validate_string_array(page, "characters_present", f"pages[{idx}]", errors, allow_empty=True)
+            self._validate_string_array(page, "continuity_requirements", f"pages[{idx}]", errors, allow_empty=True)
 
-            # Validate environment is a dict (content doesn't matter as long as it exists)
-            environment = page.get("environment")
-            if environment is not None and not isinstance(environment, dict):
-                errors.append(f"pages[{idx}].environment must be an object.")
-
-        if page_numbers_in_order:
+        if page_numbers:
             expected = list(range(1, len(pages) + 1))
-            if page_numbers_in_order != expected:
+            if page_numbers != expected:
                 errors.append("Pages must be sequential and ordered with page_number 1..N with no gaps or duplicates.")
 
-        # --- Page count vs age_band
-        if isinstance(final_page_count, int) and final_page_count > 0 and final_page_count != len(pages):
-            errors.append("`final_page_count` must match the number of entries in `pages`.")
-
-        if isinstance(age_band, str) and age_band.strip():
-            band = age_band.strip()
-            allowed_bands = self._AGE_GROUP_ALLOWED_BANDS.get(age_group)
-            if allowed_bands and band not in allowed_bands:
-                errors.append(f"`age_band` must be one of {sorted(allowed_bands)} for age_group={age_group}.")
-
-            page_range = self._AGE_BAND_PAGE_RANGES.get(band)
-            if page_range and isinstance(final_page_count, int) and final_page_count > 0:
-                min_pages, max_pages = page_range
-                if not (min_pages <= final_page_count <= max_pages):
-                    errors.append(
-                        f"Page count ({final_page_count}) must be within {min_pages}-{max_pages} for age_band={band}."
-                    )
-
         return PlanValidationResult(ok=(len(errors) == 0), errors=errors)
+
+    def _validate_source_inputs(
+        self,
+        plan: dict[str, Any],
+        source_inputs: dict[str, str],
+        errors: list[str],
+    ) -> None:
+        expected_theme = source_inputs.get("category", "")
+        expected_learning_goal = source_inputs.get("learning_goal", "")
+        if plan.get("theme") != expected_theme:
+            errors.append("`theme` must match the request Theme exactly.")
+        if plan.get("learning_goal") != expected_learning_goal:
+            errors.append("`learning_goal` must match the request Learning Goal exactly.")
+
+    def _validate_visual_bible(self, visual_bible: Any, errors: list[str]) -> None:
+        if not isinstance(visual_bible, dict):
+            errors.append("Missing or invalid `visual_bible` (must be an object).")
+            return
+
+        self._validate_required_string(visual_bible, "style", "visual_bible", errors)
+
+        hero = visual_bible.get("hero")
+        if not isinstance(hero, dict):
+            errors.append("visual_bible.hero must be an object.")
+        else:
+            for field in ("name", "appearance", "outfit"):
+                self._validate_required_string(hero, field, "visual_bible.hero", errors)
+            signature_item = hero.get("signature_item")
+            if signature_item is not None and not isinstance(signature_item, str):
+                errors.append("visual_bible.hero.signature_item must be a string or null.")
+
+        companion = visual_bible.get("companion")
+        if companion is not None:
+            self._validate_optional_character_object(companion, "visual_bible.companion", errors)
+
+        for field in ("father", "mother"):
+            value = visual_bible.get(field)
+            if value is not None:
+                self._validate_optional_appearance_object(value, f"visual_bible.{field}", errors)
+
+        recurring = visual_bible.get("recurring_characters")
+        if recurring is None:
+            return
+        if not isinstance(recurring, list):
+            errors.append("visual_bible.recurring_characters must be an array.")
+            return
+        for idx, character in enumerate(recurring):
+            if not isinstance(character, dict):
+                errors.append(f"visual_bible.recurring_characters[{idx}] must be an object.")
+                continue
+            for field in ("name", "role", "appearance"):
+                self._validate_required_string(character, field, f"visual_bible.recurring_characters[{idx}]", errors)
+
+    def _validate_optional_character_object(self, value: Any, label: str, errors: list[str]) -> None:
+        if not isinstance(value, dict):
+            errors.append(f"{label} must be an object.")
+            return
+        name = value.get("name")
+        appearance = value.get("appearance")
+        if isinstance(name, str) and name.strip():
+            self._validate_required_string(value, "appearance", label, errors)
+        elif isinstance(appearance, str) and appearance.strip():
+            return
+
+    def _validate_optional_appearance_object(self, value: Any, label: str, errors: list[str]) -> None:
+        if not isinstance(value, dict):
+            errors.append(f"{label} must be an object.")
+            return
+        appearance = value.get("appearance")
+        if appearance is not None and not isinstance(appearance, str):
+            errors.append(f"{label}.appearance must be a string when provided.")
+
+    def _validate_required_string(
+        self,
+        obj: dict[str, Any],
+        field: str,
+        label: str,
+        errors: list[str],
+    ) -> None:
+        value = obj.get(field)
+        if not isinstance(value, str) or not value.strip():
+            errors.append(f"{label}.{field} must be a non-empty string.")
+
+    @staticmethod
+    def _enum_value(value: Any) -> str:
+        return str(getattr(value, "value", value))
+
+    @staticmethod
+    def _normalize_story_role(value: str) -> str:
+        return value.strip().lower().replace(" ", "_").replace("-", "_")
+
+    def _validate_string_array(
+        self,
+        obj: dict[str, Any],
+        field: str,
+        label: str,
+        errors: list[str],
+        *,
+        allow_empty: bool,
+    ) -> None:
+        value = obj.get(field)
+        if not isinstance(value, list):
+            errors.append(f"{label}.{field} must be an array.")
+            return
+        if not allow_empty and not value:
+            errors.append(f"{label}.{field} must be a non-empty array.")
+            return
+        for item_idx, item in enumerate(value):
+            if not isinstance(item, str) or not item.strip():
+                errors.append(f"{label}.{field}[{item_idx}] must be a non-empty string.")
 
 
 class PlanValidationError(RuntimeError):
