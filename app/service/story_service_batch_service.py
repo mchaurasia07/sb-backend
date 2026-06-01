@@ -298,26 +298,24 @@ class StoryServiceBatchService:
             if flags.skip_image_generation:
                 await self.workflow._create_pages_without_images(story, story_json)
                 await self.workflow._persist_story_content(story, story_json)
+                await self._ensure_audio_batch_submitted(story)
+                self._log_event("workflow_deferred_after_audio_submit", story_id=story.id)
                 await self.session.commit()
+                return story
             else:
-                await self._step_generate_images_batch(story, story_json, image_plan)
+                image_job = await self._step_submit_images_batch(story, story_json, image_plan)
+                if image_job is None:
+                    await self._ensure_audio_batch_submitted(story)
+                    self._log_event("workflow_deferred_after_audio_submit", story_id=story.id)
+                    await self.session.commit()
+                    return story
 
-            story_json = await self.workflow._load_existing_story_json(story) or story_json
-            await self.workflow._set_current_step(story, StoryStepName.NARRATION_GENERATION)
-            story_json = await self._step_generate_narration_batch(story, story_json)
-
-            story.status = StoryStatus.COMPLETED
-            story.current_step = None
-            story.error_message = None
-            self.workflow._apply_story_metadata(story, story_plan, story_json)
             story.story_plan_json = story_plan
             story.image_plan_json = image_plan
-            await self.stories.upsert_content(story, language=DEFAULT_STORY_LANGUAGE, story_json=story_json)
             await self.stories.update(story)
             await self.session.commit()
-            await StoryCompletionEmailService(self.session).send_story_completed(story, story_json)
-            self._log_event("workflow_completed", story_id=story.id, page_count=len(story_json.get("pages", [])))
-            logger.info("Story %s: delayed batch workflow completed successfully", story.id)
+            self._log_event("workflow_deferred_after_image_submit", story_id=story.id)
+            logger.info("Story %s: delayed batch workflow deferred to reconcile scheduler", story.id)
             return story
         except Exception as exc:
             self._log_event("workflow_failed", story_id=story.id, error=str(exc))
@@ -414,12 +412,12 @@ class StoryServiceBatchService:
         await self.session.commit()
         return image_plan
 
-    async def _step_generate_images_batch(
+    async def _step_submit_images_batch(
         self,
         story: Story,
         story_json: dict[str, Any],
         image_plan: dict[str, Any],
-    ) -> None:
+    ) -> StoryBatchJob | None:
         step = await self.story_steps.create(story.id, StoryStepName.IMAGE_GENERATION)
         step.status = StepStatus.IN_PROGRESS
         step.prompt = self._json_safe({"mode": "google_batch", "image_plan": image_plan})
@@ -439,63 +437,119 @@ class StoryServiceBatchService:
                 missing_items=len(missing),
                 reused_items=len(items) - len(missing),
             )
-            attempts: list[dict[str, Any]] = []
-            for attempt in range(1, settings.STORY_BATCH_MAX_IMAGE_RETRIES + 1):
-                if not missing:
-                    break
-
-                story.status = StoryStatus.IMAGE_RETRY_REQUIRED if attempt > 1 else StoryStatus.IN_PROGRESS
-                story.current_step = StoryStepName.IMAGE_GENERATION.value
-                await self.stories.update(story)
-                await self.session.commit()
-                self._log_event(
-                    "image_batch_attempt_started",
-                    story_id=story.id,
-                    attempt=attempt,
-                    item_count=len(missing),
-                )
-
-                completed_keys, failed_keys, job_summary = await self._submit_and_process_image_batch(
-                    story,
-                    story_json,
-                    missing,
-                    attempt,
-                )
-                attempts.append(job_summary)
-                missing = [item for item in missing if item.key not in completed_keys]
-                failed_key_set = set(failed_keys)
-                missing = [item for item in missing if item.key in failed_key_set or item.key not in completed_keys]
-
-            final_missing = [item.key for item in await self._missing_image_items(story, story_json, items)]
-            if final_missing:
-                error = f"Image batch failed after retries. Missing image keys: {', '.join(final_missing)}"
-                step.status = StepStatus.FAILED
-                step.error_message = error
-                step.response = {"attempts": attempts, "missing_image_keys": final_missing}
+            if not missing:
+                step.status = StepStatus.COMPLETED
+                step.response = {
+                    "images_generated": True,
+                    "expected_image_count": len(items),
+                    "message": "All batch images already exist",
+                }
                 await self.story_steps.update(step)
-                story.status = StoryStatus.FAILED
-                story.error_message = error
-                story.current_step = None
-                await self.stories.update(story)
+                await self.workflow._persist_story_content(story, story_json)
                 await self.session.commit()
-                raise AppException(error, code="IMAGE_BATCH_INCOMPLETE")
+                self._log_event("image_batch_step_completed", story_id=story.id, expected_items=len(items))
+                return None
 
-            step.status = StepStatus.COMPLETED
+            story.status = StoryStatus.IN_PROGRESS
+            story.current_step = StoryStepName.IMAGE_GENERATION.value
+            await self.stories.update(story)
+            await self.session.commit()
+            self._log_event(
+                "image_batch_attempt_started",
+                story_id=story.id,
+                attempt=1,
+                item_count=len(missing),
+            )
+
+            job = await self._submit_image_batch_job_only(story, missing, attempt=1)
             step.response = {
-                "images_generated": True,
+                "images_submitted": True,
                 "expected_image_count": len(items),
-                "attempts": attempts,
-                "message": "All batch images generated and saved successfully",
+                "submitted_image_count": len(missing),
+                "batch_job_id": str(job.id),
+                "provider_job_name": job.provider_job_name,
+                "provider_state": job.provider_state,
+                "message": "Image batch submitted; reconcile scheduler will process results",
             }
             await self.story_steps.update(step)
             await self.workflow._persist_story_content(story, story_json)
             await self.session.commit()
-            self._log_event("image_batch_step_completed", story_id=story.id, expected_items=len(items))
+            self._log_event(
+                "image_batch_step_deferred",
+                story_id=story.id,
+                batch_job_id=job.id,
+                expected_items=len(items),
+                submitted_items=len(missing),
+            )
+            return job
         except Exception as exc:
             self._log_event("image_batch_step_failed", story_id=story.id, error=str(exc))
             step.status = StepStatus.FAILED
             step.error_message = str(exc)
             await self.story_steps.update(step)
+            await self.session.commit()
+            raise
+
+    async def _submit_image_batch_job_only(
+        self,
+        story: Story,
+        items: list[BatchImageItem],
+        *,
+        attempt: int,
+    ) -> StoryBatchJob:
+        reference_images = await self._load_reference_image_blobs(story)
+        requests = [
+            self._build_image_inlined_request(item, reference_images=reference_images)
+            for item in items
+        ]
+        model = (story.reference_image_model or settings.GOOGLE_REFERENCE_IMAGE_MODEL).removeprefix("models/")
+        job = await self.batch_jobs.create(
+            story_id=story.id,
+            job_type=StoryBatchJobType.IMAGE,
+            attempt=attempt,
+            expected_item_count=len(items),
+            request_keys=[item.key for item in items],
+            provider_model=model,
+            request_payload={
+                "mode": "image",
+                "attempt": attempt,
+                "items": [self._image_item_payload(item) for item in items],
+            },
+        )
+        await self.session.commit()
+        self._log_event(
+            "image_batch_created",
+            story_id=story.id,
+            batch_job_id=job.id,
+            attempt=attempt,
+            item_count=len(items),
+            model=model,
+        )
+
+        try:
+            provider_job = await self.google_client.aio.batches.create(
+                model=model,
+                src=requests,
+                config={"display_name": f"story-{story.id}-images-attempt-{attempt}"},
+            )
+            job.provider_job_name = provider_job.name
+            job.provider_state = self._job_state_name(provider_job)
+            await self.batch_jobs.update(job)
+            await self.session.commit()
+            self._log_event(
+                "image_batch_submitted",
+                story_id=story.id,
+                batch_job_id=job.id,
+                provider_job_name=job.provider_job_name,
+                provider_state=job.provider_state,
+            )
+            return job
+        except Exception as exc:
+            self._log_event("image_batch_submit_failed", story_id=story.id, batch_job_id=job.id, error=str(exc))
+            job.status = StoryBatchJobStatus.FAILED
+            job.error_message = str(exc)
+            job.missing_keys = [item.key for item in items]
+            await self.batch_jobs.update(job)
             await self.session.commit()
             raise
 

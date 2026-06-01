@@ -57,12 +57,21 @@ class StoryCatalogService:
         *,
         page: int,
         page_size: int,
+        age_group: str,
         status_filter: str | None = None,
+        theme: str | None = None,
+        language: str | None = None,
     ) -> PaginatedResponse[StoryCatalogResponse]:
+        normalized_age_group = age_group.strip().lower()
+        normalized_theme = theme.strip().lower() if theme and theme.strip() else None
+        normalized_language = language.strip().lower() if language and language.strip() else None
         stories, total = await self.generic_stories.list_paginated(
             page=page,
             page_size=page_size,
+            age_group=normalized_age_group,
             status=status_filter,
+            theme=normalized_theme,
+            language=normalized_language,
         )
         available_languages = await self.generic_stories.get_available_languages_by_story_ids(
             [story.id for story in stories]
@@ -71,6 +80,7 @@ class StoryCatalogService:
             self._generic_to_catalog(
                 story,
                 available_languages=available_languages.get(story.id, []),
+                language=normalized_language or DEFAULT_GENERIC_STORY_LANGUAGE,
             )
             for story in stories
         ]
@@ -114,11 +124,21 @@ class StoryCatalogService:
         )
 
     @staticmethod
-    def _generic_to_catalog(story, *, available_languages: list[str]) -> StoryCatalogResponse:
+    def _generic_to_catalog(
+        story,
+        *,
+        available_languages: list[str],
+        language: str = DEFAULT_GENERIC_STORY_LANGUAGE,
+    ) -> StoryCatalogResponse:
         default_content = _content_for_language(
             getattr(story, "contents", []),
-            DEFAULT_GENERIC_STORY_LANGUAGE,
+            language,
         )
+        if default_content is None and language != DEFAULT_GENERIC_STORY_LANGUAGE:
+            default_content = _content_for_language(
+                getattr(story, "contents", []),
+                DEFAULT_GENERIC_STORY_LANGUAGE,
+            )
         story_json = default_content.story_json if default_content and isinstance(default_content.story_json, dict) else {}
         return StoryCatalogResponse(
             id=story.id,

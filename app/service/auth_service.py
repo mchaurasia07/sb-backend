@@ -72,13 +72,13 @@ class AuthService:
         logger.info("user_signup_created", user_id=str(user.id), email=user.email)
         return UserResponse.model_validate(user)
 
-    async def verify_email_otp(self, payload: VerifyEmailOtpRequest) -> UserResponse:
+    async def verify_email_otp(self, payload: VerifyEmailOtpRequest) -> AuthTokenResponse:
         user = await self._get_user_by_email(payload.email)
         await self._verify_otp(user, OtpPurpose.EMAIL_VERIFICATION, payload.otp)
         await self.users.mark_email_verified(user)
         await email_client.send_welcome_email(user.email)
         logger.info("email_verified", user_id=str(user.id))
-        return UserResponse.model_validate(user)
+        return await self._build_auth_response(user)
 
     async def login(self, payload: LoginRequest) -> AuthTokenResponse | ChildLoginResponse:
         if payload.child_login:

@@ -39,13 +39,13 @@ async def signup(request: Request, payload: SignupRequest, session: AsyncSession
     return success_response(data, "Signup successful. Please verify your email OTP.")
 
 
-@router.post("/verify-email-otp", response_model=ApiResponse[UserResponse])
+@router.post("/verify-email-otp", response_model=ApiResponse[AuthTokenResponse])
 @limiter.limit("10/minute")
 async def verify_email_otp(
     request: Request,
     payload: VerifyEmailOtpRequest,
     session: AsyncSession = Depends(get_db_session),
-) -> ApiResponse[UserResponse]:
+) -> ApiResponse[AuthTokenResponse]:
     data = await AuthService(session).verify_email_otp(payload)
     return success_response(data, "Email verified successfully")
 

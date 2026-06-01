@@ -86,6 +86,9 @@ async def delete_generic_story(
 async def list_generic_stories(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    age_group: str = Query(..., min_length=1, max_length=32),
+    theme: str | None = Query(default=None, min_length=1, max_length=100),
+    language: str | None = Query(default=None, min_length=2, max_length=16),
     status_filter: Literal["active", "inactive"] | None = Query(default=None, alias="status"),
     _: AuthContext = Depends(get_auth_context),
     session: AsyncSession = Depends(get_db_session),
@@ -93,6 +96,9 @@ async def list_generic_stories(
     data = await StoryCatalogService(session).list_generic_paginated(
         page=page,
         page_size=page_size,
+        age_group=age_group,
+        theme=theme,
+        language=language,
         status_filter=status_filter,
     )
     return success_response(data, "Generic stories retrieved successfully")

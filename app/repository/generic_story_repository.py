@@ -79,14 +79,24 @@ class GenericStoryRepository:
         *,
         page: int,
         page_size: int,
+        age_group: str,
         status: str | None = None,
+        theme: str | None = None,
+        language: str | None = None,
     ) -> tuple[list[GenericStory], int]:
         query: Select[tuple[GenericStory]] = select(GenericStory).options(selectinload(GenericStory.contents))
         count_query = select(func.count()).select_from(GenericStory)
+        filters = [func.lower(GenericStory.age_group) == age_group.lower()]
 
         if status:
-            query = query.where(GenericStory.status == status)
-            count_query = count_query.where(GenericStory.status == status)
+            filters.append(GenericStory.status == status)
+        if theme:
+            filters.append(func.lower(GenericStory.theme) == theme.lower())
+        if language:
+            filters.append(GenericStory.contents.any(GenericStoryContent.language == language))
+
+        query = query.where(*filters)
+        count_query = count_query.where(*filters)
 
         total = await self.session.scalar(count_query)
         result = await self.session.execute(
