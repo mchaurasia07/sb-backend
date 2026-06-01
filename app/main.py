@@ -12,6 +12,7 @@ from app.core.rate_limit import limiter
 from app.middleware.auth import AuthenticationContextMiddleware
 from app.middleware.request_context import RequestContextMiddleware
 from app.routes.v1 import api_router
+from app.service.story_batch_reconcile_scheduler import StoryBatchReconcileScheduler
 
 logger = get_logger(__name__)
 
@@ -21,8 +22,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Configure application resources on startup and shutdown."""
     configure_logging()
     logger.info("application_starting", app_name=settings.APP_NAME, environment=settings.ENVIRONMENT)
-    yield
-    logger.info("application_stopping", app_name=settings.APP_NAME)
+    scheduler = StoryBatchReconcileScheduler()
+    scheduler.start()
+    try:
+        yield
+    finally:
+        await scheduler.stop()
+        logger.info("application_stopping", app_name=settings.APP_NAME)
 
 
 def create_app() -> FastAPI:

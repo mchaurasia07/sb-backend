@@ -33,6 +33,7 @@ from app.service.child_activity_service import ChildActivityService
 from app.service.child_audio_service import ChildAudioService
 from app.service.child_book_service import ChildBookActivityEvent, ChildBookService
 from app.service.child_service import ChildService
+from app.service.notification_service import NotificationService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -127,6 +128,48 @@ async def update_child_book_progress_background(
                 child_id,
                 child_book_id,
             )
+
+
+async def send_child_story_added_notification_background(
+    *,
+    child_id: UUID,
+    child_book_id: UUID,
+    story_id: UUID,
+    story_title: str,
+    story_type: str,
+) -> None:
+    async with AsyncSessionLocal() as session:
+        try:
+            await NotificationService(session).send_child_story_added(
+                child_id=child_id,
+                child_book_id=child_book_id,
+                story_id=story_id,
+                story_title=story_title,
+                story_type=story_type,
+            )
+        except Exception:
+            await session.rollback()
+            logger.exception("Failed to send child story notification: child_id=%s story_id=%s", child_id, story_id)
+
+
+async def send_child_audio_added_notification_background(
+    *,
+    child_id: UUID,
+    child_audio_id: UUID,
+    audio_id: UUID,
+    audio_name: str,
+) -> None:
+    async with AsyncSessionLocal() as session:
+        try:
+            await NotificationService(session).send_child_audio_added(
+                child_id=child_id,
+                child_audio_id=child_audio_id,
+                audio_id=audio_id,
+                audio_name=audio_name,
+            )
+        except Exception:
+            await session.rollback()
+            logger.exception("Failed to send child audio notification: child_id=%s audio_id=%s", child_id, audio_id)
 
 
 @router.post("", response_model=ApiResponse[ChildProfileResponse], status_code=status.HTTP_201_CREATED)
@@ -287,6 +330,7 @@ async def list_child_audios(
 async def add_generic_audio_to_child(
     child_id: UUID,
     payload: AddGenericAudioToChildRequest,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[ChildAudioResponse]:
@@ -294,6 +338,13 @@ async def add_generic_audio_to_child(
         current_user=current_user,
         child_id=child_id,
         audio_id=payload.audio_id,
+    )
+    background_tasks.add_task(
+        send_child_audio_added_notification_background,
+        child_id=child_id,
+        child_audio_id=data.child_audio_id,
+        audio_id=data.audio_id,
+        audio_name=data.name,
     )
     return success_response(data, "Generic audio added to child successfully")
 
@@ -306,6 +357,7 @@ async def add_generic_audio_to_child(
 async def add_generic_story_to_child(
     child_id: UUID,
     payload: AddGenericStoryToChildRequest,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[ChildBookResponse]:
@@ -314,6 +366,14 @@ async def add_generic_story_to_child(
         child_id=child_id,
         generic_story_id=payload.generic_story_id,
         language=payload.language,
+    )
+    background_tasks.add_task(
+        send_child_story_added_notification_background,
+        child_id=child_id,
+        child_book_id=data.id,
+        story_id=data.story_id,
+        story_title=data.title,
+        story_type=data.story_type,
     )
     return success_response(data, "Generic story added to child successfully")
 
@@ -326,6 +386,7 @@ async def add_generic_story_to_child(
 async def add_custom_story_to_child(
     child_id: UUID,
     payload: AddCustomStoryToChildRequest,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[ChildBookResponse]:
@@ -334,6 +395,14 @@ async def add_custom_story_to_child(
         child_id=child_id,
         story_id=payload.story_id,
         language=payload.language,
+    )
+    background_tasks.add_task(
+        send_child_story_added_notification_background,
+        child_id=child_id,
+        child_book_id=data.id,
+        story_id=data.story_id,
+        story_title=data.title,
+        story_type=data.story_type,
     )
     return success_response(data, "Custom story added to child successfully")
 

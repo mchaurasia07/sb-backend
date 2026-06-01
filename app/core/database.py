@@ -15,7 +15,7 @@ engine = create_async_engine(
     pool_pre_ping=settings.DB_POOL_PRE_PING,
     pool_size=settings.DB_POOL_SIZE,
     max_overflow=settings.DB_MAX_OVERFLOW,
-    echo=settings.DEBUG,
+    echo=settings.SQL_ECHO,
     pool_recycle=settings.DB_POOL_RECYCLE_SECONDS,
 )
 if settings.DATABASE_URL.startswith("mysql+asyncmy://"):

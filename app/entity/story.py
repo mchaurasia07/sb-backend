@@ -13,6 +13,8 @@ class StoryStatus(str, Enum):
 
     PENDING = "PENDING"
     IN_PROGRESS = "IN_PROGRESS"
+    IMAGE_RETRY_REQUIRED = "IMAGE_RETRY_REQUIRED"
+    AUDIO_RETRY_REQUIRED = "AUDIO_RETRY_REQUIRED"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
 
@@ -82,6 +84,7 @@ class Story(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     story_plan_validated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
     image_plan_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     image_plan_validated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
+    input_request: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # AI configuration locked at story creation so retries use the same provider/models.
     ai_provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
@@ -101,6 +104,11 @@ class Story(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     contents = relationship(
         "StoryContent",
+        back_populates="story",
+        cascade="all, delete-orphan",
+    )
+    batch_jobs = relationship(
+        "StoryBatchJob",
         back_populates="story",
         cascade="all, delete-orphan",
     )

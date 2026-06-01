@@ -90,6 +90,17 @@ class CloudflareR2ImageStorageService:
         return self.public_url(key)
 
     async def get_image_bytes(self, key_or_url: str) -> bytes:
+        local_path = self._legacy_local_media_path(key_or_url)
+        if local_path is not None:
+            try:
+                return await asyncio.to_thread(local_path.read_bytes)
+            except OSError as exc:
+                raise AppException(
+                    f"Failed to read legacy local image: {local_path}",
+                    status.HTTP_502_BAD_GATEWAY,
+                    "LEGACY_LOCAL_IMAGE_READ_FAILED",
+                ) from exc
+
         key = self.object_key_from_url(key_or_url)
 
         def _get() -> bytes:
@@ -159,6 +170,28 @@ class CloudflareR2ImageStorageService:
             raise AppException("Image URL does not match configured R2 public base URL", code="INVALID_R2_URL")
 
         return value.lstrip("/")
+
+    @staticmethod
+    def _legacy_local_media_path(key_or_url: str) -> Path | None:
+        value = str(key_or_url).strip()
+        parsed = urlparse(value)
+        media_prefix = settings.MEDIA_URL_PREFIX.rstrip("/") + "/"
+
+        if parsed.scheme in {"http", "https"}:
+            path = parsed.path
+        else:
+            path = value
+
+        if not path.startswith(media_prefix):
+            return None
+
+        relative_path = path[len(media_prefix) :]
+        file_path = (settings.media_root_path / relative_path).resolve()
+        try:
+            file_path.relative_to(settings.media_root_path)
+        except ValueError:
+            return None
+        return file_path if file_path.exists() else None
 
     def _key(self, *parts: str) -> str:
         key_parts = [settings.cloudflare_r2_image_key_prefix, *[part.strip("/") for part in parts if part]]

@@ -4,6 +4,7 @@ import smtplib
 import ssl
 from email.message import EmailMessage
 from email.utils import formataddr
+from typing import Any
 
 from app.core.config import settings
 from app.core.logger import get_logger
@@ -38,6 +39,31 @@ class EmailClient:
         html_body = self._build_welcome_template()
         await self._send(email, subject, plain_body, html_body)
         logger.info("welcome_email_sent", email=email)
+
+    async def send_story_completed_email(
+        self,
+        email: str,
+        *,
+        story_title: str,
+        story_summary: str | None,
+        story_input: dict[str, Any] | None,
+    ) -> None:
+        subject = f"Your story is ready: {story_title}"
+        input_lines = self._story_input_plain_lines(story_input)
+        plain_body = (
+            f"Your story \"{story_title}\" is generated and ready to read.\n\n"
+            f"Summary:\n{story_summary or 'Your new personalized story is ready in the dashboard.'}\n\n"
+            "Story input used:\n"
+            f"{chr(10).join(input_lines) if input_lines else 'No story input was provided.'}\n\n"
+            "Open the dashboard to read the story now."
+        )
+        html_body = self._build_story_completed_template(
+            story_title=story_title,
+            story_summary=story_summary,
+            story_input=story_input,
+        )
+        await self._send(email, subject, plain_body, html_body)
+        logger.info("story_completed_email_sent", email=email, story_title=story_title)
 
     async def _send(self, recipient: str, subject: str, plain_body: str, html_body: str) -> None:
         await asyncio.to_thread(self._send_sync, recipient, subject, plain_body, html_body)
@@ -105,6 +131,82 @@ class EmailClient:
             """,
             footer="Thank you for joining Storybook.",
         )
+
+    def _build_story_completed_template(
+        self,
+        *,
+        story_title: str,
+        story_summary: str | None,
+        story_input: dict[str, Any] | None,
+    ) -> str:
+        safe_title = html.escape(story_title)
+        safe_summary = html.escape(story_summary or "Your new personalized story is ready in the dashboard.")
+        input_rows = "".join(
+            f"""
+                <tr>
+                  <th>{html.escape(label)}</th>
+                  <td>{html.escape(value)}</td>
+                </tr>
+            """
+            for label, value in self._story_input_display_rows(story_input)
+        )
+        if not input_rows:
+            input_rows = """
+                <tr>
+                  <td colspan="2">No story input was provided.</td>
+                </tr>
+            """
+
+        return self._layout(
+            eyebrow="Story ready",
+            title="Your story is ready to read",
+            intro=f'"{story_title}" has finished generating and is waiting in your dashboard.',
+            content=f"""
+                <div class="panel">
+                    <strong>Story title</strong>
+                    <p>{safe_title}</p>
+                </div>
+                <div class="panel panel-soft">
+                    <strong>Summary</strong>
+                    <p>{safe_summary}</p>
+                </div>
+                <div class="input-block">
+                    <strong>Story input used</strong>
+                    <table role="presentation" cellspacing="0" cellpadding="0">
+                        {input_rows}
+                    </table>
+                </div>
+                <p class="cta-text">Open your dashboard to read the story now.</p>
+            """,
+            footer="This notification was sent because story generation completed successfully.",
+        )
+
+    @staticmethod
+    def _story_input_display_rows(story_input: dict[str, Any] | None) -> list[tuple[str, str]]:
+        if not isinstance(story_input, dict):
+            return []
+        fields = [
+            ("Mode", story_input.get("mode")),
+            ("Processing mode", story_input.get("processing_mode")),
+            ("Category", story_input.get("category")),
+            ("Learning goal", story_input.get("learning_goal")),
+            ("Context", story_input.get("context")),
+            ("Event", story_input.get("event_description")),
+        ]
+        return [
+            (label, str(value).strip())
+            for label, value in fields
+            if value is not None and str(value).strip()
+        ]
+
+    @classmethod
+    def _story_input_plain_lines(cls, story_input: dict[str, Any] | None) -> list[str]:
+        return [f"- {label}: {value}" for label, value in cls._story_input_display_rows(story_input)]
+
+    @staticmethod
+    def _brand_name() -> str:
+        app_name = (settings.APP_NAME or "").strip()
+        return "TaleSpell" if not app_name or app_name == "SB Backend" else app_name
 
     def _layout(self, eyebrow: str, title: str, intro: str, content: str, footer: str) -> str:
         return f"""<!doctype html>
@@ -184,8 +286,39 @@ class EmailClient:
       margin-top: 22px;
       padding: 18px 20px;
     }}
+    .panel-soft {{
+      background: #fff8f2;
+      border-left-color: #c45b3c;
+    }}
     .panel p {{
       margin: 8px 0 0;
+    }}
+    .input-block {{
+      margin-top: 22px;
+    }}
+    table {{
+      border-collapse: collapse;
+      margin-top: 12px;
+      width: 100%;
+    }}
+    th, td {{
+      border-bottom: 1px solid #edf0f2;
+      font-size: 14px;
+      line-height: 1.5;
+      padding: 10px 0;
+      text-align: left;
+      vertical-align: top;
+    }}
+    th {{
+      color: #425466;
+      font-weight: 700;
+      width: 36%;
+      padding-right: 16px;
+    }}
+    .cta-text {{
+      color: #28536b;
+      font-weight: 700;
+      margin-top: 24px;
     }}
     .footer {{
       border-top: 1px solid #edf0f2;
@@ -198,7 +331,7 @@ class EmailClient:
 <body>
   <div class="wrap">
     <div class="email">
-      <div class="header"><div class="brand">Storybook</div></div>
+      <div class="header"><div class="brand">{html.escape(self._brand_name())}</div></div>
       <div class="body">
         <p class="eyebrow">{html.escape(eyebrow)}</p>
         <h1>{html.escape(title)}</h1>

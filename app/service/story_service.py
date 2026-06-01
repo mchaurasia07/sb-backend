@@ -28,6 +28,7 @@ from app.service.image_storage_provider import get_image_storage_service
 from app.service.plan_validator import PlanValidator
 from app.service.image_plan_validator import ImagePlanValidator
 from app.service.story_input_safety_service import StoryInputSafetyService
+from app.service.story_completion_email_service import StoryCompletionEmailService
 from app.service.story_narration_service import StoryNarrationService
 from app.utils.prompt_loader import load_prompt, render_prompt
 
@@ -378,6 +379,7 @@ class StoryService:
             learning_goal=payload.learning_goal,
             context=payload.context,
             event_description=payload.event_description,
+            input_request=payload.model_dump(mode="json"),
             **self._current_ai_config(),
         )
         await self.session.commit()
@@ -609,6 +611,7 @@ class StoryService:
             await self.stories.upsert_content(story, language=DEFAULT_STORY_LANGUAGE, story_json=story_json)
             await self.stories.update(story)
             await self.session.commit()
+            await StoryCompletionEmailService(self.session).send_story_completed(story, story_json)
 
             logger.info(f"Story {story_id}: Workflow completed successfully")
             return story

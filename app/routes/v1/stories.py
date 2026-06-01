@@ -9,14 +9,26 @@ from app.core.dependencies import get_current_user
 from app.entity.user import User
 from app.model.request.story import StoryGenerationRequest
 from app.model.response.common import ApiResponse, PaginatedResponse, success_response
-from app.model.response.story import StoryResponse, StoryStatusResponse, StoryStepResponse
+from app.model.response.story import (
+    StoryBatchJobCancelResponse,
+    StoryBatchJobReconcileResponse,
+    StoryResponse,
+    StoryStatusResponse,
+    StoryStepResponse,
+)
 from app.service.story_service import StoryService, StoryGenerationFlags
+from app.service.story_service_batch_service import StoryServiceBatchService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-async def execute_story_workflow_background(story_id: UUID, user_id: UUID, resume: bool = False) -> None:
+async def execute_story_workflow_background(
+    story_id: UUID,
+    user_id: UUID,
+    resume: bool = False,
+    flags: StoryGenerationFlags | None = None,
+) -> None:
     """Background task that executes story generation workflow.
 
     Creates new database session since background tasks don't share request session.
@@ -27,11 +39,29 @@ async def execute_story_workflow_background(story_id: UUID, user_id: UUID, resum
             logger.info(f"[BACKGROUND] Created session, initializing service")
             service = StoryService(session)
             logger.info(f"[BACKGROUND] Service initialized, executing workflow")
-            await service.execute_workflow(story_id, flags=StoryGenerationFlags(), resume=resume)
+            await service.execute_workflow(story_id, flags=flags or StoryGenerationFlags(), resume=resume)
             logger.info(f"[BACKGROUND] Workflow completed successfully for story {story_id}")
         except Exception as e:
             logger.error(f"[BACKGROUND] Workflow failed for story {story_id}")
             logger.exception(f"[BACKGROUND] Exception: {str(e)}")
+
+
+async def execute_story_batch_workflow_background(
+    story_id: UUID,
+    user_id: UUID,
+    resume: bool = False,
+    flags: StoryGenerationFlags | None = None,
+) -> None:
+    """Background task that executes delayed Google Batch story generation."""
+    logger.info("[BATCH_BACKGROUND] Starting delayed workflow for story %s", story_id)
+    async with AsyncSessionLocal() as session:
+        try:
+            service = StoryServiceBatchService(session)
+            await service.execute_workflow(story_id, flags=flags or StoryGenerationFlags(), resume=resume)
+            logger.info("[BATCH_BACKGROUND] Delayed workflow completed successfully for story %s", story_id)
+        except Exception as e:
+            logger.error("[BATCH_BACKGROUND] Delayed workflow failed for story %s", story_id)
+            logger.exception("[BATCH_BACKGROUND] Exception: %s", str(e))
 
 
 @router.post("/generate", response_model=ApiResponse[StoryResponse], status_code=status.HTTP_202_ACCEPTED)
@@ -66,10 +96,31 @@ async def generate_story(
     )
 
     # Kick off background workflow task
-    background_tasks.add_task(execute_story_workflow_background, story_response.id, current_user.id)
+    flags = StoryGenerationFlags.from_request(payload)
+    if payload.processing_mode == "delayed":
+        background_tasks.add_task(execute_story_batch_workflow_background, story_response.id, current_user.id, False, flags)
+        message = "Delayed batch story generation started successfully"
+    else:
+        background_tasks.add_task(execute_story_workflow_background, story_response.id, current_user.id, False, flags)
+        message = "Story generation started successfully"
 
     logger.info(f"Story {story_response.id} generation started in background")
-    return success_response(story_response, "Story generation started successfully")
+    return success_response(story_response, message)
+
+
+@router.post("/batch-jobs/reconcile", response_model=ApiResponse[StoryBatchJobReconcileResponse])
+async def reconcile_story_batch_jobs(
+    limit: int = Query(50, ge=1, le=200),
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[StoryBatchJobReconcileResponse]:
+    """Manually reconcile submitted/running Google Batch jobs."""
+    _ = current_user
+    data = await StoryServiceBatchService(session).reconcile_batch_jobs(limit=limit)
+    return success_response(
+        StoryBatchJobReconcileResponse(**data),
+        "Story batch jobs reconciled successfully",
+    )
 
 
 @router.post("/{story_id}/retry", response_model=ApiResponse[StoryStatusResponse], status_code=status.HTTP_202_ACCEPTED)
@@ -81,8 +132,17 @@ async def retry_story_generation(
 ) -> ApiResponse[StoryStatusResponse]:
     """Retry a failed story generation workflow from the last saved checkpoint."""
     service = StoryService(session)
+    story = await service.stories.get_for_user(current_user.id, story_id)
+    processing_mode = (
+        (story.input_request or {}).get("processing_mode")
+        if story is not None and isinstance(story.input_request, dict)
+        else None
+    )
     data = await service.retry_story_async(current_user.id, story_id)
-    background_tasks.add_task(execute_story_workflow_background, story_id, current_user.id, True)
+    if processing_mode == "delayed":
+        background_tasks.add_task(execute_story_batch_workflow_background, story_id, current_user.id, True)
+    else:
+        background_tasks.add_task(execute_story_workflow_background, story_id, current_user.id, True)
     logger.info("Story %s retry accepted", story_id)
     return success_response(data, "Story generation retry accepted")
 
@@ -102,6 +162,25 @@ async def recover_story_generation(
         stale_after_minutes=stale_after_minutes,
     )
     return success_response(data, "Story recovery checked successfully")
+
+
+@router.post(
+    "/{story_id}/batch-jobs/{batch_job_id}/cancel",
+    response_model=ApiResponse[StoryBatchJobCancelResponse],
+)
+async def cancel_story_batch_job(
+    story_id: UUID,
+    batch_job_id: UUID,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[StoryBatchJobCancelResponse]:
+    """Cancel a submitted Google Batch job for a delayed story workflow."""
+    data = await StoryServiceBatchService(session).cancel_batch_job(
+        user_id=current_user.id,
+        story_id=story_id,
+        batch_job_id=batch_job_id,
+    )
+    return success_response(StoryBatchJobCancelResponse(**data), data["message"])
 
 
 @router.get("/{story_id}/status", response_model=ApiResponse[StoryStatusResponse])

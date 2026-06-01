@@ -11,9 +11,11 @@ class Settings(BaseSettings):
     APP_NAME: str
     ENVIRONMENT: str
     DEBUG: bool = Field(validation_alias="APP_DEBUG")
+    LOG_LEVEL: str = "INFO"
     API_V1_PREFIX: str
 
     DATABASE_URL: str
+    SQL_ECHO: bool = False
     DB_POOL_PRE_PING: bool
     DB_POOL_SIZE: int
     DB_MAX_OVERFLOW: int
@@ -42,6 +44,9 @@ class Settings(BaseSettings):
     SMTP_FROM_NAME: str
     SMTP_USE_TLS: bool
     SMTP_TIMEOUT_SECONDS: float
+
+    EXPO_PUSH_ACCESS_TOKEN: str = ""
+    NOTIFICATION_ADMIN_TOKEN: str = ""
 
     # Storage Configuration - supports both relative and absolute paths
     MEDIA_ROOT: str = Field(description="Absolute or relative path for image storage")
@@ -101,6 +106,13 @@ class Settings(BaseSettings):
     STORY_MAX_RETRIES: int
     STORY_GENERATION_ENABLED: bool
     STORY_MOCK_LLM_RESPONSES: bool
+    STORY_BATCH_MAX_IMAGE_RETRIES: int = 3
+    STORY_BATCH_MAX_AUDIO_RETRIES: int = 3
+    STORY_BATCH_POLL_INTERVAL_SECONDS: int = 30
+    STORY_BATCH_MAX_WAIT_SECONDS: int = 86400
+    STORY_BATCH_RECONCILE_SCHEDULER_ENABLED: bool = True
+    STORY_BATCH_RECONCILE_INTERVAL_SECONDS: int = 1800
+    STORY_BATCH_RECONCILE_LIMIT: int = 50
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

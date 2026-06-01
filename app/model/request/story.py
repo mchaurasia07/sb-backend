@@ -21,6 +21,10 @@ class StoryGenerationRequest(BaseModel):
     # Testing flags
     skip_image_generation: bool = Field(False, description="Skip image generation for testing")
     skip_validation: bool = Field(False, description="Skip validation steps for testing")
+    processing_mode: Literal["instant", "delayed"] = Field(
+        "instant",
+        description="Use instant for current workflow or delayed for Google Batch image/audio processing",
+    )
 
     @field_validator("category", "learning_goal", "context", "event_description", mode="before")
     @classmethod
@@ -31,6 +35,20 @@ class StoryGenerationRequest(BaseModel):
             return value
         normalized = " ".join(value.split())
         return normalized or None
+
+    @field_validator("processing_mode", mode="before")
+    @classmethod
+    def normalize_processing_mode(cls, value):
+        if value is None:
+            return "instant"
+        if not isinstance(value, str):
+            return value
+        normalized = value.strip().lower()
+        if normalized in {"batch", "delayed_batch", "delayed"}:
+            return "delayed"
+        if normalized in {"sync", "normal", "standard", "instant"}:
+            return "instant"
+        return normalized
 
     @model_validator(mode="after")
     def validate_mode_inputs(self):

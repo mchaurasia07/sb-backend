@@ -63,3 +63,36 @@ class StoryStepResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class StoryBatchJobCancelResponse(BaseModel):
+    """Result of a provider-backed story batch job cancellation."""
+
+    story_id: UUID
+    batch_job_id: UUID
+    job_type: str
+    status: str
+    provider_job_name: str | None
+    provider_state: str | None
+    story_status: str
+    message: str
+
+
+class StoryBatchJobReconcileItemResponse(BaseModel):
+    """Single batch-job reconciliation result."""
+
+    story_id: UUID
+    batch_job_id: UUID
+    job_type: str
+    status: str
+    provider_state: str | None = None
+    action: str
+    message: str | None = None
+
+
+class StoryBatchJobReconcileResponse(BaseModel):
+    """Manual reconciliation summary for provider-backed story batch jobs."""
+
+    checked_count: int
+    processed_count: int
+    results: list[StoryBatchJobReconcileItemResponse]

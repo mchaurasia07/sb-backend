@@ -38,6 +38,15 @@ class StoryStepRepository:
         )
         return list(result.scalars().all())
 
+    async def latest_for_story_step(self, story_id: UUID, step_name: StoryStepName) -> StoryStep | None:
+        result = await self.session.execute(
+            select(StoryStep)
+            .where(StoryStep.story_id == story_id, StoryStep.step_name == step_name)
+            .order_by(StoryStep.created_at.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
     async def update(self, step: StoryStep) -> StoryStep:
         """Update an existing step."""
         await self.session.flush()
