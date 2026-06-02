@@ -14,6 +14,14 @@ The illustration must preserve the same child character, recurring characters, o
 
 {visual_bible}
 
+## Hero Child Name
+
+{child_name}
+
+## Story Title
+
+{story_title}
+
 ## Current Page
 
 {page_data}
@@ -30,42 +38,49 @@ The illustration must preserve the same child character, recurring characters, o
 
 Provided as a reference image.
 
-This is the PRIMARY source of truth for:
+This is the PRIMARY source of truth for facial identity only:
 
 * face
 * hairstyle
 * age appearance
-* body proportions
-* outfit
-* accessories
-* rendering style
+
+It may be a head-and-shoulders portrait. Do not treat the portrait clothing,
+portrait crop, or portrait background as story requirements.
 
 ---
 
-## Original Child Photo
+## Character Identity Lock
 
-Provided as a supporting reference image.
+{character_identity_lock}
 
-Use only to reinforce:
+This lock was extracted during character creation and persisted on the child
+profile. Use it as the single written CHARACTER LOCK together with the Master
+Character Reference Image.
 
-* facial identity
-* eye shape
-* nose shape
-* smile
+It locks:
+
+* face shape
+* eye shape and eye color
+* eyebrow shape
+* hair color, hairstyle, hair length, and hair direction
 * skin tone
-* hair color
-* unique facial features
+* nose shape
+* mouth shape
+* smile type
+* distinctive visible features
+* age appearance
 
-Never override the Master Character Reference Image.
+Do not change these identity traits to fit the story theme, outfit, expression,
+camera angle, or environment.
 
 ---
 
 # PRIORITY ORDER
 
-1. Master Character Reference Image
-2. Original Child Photo
-3. Visual Bible
-4. Current Page Data
+1. Master Character Reference Image for face, hairstyle, hairline, and likeness
+2. Character Identity Lock for written face, hair, eye, nose, mouth, and age lock
+3. Visual Bible for locked story outfit, body scale, recurring characters, and style
+4. Current Page Data for action, emotion, environment, and composition
 
 If conflicts occur, always preserve the higher-priority source.
 
@@ -74,6 +89,10 @@ If conflicts occur, always preserve the higher-priority source.
 # IDENTITY LOCK
 
 The Master Character Reference Image is the visual source of truth.
+
+The hero child name is "{child_name}". When the page refers to the hero, treat
+that named child as the same child shown in the Master Character Reference Image
+and the same hero defined in the Visual Bible.
 
 Preserve exactly:
 
@@ -87,16 +106,32 @@ Preserve exactly:
 * smile
 * skin tone
 * age appearance
-* body proportions
-* outfit
+
+Do not preserve from the portrait:
+
+* portrait clothing
+* portrait crop
+* white studio background
+* head-and-shoulders framing
+
+Use the Visual Bible for:
+
+* story outfit
+* shoes
 * accessories
 * signature items
+* full-body or seated body proportions
+* rendering style
 
 Do not redesign the child.
 
 Do not create a generic animated character.
 
 The child must remain recognizably the same child across every illustration.
+
+Treat the hero as one reusable 3D character model. The final image should look
+like the Master Character Reference Image has been posed in the current scene,
+not like a newly redesigned child with similar features.
 
 ---
 
@@ -107,6 +142,10 @@ All recurring characters defined in the Visual Bible must remain visually identi
 Preserve:
 
 * appearance
+* hair color and hairstyle
+* eye color/shape
+* skin/fur/feather color
+* face/head shape
 * clothing
 * scale
 * accessories
@@ -131,6 +170,7 @@ Maintain the same:
 * colors
 * shoes
 * accessories
+* child-safe coverage level
 
 across:
 
@@ -139,6 +179,34 @@ across:
 * back cover
 
 Do not introduce outfit changes.
+
+If the Master Character Reference Image shows different clothing, ignore the
+portrait clothing and keep the Visual Bible outfit.
+
+---
+
+# CHILD-SAFE CLOTHING COVERAGE
+
+All visible children and adults must be dressed modestly and appropriately for a
+children's picture book.
+
+For water park, pool, beach, splash pad, rain, or any water-play scene:
+
+* the hero child must wear a rash guard shirt that covers shoulders and the
+  upper body
+* the hero child must wear knee-length swim shorts, swim leggings, or
+  shorts-over-leggings
+* the hero child must wear water shoes or sandals
+* adults and caregivers must wear modest cover-up clothing such as a rash guard
+  or t-shirt with knee-length shorts, leggings, or a skirted cover-up
+* every visible person must use a covered, modest, family-friendly water-play
+  outfit
+
+If Current Page Data mentions water-play clothing, reinterpret it as the modest
+covered outfit from the Visual Bible and these coverage rules.
+
+Avoid crowded water-park background people. If background people are needed,
+make them tiny, simplified, fully clothed, and non-detailed.
 
 ---
 
@@ -169,7 +237,14 @@ Cover:
 
 * visually exciting
 * strongest emotional appeal
-* title-safe negative space
+* readable front-cover layout
+* render the exact Story Title as visible book-cover title typography
+* place title text directly on clean natural title-safe negative space, such as
+  sky, soft foliage, wall, or water mist
+* use large, correctly spelled, child-friendly typography
+* do not put the title inside a black rectangle, box, label, banner, UI panel,
+  sticker, plaque, or card
+* no extra words besides the exact Story Title
 
 Story Page:
 
@@ -177,15 +252,25 @@ Story Page:
 * readable storytelling
 * balanced composition
 * text-safe negative space
+* no visible text unless the Current Page explicitly requires a readable sign,
+  label, or book title
 
 Back Cover:
 
 * warm closing moment
 * visually calming
+* no visible title text unless Current Page explicitly asks for it
 
 Keep the child character as the primary focal point.
 
 Avoid clutter and overcrowded scenes.
+
+Maintain stable character scale across story pages:
+
+* story pages should usually use a medium full-body or three-quarter view
+* the child should be clearly readable but not an extreme close-up
+* avoid making the face disproportionately large compared with the body
+* avoid shrinking the child into the background unless the page explicitly requires a wide establishing shot
 
 ---
 
@@ -262,6 +347,9 @@ Do not generate:
 * age changes
 * hairstyle changes
 * outfit changes
+* minimal water-play outfits
+* uncovered water-play outfits
+* detailed background people in water-play scenes
 * inconsistent facial features
 * oversized eyes
 * oversized heads
@@ -273,11 +361,14 @@ Do not generate:
 * horror imagery
 * aggressive expressions
 * watermarks
-* unwanted text
+* unwanted text on story pages or back cover
 * text artifacts
+* misspelled cover title
+* extra cover words beyond the exact Story Title
+* black rectangle or label behind cover title
 
 ---
 
 # FINAL INSTRUCTION
 
-Generate ONE premium cinematic children's storybook illustration that faithfully depicts the Current Page Data while preserving complete consistency with the Master Character Reference Image and Visual Bible.
+Generate ONE premium cinematic children's storybook illustration that faithfully depicts the Current Page Data while preserving complete consistency with the Master Character Reference Image and Visual Bible. If Page Type is cover, render the exact Story Title visibly and correctly on the cover.

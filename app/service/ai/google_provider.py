@@ -1,5 +1,6 @@
 import logging
 import mimetypes
+import json
 from pathlib import Path
 from typing import Any
 
@@ -150,8 +151,17 @@ class GoogleProvider(AIProvider):
                 "child_age_visual_guidance",
                 "age-appropriate child height, body build, hands, feet, limbs, and facial maturity",
             )
+            identity_profile = kwargs.get("identity_profile")
+            identity_profile_json = kwargs.get("identity_profile_json")
+            identity_profile_text = kwargs.get("identity_profile_text")
 
-            analysis_prompt = f"""Describe this photo to create an illustrated storybook character that remains recognizable as the same real child.
+            if identity_profile:
+                analysis_text = str(identity_profile_text or "").strip()
+                if not identity_profile_json:
+                    identity_profile_json = json.dumps(identity_profile, ensure_ascii=False)
+                logger.info("Using caller-provided permanent identity profile for character generation")
+            else:
+                analysis_prompt = f"""Describe this photo to create a premium semi-realistic 3D storybook character model that remains recognizable as the same child.
 
 Focus on exact visual identity details:
 1. Hair color, hairstyle, hair direction, and side part
@@ -160,33 +170,44 @@ Focus on exact visual identity details:
 4. Eyebrow shape and thickness
 5. Nose shape, smile, visible teeth or tooth gap, cheeks, and skin tone
 6. Approximate age appearance. The child profile age is {child_age_label}; describe how the photo should be illustrated with {child_age_visual_guidance}.
-7. Clothing details and colors
-8. Any small distinctive facial marks or unique features
+7. Any small distinctive facial marks or unique features
 
-Format your response as a clear description list."""
+Do not describe clothing, background, pose, camera crop, or photo quality.
+Format your response as a clear visual identity list."""
 
-            logger.info(f"Analyzing character profile using: {self.text_model}")
-            analysis_response = await self.client.aio.models.generate_content(
-                model=self.text_model,
-                contents=[
-                    analysis_prompt,
-                    types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
-                ],
-            )
+                logger.info(f"Analyzing character profile using: {self.text_model}")
+                analysis_response = await self.client.aio.models.generate_content(
+                    model=self.text_model,
+                    contents=[
+                        analysis_prompt,
+                        types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
+                    ],
+                )
 
-            analysis_text = analysis_response.text or ""
-            logger.info("Reference character features analyzed successfully")
+                analysis_text = analysis_response.text or ""
+                identity_profile_json = None
+                logger.info("Reference character features analyzed successfully")
 
             enhanced_prompt = (
-                "Create a single polished children's storybook character illustration from the reference photo. "
-                "The character must remain recognizably the same real child, with the same face shape, hairstyle, "
-                "eye shape, natural eye size, eyebrows, nose, smile, skin tone, and approximate age. "
+                "Create a single polished premium semi-realistic 3D children's storybook character model from "
+                "the reference photo and the permanent identity profile. This is a character-model conversion, "
+                "not a photorealistic portrait. Preserve exact identity and transform only the artistic style. "
+                "The character must remain recognizably the same child, with the same face shape, hairstyle, "
+                "hair direction, hairline, hair volume, eye shape, natural eye size, eye color, eyebrows, nose, "
+                "mouth shape, smile type, skin tone, cheeks, distinctive facial features, and age appearance. "
                 f"The child profile age is {child_age_label}; preserve {child_age_visual_guidance}. "
-                "Use a clean, warm, premium semi-realistic 3D storybook style with natural child proportions. "
-                "Do not redesign the child into a generic cartoon character, do not enlarge the eyes, and do not "
-                "change the hairstyle or facial structure. "
+                "Use soft stylized skin shading, detailed stylized hair, natural child proportions, and a "
+                "warm high-end animated family-film look. The output should look like the reusable master "
+                "character model for all future story pages. "
+                "Do not create a raw photo, photorealistic passport portrait, flat cartoon, generic animated "
+                "child, or a different stylized design. Do not enlarge the eyes, change the hairstyle, change "
+                "hair direction, change the hairline, change facial structure, or copy reference-photo clothing. "
+                "Generate a clean front-facing head-and-shoulders character model on a pure white studio "
+                "background. "
                 "Do not include text, logos, watermarks, borders, or extra characters. "
-                f"Reference analysis: {analysis_text}. "
+                "PERMANENT IDENTITY PROFILE JSON:\n"
+                f"{identity_profile_json or '{}'}\n\n"
+                f"Identity summary: {analysis_text}. "
                 f"Scene and styling instruction: {prompt}"
             )
 
@@ -218,6 +239,8 @@ Format your response as a clear description list."""
                 revised_prompt=enhanced_prompt,
                 metadata={
                     "analysis_text": analysis_text,
+                    "identity_profile_used": bool(identity_profile),
+                    "identity_profile_json": identity_profile_json,
                     "enhanced_prompt": enhanced_prompt,
                     "child_age_label": child_age_label,
                     "child_age_visual_guidance": child_age_visual_guidance,
@@ -352,6 +375,74 @@ Format your response as a clear description list."""
             logger.error(f"Google text generation failed: {e}")
             raise AppException(f"Text generation failed: {str(e)}", code="GOOGLE_ERROR")
 
+    async def describe_character_image(
+        self,
+        image_bytes: bytes,
+        prompt: str,
+        mime_type: str = "image/png",
+        **kwargs: Any,
+    ) -> TextGenerationResult:
+        """Analyze the generated master character portrait with a vision prompt."""
+        if settings.STORY_MOCK_LLM_RESPONSES:
+            logger.info("MOCK MODE: Returning mock character description instead of calling Google Gemini")
+            return TextGenerationResult(
+                text=(
+                    '{"age_appearance":"young child","face_shape":"round","cheek_shape":"soft round",'
+                    '"jawline_shape":"soft childlike","chin_shape":"small rounded","skin_tone":"warm medium",'
+                    '"hair_color":"dark brown","hair_length":"short","hair_texture":"smooth",'
+                    '"hair_style":"neatly combed","hair_direction":"slightly side-swept",'
+                    '"eye_color":"brown","eye_shape":"almond","eye_size":"natural child-sized",'
+                    '"eyebrow_shape":"soft arched","eyebrow_thickness":"medium",'
+                    '"nose_shape":"small rounded","mouth_shape":"small rounded",'
+                    '"smile_characteristics":"gentle closed-mouth smile","ear_visibility":"partly visible",'
+                    '"distinctive_features":["round cheeks"],'
+                    '"identity_summary":"A young child with a round face, soft round cheeks, warm medium skin tone, brown almond eyes, a small rounded nose, and a small rounded mouth with a gentle closed-mouth smile. The child has short dark brown smooth hair, neatly combed with a slight side-swept direction. The overall neck-up identity should stay soft, childlike, and consistent, with natural child-sized eyes and round cheeks as the main distinctive features."}'
+                ),
+                prompt_used=prompt,
+                model=self.text_model,
+                metadata={"mock_mode": True, "provider": "google"},
+            )
+
+        if not image_bytes:
+            raise AppException("Character image is empty", code="EMPTY_IMAGE")
+
+        logger.info(f"Describing generated character image with Google vision model: {self.text_model}")
+
+        try:
+            response = await self.client.aio.models.generate_content(
+                model=self.text_model,
+                contents=[
+                    prompt,
+                    types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
+                ],
+                config=types.GenerateContentConfig(
+                    max_output_tokens=kwargs.get("max_tokens", 2000),
+                    temperature=kwargs.get("temperature", 0.2),
+                    response_mime_type="application/json",
+                ),
+            )
+            if not response.text:
+                debug = self._text_response_debug(response)
+                raise AppException(
+                    "Empty character description response from Google API "
+                    f"(finish_reason={debug['finish_reason']})",
+                    code="EMPTY_RESPONSE",
+                )
+
+            usage_metadata = getattr(response, "usage_metadata", None)
+            usage = usage_metadata.model_dump() if hasattr(usage_metadata, "model_dump") else None
+            return TextGenerationResult(
+                text=response.text,
+                prompt_used=prompt,
+                model=self.text_model,
+                metadata={"provider": "google", "usage": usage},
+            )
+        except AppException:
+            raise
+        except Exception as e:
+            logger.error(f"Google character description failed: {e}")
+            raise AppException(f"Character description failed: {str(e)}", code="GOOGLE_ERROR")
+
     async def create_story_image(
         self,
         prompt: str,
@@ -375,9 +466,6 @@ Format your response as a clear description list."""
 
         try:
             reference_image = parse_base64_image_data(reference_image_base64)
-            consistency_reference = None
-            if kwargs.get("consistency_reference_image_base64"):
-                consistency_reference = parse_base64_image_data(kwargs["consistency_reference_image_base64"])
         except ValueError as e:
             raise AppException(str(e), code="INVALID_REFERENCE_IMAGE")
 
@@ -392,38 +480,30 @@ Format your response as a clear description list."""
                 code="UNSUPPORTED_MODEL",
             )
 
-        consistency_instruction = ""
-        child_age_label = kwargs.get("child_age_label", "the child's profile age")
-        child_age_visual_guidance = kwargs.get(
-            "child_age_visual_guidance",
-            "age-appropriate child height, body build, hands, feet, limbs, and facial maturity",
+        consistency_instruction = (
+            "\nThe only attached image after this prompt is the generated Master Character Reference Portrait "
+            "from character_image_url. It is the PRIMARY and ONLY visual identity reference for story image "
+            "generation. No original child avatar photo is attached. Preserve the master character's face, "
+            "facial proportions, hairstyle, hairline, skin tone, and age appearance. Do not invent a new "
+            "face, hairstyle, or story-theme costume. Use the Character Identity Lock inside the scene prompt "
+            "as the written identity and age lock. "
+            "Use the Visual Bible and scene prompt for the single locked story outfit, shoes, accessories, "
+            "body scale, rendering style, and environment. Do not copy portrait clothing, portrait crop, "
+            "white studio background, or head-and-shoulders framing. If the scene prompt conflicts with "
+            "the master character face, hairstyle, or age appearance, keep the master facial identity and "
+            "only change the action/environment.\n"
         )
-        if consistency_reference is not None:
-            consistency_instruction = (
-                "\nThe first attached image after this prompt is the generated master character image from "
-                "character_image_url. It is the PRIMARY reference and must be used as the exact illustrated "
-                "character model. Match the master character's face, facial proportions, eye shape, natural eye "
-                f"size, hairstyle, {child_age_label} age appearance, age-appropriate body proportions, and "
-                "illustration style. The second attached image is the original child profile photo and is only a "
-                "supporting real-identity reference. Do not redesign the face or make the child look older or younger. "
-                f"Preserve this age/body guidance: {child_age_visual_guidance}. "
-                "Clothing may follow the single locked story outfit from the scene prompt, but it must remain "
-                "identical across the whole book. If the scene prompt conflicts with the master character face, "
-                "age, or body proportions, keep the master character design and only change the action/environment.\n"
-            )
-        else:
-            consistency_instruction = (
-                "\nOnly the original child profile photo is attached. Preserve the real child identity and do "
-                "not invent a new outfit or story-theme costume.\n"
-            )
 
         story_prompt = (
             "Generate one polished children's storybook illustration. Character consistency is more important "
             "than scene costume, theme costume, or decorative story details."
             f"{consistency_instruction}"
             "Use a premium semi-realistic 3D storybook style while following this scene prompt. The child must "
-            f"look like {child_age_label} and keep the same master-character face in every image. Character "
-            "likeness and age consistency are more important than costume or scene details:\n\n"
+            "match the age guidance in the scene prompt and keep the same master-character face and hairstyle in every image. "
+            "Use the same single 3D character model across the full book, as if the Master Character Reference "
+            "Image has been posed in each scene. Character likeness, age consistency, "
+            "modest child-safe clothing coverage, and family-friendly composition are more important than "
+            "decorative scene details:\n\n"
             f"{prompt}"
         )
 
@@ -431,26 +511,12 @@ Format your response as a clear description list."""
 
         try:
             contents: list[Any] = [story_prompt]
-            if consistency_reference is not None:
-                contents.extend(
-                    [
-                        types.Part.from_bytes(
-                            data=consistency_reference.image_bytes,
-                            mime_type=consistency_reference.mime_type,
-                        ),
-                        types.Part.from_bytes(
-                            data=reference_image.image_bytes,
-                            mime_type=reference_image.mime_type,
-                        ),
-                    ]
+            contents.append(
+                types.Part.from_bytes(
+                    data=reference_image.image_bytes,
+                    mime_type=reference_image.mime_type,
                 )
-            else:
-                contents.append(
-                    types.Part.from_bytes(
-                        data=reference_image.image_bytes,
-                        mime_type=reference_image.mime_type,
-                    )
-                )
+            )
 
             try:
                 response = await self.client.aio.models.generate_content(
@@ -471,55 +537,65 @@ Format your response as a clear description list."""
                     raise
 
                 logger.warning(
-                    "Google reference story image returned no image; retrying text-only image fallback: %s",
+                    "Google reference story image returned no image; retrying once with reference images: %s",
                     exc.message,
                 )
-                fallback_prompt = (
-                    "Generate one polished, child-safe children's storybook illustration from the written "
-                    "scene instructions below. Use the written character reference details in the prompt for "
-                    "identity consistency. Do not depend on attached reference images for this fallback attempt. "
-                    "Keep the image warm, family-friendly, cleanly composed, and visually readable.\n\n"
+                retry_prompt = (
+                    "Generate one polished, child-safe children's storybook illustration. "
+                    "Use the only attached image, the Master Character Reference Portrait, as the facial identity "
+                    "and hairstyle reference. No original child avatar photo is attached. "
+                    "Use the written visual bible for the story outfit, accessories, body scale, "
+                    "rendering style, and scene details. Do not copy portrait clothing or portrait crop. "
+                    "Keep natural age-appropriate proportions, consistent face, consistent hairstyle, "
+                    "modest family-friendly clothing coverage, and a readable medium storybook composition. "
+                    "For water-play scenes, use rash guards or t-shirts covering shoulders and the upper body, "
+                    "knee-length shorts or leggings, and water shoes. Use covered water-play outfits for every "
+                    "visible person and keep background people tiny, simplified, fully clothed, or omitted.\n\n"
                     f"{prompt}"
                 )
-                fallback_result = await self.generate_image(
-                    fallback_prompt,
-                    model=kwargs.get("fallback_image_model") or model,
-                    aspect_ratio=kwargs.get("aspect_ratio", "1:1"),
-                    output_mime_type=kwargs.get("output_mime_type", "image/jpeg"),
+                retry_contents: list[Any] = [retry_prompt]
+                retry_contents.append(
+                    types.Part.from_bytes(
+                        data=reference_image.image_bytes,
+                        mime_type=reference_image.mime_type,
+                    )
                 )
-                fallback_metadata = {
-                    **(fallback_result.metadata or {}),
-                    "mode": "story_image_text_fallback",
-                    "provider": "google",
-                    "reference_generation_error": exc.message,
-                    "reference_model": model,
-                    "reference_mime_type": reference_image.mime_type,
-                    "consistency_reference_used": consistency_reference is not None,
-                    "consistency_reference_mime_type": (
-                        consistency_reference.mime_type if consistency_reference is not None else None
-                    ),
-                }
-                return ImageGenerationResult(
-                    image_bytes=fallback_result.image_bytes,
-                    prompt_used=fallback_result.prompt_used,
-                    model=fallback_result.model,
-                    revised_prompt=fallback_result.revised_prompt,
-                    metadata=fallback_metadata,
-                )
+
+                try:
+                    response = await self.client.aio.models.generate_content(
+                        model=model,
+                        contents=retry_contents,
+                        config=types.GenerateContentConfig(
+                            response_modalities=["IMAGE", "TEXT"],
+                            image_config=types.ImageConfig(
+                                aspect_ratio=kwargs.get("aspect_ratio", "1:1"),
+                            ),
+                        ),
+                    )
+                    image_bytes, response_text = self._extract_image_from_content_response(response)
+                    usage_metadata = getattr(response, "usage_metadata", None)
+                    usage = usage_metadata.model_dump() if hasattr(usage_metadata, "model_dump") else None
+                    story_prompt = retry_prompt
+                except AppException as retry_exc:
+                    if retry_exc.code == "EMPTY_RESPONSE":
+                        raise AppException(
+                            "Google reference story image returned no image after retry. "
+                            "Not using text-only fallback because character reference consistency is required.",
+                            code="GOOGLE_REFERENCE_IMAGE_EMPTY",
+                        ) from retry_exc
+                    raise
 
             return ImageGenerationResult(
                 image_bytes=image_bytes,
                 prompt_used=story_prompt,
                 model=model,
                 metadata={
-                    "provider": "google",
-                    "mode": "story_reference_image",
+                        "provider": "google",
+                        "mode": "story_reference_image",
                     "aspect_ratio": kwargs.get("aspect_ratio", "1:1"),
                     "reference_mime_type": reference_image.mime_type,
-                    "consistency_reference_used": consistency_reference is not None,
-                    "consistency_reference_mime_type": (
-                        consistency_reference.mime_type if consistency_reference is not None else None
-                    ),
+                    "reference_role": "master_character_reference_portrait",
+                    "single_reference_used": True,
                     "image_response_text": response_text,
                     "usage": usage,
                 },

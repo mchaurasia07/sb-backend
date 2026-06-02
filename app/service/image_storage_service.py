@@ -1,5 +1,6 @@
 import asyncio
 from pathlib import Path
+import shutil
 from uuid import UUID
 from urllib.parse import unquote, urlparse
 
@@ -124,6 +125,12 @@ class ImageStorageService:
         public_path = f"{settings.MEDIA_URL_PREFIX}/stories/{story_id}/{filename}"
         return f"{public_base_url}{public_path}"
 
+    async def delete_child_profile_directory(self, parent_id: UUID, child_id: UUID) -> None:
+        await self._delete_directory(settings.media_root_path / str(parent_id) / str(child_id))
+
+    async def delete_story_directory(self, story_id: UUID) -> None:
+        await self._delete_directory(settings.media_root_path / "stories" / str(story_id))
+
     async def get_image_bytes(self, url_or_path: str) -> bytes:
         file_path = self._resolve_media_path(url_or_path)
         try:
@@ -181,6 +188,24 @@ class ImageStorageService:
             raise AppException(f"Image file not found: {file_path}", code="FILE_NOT_FOUND")
 
         return file_path
+
+    @staticmethod
+    async def _delete_directory(path: Path) -> None:
+        directory = path.resolve()
+        try:
+            directory.relative_to(settings.media_root_path)
+        except ValueError as exc:
+            raise AppException("Image directory must be in media directory", code="INVALID_IMAGE_PATH") from exc
+
+        if not directory.exists():
+            return
+        if not directory.is_dir():
+            raise AppException("Image delete target must be a directory", code="INVALID_IMAGE_PATH")
+
+        try:
+            await asyncio.to_thread(shutil.rmtree, directory)
+        except OSError as exc:
+            raise AppException(f"Failed to delete image directory: {directory}", code="IMAGE_DELETE_FAILED") from exc
 
 
 image_storage_service = ImageStorageService()

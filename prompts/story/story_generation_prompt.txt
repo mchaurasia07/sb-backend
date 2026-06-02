@@ -42,13 +42,24 @@ Follow:
 * theme
 * learning_goal
 * moral_theme
+* central_problem
+* hero_want
+* emotional_need
+* stakes
+* climax_choice
+* resolution_payoff
+* moral_explanation
+* content_anchors
 * setting
 * tone
 * visual_bible
 * story_role
 * scene_description
+* domain_detail
 * emotional_beat
 * learning_goal_integration
+* growth_step
+* page_turn_hook
 * characters_present
 * continuity_requirements
 
@@ -100,6 +111,10 @@ Avoid:
 * repetitive explanations
 
 The learning goal should be visible through actions and choices.
+
+Each page should follow the planned growth_step. Use the page_turn_hook to add
+gentle forward momentum, but do not force a cliffhanger if the page is the final
+resolution.
 
 ---
 
@@ -159,6 +174,57 @@ The climax should demonstrate mastery of the learning goal.
 
 ---
 
+## STORY ARC
+
+Use the plan's central_problem, hero_want, emotional_need, stakes,
+climax_choice, and resolution_payoff to create a coherent story arc.
+
+The story should not feel like separate page descriptions. It should feel like
+one connected journey where:
+
+* the hero wants something specific
+* the problem gently blocks that want
+* early attempts are incomplete or uncertain
+* the hero learns through action
+* the climax choice shows growth
+* the ending makes the emotional change visible
+
+---
+
+## DOMAIN CONTENT / FACT ANCHORS
+
+Use the plan's content_anchors and each page's domain_detail naturally in the
+story text.
+
+Do not write generic theme language when the plan provides concrete names.
+
+If the plan names Earth, Mars, Saturn, the Moon, rockets, stars, rings, or
+other theme anchors, include those names where they belong in the story.
+
+Every page should include the planned domain_detail when present, woven into
+action, setting, dialogue, or sensory description.
+
+For Toddler (2-4):
+
+* use one simple concrete detail per page
+* keep facts very light
+* prefer sensory language and naming
+
+For Early Reader (5-7):
+
+* use named places, objects, creatures, or facts clearly
+* explain one small idea at a time through action
+
+For Advanced (8-12):
+
+* use richer domain details and cause/effect
+* keep explanations story-driven, not textbook-like
+
+Avoid turning the story into a lesson list. The facts should help the journey
+feel specific, vivid, and real.
+
+---
+
 ## AGE BAND RULES
 
 Toddler (2-4)
@@ -206,6 +272,16 @@ Do NOT end every page with a question.
 
 Questions should be rare.
 
+Most non-final pages should leave a soft reason to continue:
+
+* an unfinished action
+* a new discovery
+* a small decision
+* a changed feeling
+* a visual surprise
+
+Do not use artificial cliffhangers.
+
 ---
 
 ## CONTINUITY
@@ -240,6 +316,21 @@ Aim for warmth, rhythm, and flow.
 
 ---
 
+## MORAL ENDING
+
+The moral must be explained at the end in 1-2 child-friendly sentences.
+
+It should:
+
+* connect directly to what the hero did in the climax
+* explain the learning goal in simple language
+* feel warm and encouraging
+* avoid sounding like a school worksheet
+
+Do not write a generic moral that could fit any story.
+
+---
+
 ## OUTPUT FORMAT
 
 Return valid JSON only.
@@ -271,6 +362,9 @@ Before generating:
 6. Verify climax occurs near the end.
 7. Verify the child remains the hero.
 8. Verify narration sounds natural when read aloud.
+9. Verify moral explains the story-specific lesson in child-friendly language.
+10. Verify the final page shows the moral before the moral field explains it.
+11. Verify concrete content_anchors and page domain_detail appear naturally in the story.
 
 Return ONLY the JSON object.
 

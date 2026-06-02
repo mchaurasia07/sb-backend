@@ -1,34 +1,84 @@
-Analyze the Master Character Reference Portrait.
+Analyze the provided child identity reference image.
 
-Extract a stable visual identity profile for future story illustration generation.
+The image may be either:
+
+* the original child profile photo
+* the generated Master Character Reference Portrait
+
+Your task is to extract a stable facial identity profile that can be reused to generate the same child consistently across storybook illustrations.
+
+Focus ONLY on features visible from the neck upward.
+
+Ignore:
+
+* clothing
+* accessories
+* shoulders
+* body proportions
+* background
+* lighting
+* image quality
+* camera angle
+* pose
+* facial expression
+* rendering artifacts
+
+Describe only stable visual identity traits.
 
 Return ONLY valid JSON.
 
 Schema:
 
 {
+"age_appearance": "",
 "face_shape": "",
+"cheek_shape": "",
+"jawline_shape": "",
+"chin_shape": "",
 "skin_tone": "",
+
+"hair_color": "",
+"hair_length": "",
+"hair_texture": "",
+"hair_style": "",
+"hair_direction": "",
+
 "eye_color": "",
 "eye_shape": "",
+"eye_size": "",
+
 "eyebrow_shape": "",
+"eyebrow_thickness": "",
+
 "nose_shape": "",
-"mouth_description": "",
-"hair_color": "",
-"hair_style": "",
-"hair_length": "",
-"distinctive_features": []
+
+"mouth_shape": "",
+"smile_characteristics": "",
+
+"ear_visibility": "",
+
+"distinctive_features": [],
+
+"identity_summary": ""
 }
 
 Requirements:
 
-* Describe only visible visual features.
-* Do not infer personality.
-* Do not describe emotions.
-* Do not describe clothing.
-* Do not describe the background.
-* Do not describe camera angle.
-* Do not invent features that are not visible.
-* Keep values concise and objective.
-* distinctive_features should contain only stable identifying traits.
-* Return JSON only.
+* Analyze only the head, face, hair, ears, and neck area.
+* Describe only visible features.
+* Do not infer ethnicity, nationality, personality, emotions, or health information.
+* Do not describe clothing, body shape, shoulders, or posture.
+* Do not describe background, lighting, or camera angle.
+* Do not invent details that are not clearly visible.
+* Keep attribute values concise and objective.
+* distinctive_features should contain only stable identifying traits such as moles, dimples, freckles, unique facial characteristics, or highly distinctive hair features.
+
+identity_summary requirements:
+
+* 100-150 words.
+* Describe only neck-up visual identity.
+* Prioritize face shape, hair, eye shape, nose shape, mouth shape, skin tone, and distinctive features.
+* The summary should be optimized for future storybook image generation.
+* Include only details that help recreate the same child consistently across illustrations.
+
+Return JSON only.

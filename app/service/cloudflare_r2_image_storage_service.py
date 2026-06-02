@@ -89,6 +89,12 @@ class CloudflareR2ImageStorageService:
         await self._put_object(key, image_bytes, self._content_type_for_filename(clean_filename))
         return self.public_url(key)
 
+    async def delete_child_profile_directory(self, parent_id: UUID, child_id: UUID) -> None:
+        await self.delete_prefix(self._key(str(parent_id), str(child_id)) + "/")
+
+    async def delete_story_directory(self, story_id: UUID) -> None:
+        await self.delete_prefix(self._key("stories", str(story_id)) + "/")
+
     async def get_image_bytes(self, key_or_url: str) -> bytes:
         local_path = self._legacy_local_media_path(key_or_url)
         if local_path is not None:
@@ -132,8 +138,8 @@ class CloudflareR2ImageStorageService:
             ) from exc
 
     async def delete_prefix(self, prefix: str) -> None:
-        clean_prefix = prefix.strip("/")
-        if not clean_prefix:
+        clean_prefix = prefix.lstrip("/")
+        if not clean_prefix.strip("/"):
             raise AppException("R2 delete prefix cannot be empty", code="INVALID_R2_PREFIX")
 
         def _delete_prefix() -> None:

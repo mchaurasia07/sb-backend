@@ -11,6 +11,18 @@ def _story_plan(page_count: int = 10) -> dict:
         "moral_theme": "patience and planning",
         "setting": "a moonlit library",
         "tone": "gentle mystery",
+        "central_problem": "The moon map opens only when Mira follows each clue carefully.",
+        "hero_want": "Mira wants to find the moonlit reading nook.",
+        "emotional_need": "Mira needs to trust slow, careful steps.",
+        "stakes": "If Mira rushes, the glowing path fades before she can follow it.",
+        "climax_choice": "Mira pauses, checks the final clue, and chooses the careful path.",
+        "resolution_payoff": "The reading nook opens and Mira feels proud of her patience.",
+        "moral_explanation": "Careful steps can solve a big puzzle.",
+        "content_anchors": {
+            "required_names": ["moon map", "silver path", "reading nook"],
+            "required_facts": ["A map can guide one careful step at a time."],
+            "age_safe_explanations": ["Following one clue at a time helps Mira stay calm."],
+        },
         "visual_bible": {
             "style": "premium semi-realistic 3D storybook",
             "hero": {
@@ -33,6 +45,9 @@ def _story_plan(page_count: int = 10) -> dict:
                 "child_action": "Mira studies the map carefully.",
                 "emotional_beat": "curious focus",
                 "learning_goal_integration": "Mira checks one clue before moving to the next.",
+                "growth_step": "Mira practices slowing down before choosing.",
+                "page_turn_hook": "A new silver path begins to glow.",
+                "domain_detail": f"Clue {index} glows on the moon map.",
                 "continuity_requirements": ["Mira keeps the moon map."],
             }
             for index in range(1, page_count + 1)

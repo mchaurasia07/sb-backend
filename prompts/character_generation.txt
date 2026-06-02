@@ -1,105 +1,146 @@
-MASTER CHARACTER REFERENCE PORTRAIT
+Create a MASTER STORYBOOK CHARACTER REFERENCE PORTRAIT.
 
-Create a character reference portrait based on the uploaded child photo.
+You will be given:
 
-This is an IDENTITY PRESERVATION task, not a creative character design task.
+1. Original child photo (for identity reference)
+2. Identity profile JSON (extracted from the photo)
 
-HIGHEST PRIORITY
+This is NOT a creative redesign task.
 
-The generated character must clearly resemble the EXACT SAME child from the reference photo.
+This is a CHARACTER CONSISTENCY LOCKING task.
 
-Strictly preserve:
+The goal is to generate a reusable animated storybook character model that will be used across ALL future story illustrations.
 
-* facial structure
+---
+
+## 🎯 PRIMARY OBJECTIVE
+
+Generate a single, high-quality, front-facing character portrait that preserves the child's real identity as closely as possible while converting it into a consistent premium semi-realistic 3D storybook character style.
+
+The character must be instantly recognizable as the SAME child from the original photo.
+
+---
+
+## 🔒 STRICT IDENTITY PRESERVATION (HIGHEST PRIORITY)
+
+Must preserve EXACTLY:
+
 * face shape
 * facial proportions
-* hairstyle
-* hairline
-* hair color
+* cheek structure
+* jawline and chin shape
+* skin tone
+* eye shape and eye color
 * eyebrow shape
-* eye shape
-* eye color
 * nose shape
 * mouth shape
 * smile characteristics
-* skin tone
-* cheek structure
-* age appearance
-* all unique facial characteristics
+* hair color
+* hair length
+* hairline
+* hair style and volume
+* hair direction/parting
+* age appearance (do not age up or down)
+* all distinctive facial features (moles, dimples, freckles, marks)
 
-The child must be instantly recognizable as the same real child.
+The child must remain visually identical in identity across all future renders.
 
-Do not redesign, beautify, stylize, or reinterpret the face.
+Do NOT modify facial identity.
 
-Do not make the child look older or younger.
+---
 
-STYLE
+## 🎨 STYLE CONVERSION (ONLY STYLE CHANGES ALLOWED)
 
-* highly realistic
-* realistic skin texture
-* realistic hair detail
-* subtle premium family-film realism
-* natural child appearance
+Convert the child into:
 
-Facial identity accuracy is more important than artistic style.
+* premium semi-realistic 3D animated storybook character
+* high-end family film animation style
+* soft stylized skin shading
+* clean facial topology
+* natural child proportions
+* slightly stylized but realistic eyes
+* polished character-model rendering
 
-CAMERA
+IMPORTANT:
+Style may change.
+Identity must NOT change.
 
-* straight-on front view
-* eye-level camera
+Do NOT make the child look like a different character design.
+
+---
+
+## 📸 CAMERA REQUIREMENTS
+
+* front-facing portrait
+* eye-level view
 * centered composition
-* symmetrical portrait
+* symmetrical face alignment
 * direct eye contact
-* natural perspective
-* portrait lens look
+* neutral, relaxed expression
 
-COMPOSITION
+---
 
-* head and shoulders portrait only
-* face occupies approximately 85% of the image
-* centered in frame
-* neutral relaxed expression
+## 🧍 COMPOSITION
 
-Do not generate:
+* head and shoulders only
+* face occupies 70–80% of frame
+* centered and stable framing
+* no dynamic pose
+
+---
+
+## 🚫 DO NOT INCLUDE
 
 * full body
-* half body
-* hands
-* arms
-* props
-* toys
-* accessories
-* hats
-* glasses
+* hands or arms
+* props or toys
+* accessories (unless present in identity profile as permanent feature)
+* hats or glasses (unless permanent in identity profile)
+* background objects or scenes
+* environmental storytelling
 
-BACKGROUND
+---
+
+## 🌐 BACKGROUND
 
 * pure white seamless studio background
-* no scenery
-* no objects
-* no decorations
-* no environment
+* no depth, no scenery, no texture
 
-LIGHTING
+---
 
-* soft professional studio lighting
-* evenly illuminated face
-* natural skin tones
-* clear facial visibility
+## 💡 LIGHTING
 
-CONSISTENCY REQUIREMENT
+* soft studio lighting
+* evenly lit face
+* natural skin tone preservation
+* no dramatic shadows
 
-This image will be used as the MASTER CHARACTER REFERENCE for future story illustrations.
+---
 
-Prioritize:
+## ⚠️ CONSISTENCY RULE (CRITICAL)
 
-1. Identity preservation
-2. Facial accuracy
-3. Consistency
-4. Realism
+This character is the MASTER REFERENCE MODEL for an entire storybook system.
 
-Prioritize these over creativity, styling, or artistic interpretation.
+All future story images will use this face as the canonical identity.
 
-OUTPUT
+Therefore:
 
-Generate a clean, front-facing, head-and-shoulders character reference portrait with maximum similarity to the uploaded child photo and a pure white background.
+* Do NOT redesign the child
+* Do NOT beautify or modify facial structure
+* Do NOT change age appearance
+* Do NOT interpret identity creatively
+* Do NOT drift from reference photo identity
+
+Identity preservation is more important than artistic quality.
+
+---
+
+## OUTPUT
+
+Generate a single premium semi-realistic 3D animated storybook character portrait:
+
+* head and shoulders
+* front-facing
+* white background
+* maximum identity match with original child
+* reusable as canonical story character model

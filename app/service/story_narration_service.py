@@ -55,6 +55,7 @@ class StoryNarrationService:
         language: str = "en",
         overwrite: bool = False,
         source: str = "story",
+        age_group: str | None = None,
     ) -> dict:
         """Generate narration directly into an in-memory story_json payload."""
         normalized_language = language.strip().lower()
@@ -64,6 +65,7 @@ class StoryNarrationService:
             language=normalized_language,
             overwrite=overwrite,
             source=source,
+            age_group=age_group,
         )
         return story_json
 
@@ -92,6 +94,7 @@ class StoryNarrationService:
             raise AppException("Generic story content does not have story_json")
 
         try:
+            generic_story = await self.generic_stories.get_by_id(story_id)
             story_json = deepcopy(content.story_json)
             await self._generate_story_json_narration(
                 story_json,
@@ -99,6 +102,7 @@ class StoryNarrationService:
                 language=normalized_language,
                 overwrite=overwrite,
                 source="generic_story",
+                age_group=generic_story.age_group if generic_story else None,
             )
 
             content.story_json = story_json
@@ -160,6 +164,7 @@ class StoryNarrationService:
                 language=normalized_language,
                 overwrite=overwrite,
                 source="story",
+                age_group=story.age_group.value,
             )
 
             content.story_json = story_json
@@ -184,8 +189,10 @@ class StoryNarrationService:
         language: str,
         overwrite: bool,
         source: str,
+        age_group: str | None = None,
     ) -> None:
         pages = story_json.get("pages", [])
+        story_age_group = age_group or story_json.get("age_group")
         moral = story_json.get("moral") if isinstance(story_json.get("moral"), dict) else {}
         default_speech_narration = (
             moral.get("speech_narration", {}) if isinstance(moral.get("speech_narration"), dict) else {}
@@ -227,6 +234,7 @@ class StoryNarrationService:
                 page,
                 story_id=story_id,
                 language=language,
+                age_group=story_age_group,
                 default_speech_narration=default_speech_narration,
             )
             pages[i] = enriched_page
@@ -245,6 +253,7 @@ class StoryNarrationService:
         *,
         story_id: UUID,
         language: str,
+        age_group: str | None = None,
         default_speech_narration: dict | None = None,
     ) -> dict:
         page_number = page_dict.get("page_number", 1)
@@ -256,7 +265,7 @@ class StoryNarrationService:
         narration = page_dict.get("narration") if isinstance(page_dict.get("narration"), dict) else {}
         speech_narration = page_dict.get("speech_narration") or default_speech_narration or {}
         emotion = page_dict.get("emotion") or speech_narration.get("emotion", "wonder")
-        derived_narration = build_page_narration(emotion)
+        derived_narration = build_page_narration(emotion, age_group)
         narration = {
             "tone": narration.get("tone") or derived_narration["tone"],
             "pace": narration.get("pace") or derived_narration["pace"],

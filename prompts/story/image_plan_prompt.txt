@@ -20,8 +20,14 @@ Story Plan JSON:
 Story JSON:
 {story_json}
 
-Character Profile:
-{character_profile}
+Character Identity Lock:
+{character_identity_lock}
+
+Hero Child Name:
+{child_name}
+
+Story Title:
+Use the title from Story Plan JSON exactly for the cover title text.
 
 Child Age:
 {child_age_label}
@@ -33,7 +39,7 @@ Age Guidance:
 
 ## SOURCE PRIORITY
 
-1. Character Profile
+1. Character Identity Lock
 
    * visual identity
    * facial features
@@ -45,6 +51,7 @@ Age Guidance:
 2. Story Plan JSON
 
    * scene structure
+   * content anchors and domain details
    * page progression
    * characters present
    * child actions
@@ -74,6 +81,24 @@ The image should tell the story even without reading the text.
 
 ---
 
+## DOMAIN DETAIL CONSISTENCY
+
+Use Story Plan JSON content_anchors and each page's domain_detail to make scenes
+specific.
+
+Do not create generic settings when the story plan gives named details.
+
+Examples:
+
+* Mars should show child-friendly red rocky terrain, not a random planet.
+* Saturn should show rings clearly.
+* A garden sprout page should show soil, seedling, watering can, or sunlight.
+* An ocean tide-pool page should show shallow rocks, shells, and small sea life.
+
+Keep details age-appropriate and visually clear. Do not overload the scene.
+
+---
+
 ## VISUAL CONSISTENCY
 
 Build one locked visual identity for:
@@ -81,6 +106,10 @@ Build one locked visual identity for:
 * child hero
 * companion
 * recurring characters
+
+The child hero name must be exactly the Hero Child Name. Store it in
+visual_bible.hero.name and use the same name when referring to the hero in page
+image prompts.
 
 Maintain consistency across all pages:
 
@@ -92,7 +121,43 @@ Maintain consistency across all pages:
 * accessories
 * companion appearance
 
+For every recurring side character, the Visual Bible must lock:
+
+* exact hair color and hairstyle, or fur/feather/body pattern
+* skin/fur/feather color
+* eye color/shape
+* face/head shape
+* outfit, shoes, accessories, and color palette if human
+* size/height relative to the hero
+* one distinctive visual feature
+
+Do not use vague side-character descriptions. If the Story Plan does not give
+enough detail for a recurring side character, choose one clear design and repeat
+it exactly in visual_bible and every image_prompt.
+
 Do not redesign characters between pages.
+
+The child profile may describe a face-focused master portrait. Use it to lock
+facial identity, hairstyle, skin tone, age appearance, and distinctive facial
+features only.
+
+Treat Character Identity Lock as the COMMON identity lock for the cover, every
+page, and the back cover. Every image_prompt must preserve this lock without
+rewriting it or changing the character.
+
+Do not treat portrait clothing, portrait crop, white background, or
+head-and-shoulders framing as story requirements.
+
+Do not copy identity-analysis wording that asks for exaggerated illustration
+features. Avoid:
+
+* oversized eyes
+* oversized head
+* exaggerated toddler proportions
+* generic cartoon face
+* stock animated child design
+
+Use natural age-appropriate child proportions instead.
 
 ---
 
@@ -107,6 +172,33 @@ The same outfit must appear in:
 * back cover
 
 Do not create outfit changes.
+
+The story outfit may be different from the master portrait clothing. Once you
+choose the story outfit, keep it identical in the cover, all pages, and back
+cover.
+
+## CHILD-SAFE CLOTHING COVERAGE
+
+All children and adults must be dressed modestly and appropriately for a
+children's picture book.
+
+For water park, pool, beach, splash pad, rain, bath-adjacent, or any scene with
+water play:
+
+* the child hero must wear a rash guard shirt that covers shoulders and the
+  upper body
+* the child hero must wear knee-length swim shorts, swim leggings, or
+  shorts-over-leggings
+* the child hero must wear water shoes or sandals
+* caregivers and other adults must wear modest cover-up clothing such as a
+  short-sleeved rash guard or t-shirt with knee-length shorts, leggings, or a
+  skirted cover-up
+* use covered, modest, family-friendly water-play outfits for every visible
+  person
+
+In crowded water-park scenes, keep background people tiny, simplified, fully
+clothed, or omit them. The illustration should focus on the hero and recurring
+characters, not on exposed bodies.
 
 ---
 
@@ -171,9 +263,20 @@ The cover should:
 
 * summarize the story
 * feature the child hero prominently
+* include the exact story title as readable book-cover typography
 * include the most iconic story element
 * feel welcoming and exciting
 * show the strongest emotion of the story
+
+The cover image_prompt must explicitly say:
+
+* render the exact title text from Story Plan JSON
+* use clean, correctly spelled, large, child-friendly book-cover typography
+* place title text directly on natural title-safe negative space, such as sky,
+  soft foliage, wall, or water mist
+* do not put the title inside a black rectangle, box, label, banner, UI panel,
+  sticker, plaque, or card
+* no extra words besides the exact title
 
 ---
 
@@ -192,6 +295,14 @@ Each image_prompt should contain:
 
 Use approximately 120-180 words per image prompt.
 
+Each image_prompt must state a stable camera/composition cue:
+
+* medium full-body or three-quarter child view for action scenes
+* clearly readable face without extreme close-up framing
+* consistent child scale across pages
+
+Use close-up framing only when the story moment explicitly requires it.
+
 ---
 
 ## GLOBAL STYLE
@@ -206,7 +317,7 @@ Use this style consistently:
 
 Use in every image prompt:
 
-"No character redesign, no age change, no outfit change, no hairstyle change, no inconsistent facial features, no oversized eyes, no oversized head, no distorted anatomy, no extra fingers, no cropped face, no horror elements, no dark frightening imagery, no aggressive expressions, no blurry rendering, no watermark."
+"No character redesign, no age change, no outfit change, no hairstyle change, no inconsistent facial features, no oversized eyes, no oversized head, no distorted anatomy, no extra fingers, no cropped face, no horror elements, no dark frightening imagery, no aggressive expressions, no blurry rendering, no watermark, no minimal swimwear, no uncovered water-play outfit."
 
 ---
 
@@ -215,6 +326,7 @@ Use in every image prompt:
 {
 "visual_bible": {
 "hero": {
+"name": "",
 "appearance": "",
 "outfit": "",
 "signature_item": ""
@@ -226,6 +338,7 @@ Use in every image prompt:
 },
 
 "cover": {
+"title_text": "",
 "visual_focus": "",
 "emotion": "",
 "image_prompt": ""

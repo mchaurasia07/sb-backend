@@ -30,12 +30,28 @@ class PlanValidator:
         if not isinstance(plan, dict):
             return PlanValidationResult(ok=False, errors=["Plan must be a JSON object."])
 
-        for field in ("title", "summary", "theme", "learning_goal", "moral_theme", "setting", "tone"):
+        for field in (
+            "title",
+            "summary",
+            "theme",
+            "learning_goal",
+            "moral_theme",
+            "setting",
+            "tone",
+            "central_problem",
+            "hero_want",
+            "emotional_need",
+            "stakes",
+            "climax_choice",
+            "resolution_payoff",
+            "moral_explanation",
+        ):
             self._validate_required_string(plan, field, "plan", errors)
 
         if source_inputs is not None:
             self._validate_source_inputs(plan, source_inputs, errors)
 
+        self._validate_content_anchors(plan.get("content_anchors"), errors)
         self._validate_visual_bible(plan.get("visual_bible"), errors)
 
         pages = plan.get("pages")
@@ -56,6 +72,9 @@ class PlanValidator:
             "child_action",
             "emotional_beat",
             "learning_goal_integration",
+            "growth_step",
+            "domain_detail",
+            "page_turn_hook",
             "continuity_requirements",
         }
 
@@ -80,7 +99,15 @@ class PlanValidator:
             else:
                 page["story_role"] = self._normalize_story_role(story_role)
 
-            for field in ("scene_description", "child_action", "emotional_beat", "learning_goal_integration"):
+            for field in (
+                "scene_description",
+                "child_action",
+                "emotional_beat",
+                "learning_goal_integration",
+                "growth_step",
+                "domain_detail",
+                "page_turn_hook",
+            ):
                 self._validate_required_string(page, field, f"pages[{idx}]", errors)
             self._validate_string_array(page, "characters_present", f"pages[{idx}]", errors, allow_empty=True)
             self._validate_string_array(page, "continuity_requirements", f"pages[{idx}]", errors, allow_empty=True)
@@ -104,6 +131,33 @@ class PlanValidator:
             errors.append("`theme` must match the request Theme exactly.")
         if plan.get("learning_goal") != expected_learning_goal:
             errors.append("`learning_goal` must match the request Learning Goal exactly.")
+
+    def _validate_content_anchors(self, content_anchors: Any, errors: list[str]) -> None:
+        if not isinstance(content_anchors, dict):
+            errors.append("Missing or invalid `content_anchors` (must be an object).")
+            return
+
+        total_values = 0
+        for field in ("required_names", "required_facts", "age_safe_explanations"):
+            before_count = len(errors)
+            self._validate_string_array(
+                content_anchors,
+                field,
+                "content_anchors",
+                errors,
+                allow_empty=True,
+            )
+            if len(errors) == before_count:
+                total_values += len(
+                    [
+                        value
+                        for value in content_anchors.get(field, [])
+                        if isinstance(value, str) and value.strip()
+                    ]
+                )
+
+        if total_values == 0:
+            errors.append("content_anchors must include at least one concrete theme detail.")
 
     def _validate_visual_bible(self, visual_bible: Any, errors: list[str]) -> None:
         if not isinstance(visual_bible, dict):

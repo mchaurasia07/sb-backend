@@ -77,3 +77,7 @@ class ChildRepository:
     async def update(self, child: ChildProfile) -> ChildProfile:
         await self.session.flush()
         return child
+
+    async def delete(self, child: ChildProfile) -> None:
+        await self.session.delete(child)
+        await self.session.flush()

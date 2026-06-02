@@ -265,6 +265,16 @@ async def select_active_child_profile(
     return success_response(data, "Active child profile selected successfully")
 
 
+@router.delete("/{child_id}", response_model=ApiResponse[None])
+async def delete_child_profile(
+    child_id: UUID,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[None]:
+    await ChildService(session).delete(current_user, child_id)
+    return success_response(None, "Child profile and related custom stories deleted successfully")
+
+
 @router.get("/{child_id}/books", response_model=ApiResponse[PaginatedResponse[ChildBookResponse]])
 async def list_child_books(
     child_id: UUID,

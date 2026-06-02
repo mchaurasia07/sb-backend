@@ -631,6 +631,7 @@ class StoryService:
                 language=DEFAULT_STORY_LANGUAGE,
                 overwrite=False,
                 source="story_workflow",
+                age_group=story.age_group.value,
             )
 
             pages = narrated_story_json.get("pages", [])
@@ -1047,6 +1048,8 @@ class StoryService:
         prompt = prompt.replace("{story_json}", _compact_json(compact_story_json))
         prompt = prompt.replace("{character_description}", character_context["character_description"])
         prompt = prompt.replace("{character_profile}", character_context["character_description"])
+        prompt = prompt.replace("{character_identity_lock}", self._format_prompt_character_identity_lock(character_context))
+        prompt = prompt.replace("{child_name}", character_context["child_name"])
         prompt = prompt.replace("{child_age_label}", character_context["child_age_label"])
         prompt = prompt.replace("{child_age_visual_guidance}", character_context["child_age_visual_guidance"])
         step.prompt = prompt
@@ -1197,11 +1200,6 @@ class StoryService:
             child = await self.children.get_for_user(story.user_id, story.child_id)
             if child is None:
                 raise NotFoundException("Child profile not found during image generation")
-            if not child.avatar_image_url:
-                raise AppException(
-                    "Child profile photo is required for story image generation",
-                    code="NO_PHOTO",
-                )
             if not child.character_image_url:
                 raise AppException(
                     "Generated character image is required for story image generation",
@@ -1209,7 +1207,6 @@ class StoryService:
                 )
 
             image_storage = get_image_storage_service()
-            avatar_image_base64 = await self._load_image_as_base64(child.avatar_image_url)
             character_image_base64 = await self._load_image_as_base64(child.character_image_url)
             character_context = self._build_character_reference_context(child)
             image_model_kwargs = self._story_image_model_kwargs(story)
@@ -1238,13 +1235,11 @@ class StoryService:
                     page_type="cover",
                     target_aspect_ratio=settings.STORY_COVER_ASPECT_RATIO,
                     page_data=cover,
+                    story_title=story_json.get("title") or story.title or "",
                 )
                 cover_bytes = await self.ai_provider.create_story_image(
                     cover_prompt,
-                    reference_image_base64=avatar_image_base64,
-                    consistency_reference_image_base64=character_image_base64,
-                    child_age_label=character_context["child_age_label"],
-                    child_age_visual_guidance=character_context["child_age_visual_guidance"],
+                    reference_image_base64=character_image_base64,
                     **image_model_kwargs,
                     size=settings.STORY_COVER_IMAGE_SIZE,
                     quality=settings.STORY_IMAGE_QUALITY,
@@ -1312,13 +1307,11 @@ class StoryService:
                         page_type="story_page",
                         target_aspect_ratio=settings.STORY_PAGE_ASPECT_RATIO,
                         page_data=img_page,
+                        story_title=story_json.get("title") or story.title or "",
                     )
                     image_bytes = await self.ai_provider.create_story_image(
                         page_prompt,
-                        reference_image_base64=avatar_image_base64,
-                        consistency_reference_image_base64=character_image_base64,
-                        child_age_label=character_context["child_age_label"],
-                        child_age_visual_guidance=character_context["child_age_visual_guidance"],
+                        reference_image_base64=character_image_base64,
                         **image_model_kwargs,
                         size=settings.STORY_PAGE_IMAGE_SIZE,
                         quality=settings.STORY_IMAGE_QUALITY,
@@ -1387,13 +1380,11 @@ class StoryService:
                     page_type="back_cover",
                     target_aspect_ratio=settings.STORY_BACK_COVER_ASPECT_RATIO,
                     page_data=back_cover,
+                    story_title=story_json.get("title") or story.title or "",
                 )
                 back_cover_bytes = await self.ai_provider.create_story_image(
                     back_cover_prompt,
-                    reference_image_base64=avatar_image_base64,
-                    consistency_reference_image_base64=character_image_base64,
-                    child_age_label=character_context["child_age_label"],
-                    child_age_visual_guidance=character_context["child_age_visual_guidance"],
+                    reference_image_base64=character_image_base64,
                     **image_model_kwargs,
                     size=settings.STORY_BACK_COVER_IMAGE_SIZE,
                     quality=settings.STORY_IMAGE_QUALITY,
@@ -1533,15 +1524,23 @@ class StoryService:
         page_type: str,
         target_aspect_ratio: str,
         page_data: dict[str, Any] | None = None,
+        story_title: str = "",
     ) -> str:
         """Render the final story image prompt with consistency context."""
+        rendered_page_data = dict(page_data or {"image_prompt": image_prompt})
+        if page_type == "cover" and story_title:
+            rendered_page_data.setdefault("title_text", story_title)
         return render_prompt(
             template,
             {
                 "visual_bible": visual_bible,
-                "page_data": page_data or {"image_prompt": image_prompt},
+                "page_data": rendered_page_data,
                 "character_consistency_json": visual_bible,
                 "character_reference_metadata": character_context["character_description"],
+                "identity_summary": character_context.get("identity_summary") or character_context["character_description"],
+                "character_identity_lock": StoryService._format_prompt_character_identity_lock(character_context),
+                "child_name": character_context.get("child_name", "Child"),
+                "story_title": story_title,
                 "child_age_label": character_context["child_age_label"],
                 "child_age_visual_guidance": character_context["child_age_visual_guidance"],
                 "page_type": page_type,
@@ -1587,19 +1586,62 @@ class StoryService:
     def _build_story_planner_character_profile(child: Any, character_context: dict[str, str]) -> dict[str, Any]:
         """Build the character-profile input expected by the new planner prompt."""
         metadata = child.character_metadata if isinstance(child.character_metadata, dict) else {}
+        identity_profile = StoryService._story_planner_identity_profile(metadata)
         return {
             "age": child.age,
             "gender": child.gender or "",
             "name": child.first_name or "Child",
-            "profile_summary": character_context["character_description"],
+            "profile_summary": StoryService._story_planner_profile_summary(child, metadata, character_context),
             "child_age_label": character_context["child_age_label"],
             "age_visual_guidance": character_context["child_age_visual_guidance"],
             "generated_character": {
-                "image_url": child.character_image_url or "",
-                "description": metadata.get("description") or character_context["character_description"],
+                "identity_profile": identity_profile,
                 "style": metadata.get("style") or "premium semi-realistic 3D storybook",
             },
         }
+
+    @staticmethod
+    def _story_planner_profile_summary(
+        child: Any,
+        metadata: dict[str, Any],
+        character_context: dict[str, str],
+    ) -> str:
+        identity_profile = StoryService._story_planner_identity_profile(metadata)
+        if not identity_profile:
+            return str(metadata.get("description") or character_context["character_description"] or "").strip()
+
+        parts = [
+            f"{child.first_name or 'Child'} is {character_context['child_age_label']}.",
+            StoryService._format_character_identity_profile(identity_profile)
+            .replace("- ", "")
+            .replace("\n", "; "),
+        ]
+        return " ".join(part for part in parts if part.strip())
+
+    @staticmethod
+    def _story_planner_identity_profile(metadata: dict[str, Any]) -> dict[str, Any]:
+        identity_profile = metadata.get("identity_profile")
+        if not isinstance(identity_profile, dict):
+            return {}
+        omitted_for_story_planning = {"mouth_description"}
+        return {
+            key: value
+            for key, value in identity_profile.items()
+            if key not in omitted_for_story_planning
+        }
+
+    @staticmethod
+    def _format_prompt_character_identity_lock(character_context: dict[str, str]) -> str:
+        identity_summary = character_context.get("identity_summary") or character_context["character_description"]
+        return (
+            f"Hero child name: {character_context.get('child_name', 'Child')}\n"
+            "Reference image role: Master Character Reference Portrait. Use the generated character_image_url "
+            "as the only visual reference image.\n"
+            f"Identity summary: {identity_summary}\n"
+            f"Identity profile:\n{character_context['character_description']}\n"
+            f"Child age: {character_context['child_age_label']}\n"
+            f"Age/body guidance: {character_context['child_age_visual_guidance']}"
+        )
 
     @staticmethod
     def _build_story_generation_context(story_plan: dict[str, Any]) -> dict[str, Any]:
@@ -1630,6 +1672,9 @@ class StoryService:
                     "characters_present": characters_present,
                     "emotional_beat": text(page.get("emotional_beat")),
                     "learning_goal_integration": text(page.get("learning_goal_integration")),
+                    "growth_step": text(page.get("growth_step")),
+                    "domain_detail": text(page.get("domain_detail")),
+                    "page_turn_hook": text(page.get("page_turn_hook")),
                     "continuity_requirements": page.get("continuity_requirements")
                     if isinstance(page.get("continuity_requirements"), list)
                     else [],
@@ -1644,6 +1689,16 @@ class StoryService:
             "moral_theme": text(story_plan.get("moral_theme")),
             "setting": text(story_plan.get("setting")),
             "tone": text(story_plan.get("tone")),
+            "central_problem": text(story_plan.get("central_problem")),
+            "hero_want": text(story_plan.get("hero_want")),
+            "emotional_need": text(story_plan.get("emotional_need")),
+            "stakes": text(story_plan.get("stakes")),
+            "climax_choice": text(story_plan.get("climax_choice")),
+            "resolution_payoff": text(story_plan.get("resolution_payoff")),
+            "moral_explanation": text(story_plan.get("moral_explanation")),
+            "content_anchors": story_plan.get("content_anchors")
+            if isinstance(story_plan.get("content_anchors"), dict)
+            else {},
             "visual_bible": story_plan.get("visual_bible") if isinstance(story_plan.get("visual_bible"), dict) else {},
             "pages": pages,
         }
@@ -1684,6 +1739,7 @@ class StoryService:
                     "characters_present": characters_present,
                     "child_action": text(page.get("child_action")),
                     "emotional_beat": text(page.get("emotional_beat")),
+                    "domain_detail": text(page.get("domain_detail")),
                     "continuity_requirements": continuity_requirements,
                 }
             )
@@ -1692,6 +1748,9 @@ class StoryService:
             "title": text(story_plan.get("title")),
             "setting": text(story_plan.get("setting")),
             "tone": text(story_plan.get("tone")),
+            "content_anchors": story_plan.get("content_anchors")
+            if isinstance(story_plan.get("content_anchors"), dict)
+            else {},
             "visual_bible": story_plan.get("visual_bible") if isinstance(story_plan.get("visual_bible"), dict) else {},
             "pages": compact_plan_pages,
         }
@@ -1805,11 +1864,28 @@ class StoryService:
 
     @staticmethod
     def _build_character_reference_context(child) -> dict[str, str]:
+        character_description = StoryService._extract_character_analysis(child)
         return {
-            "character_description": StoryService._extract_character_analysis(child),
+            "child_name": (child.first_name or "Child") if child else "Child",
+            "character_description": character_description,
+            "identity_summary": StoryService._extract_identity_summary(child) or character_description,
             "child_age_label": StoryService._child_age_label(child),
             "child_age_visual_guidance": StoryService._age_visual_guidance(child.age if child else None),
         }
+
+    @staticmethod
+    def _extract_identity_summary(child) -> str:
+        if not child or not isinstance(child.character_metadata, dict):
+            return ""
+        metadata_summary = child.character_metadata.get("identity_summary")
+        if isinstance(metadata_summary, str) and metadata_summary.strip():
+            return metadata_summary.strip()
+
+        identity_profile = child.character_metadata.get("identity_profile")
+        if not isinstance(identity_profile, dict):
+            return ""
+        value = identity_profile.get("identity_summary")
+        return value.strip() if isinstance(value, str) and value.strip() else ""
 
     @staticmethod
     def _extract_character_analysis(child) -> str:
@@ -1821,8 +1897,9 @@ class StoryService:
 
         metadata = child.character_metadata
 
-        # Priority: Use analysis_text (detailed visual analysis) over simple description
-        analysis_text = metadata.get("analysis_text", "")
+        # Use the structured identity profile generated from the master portrait.
+        # Legacy free-form visual descriptions are not used in story prompts.
+        identity_profile = metadata.get("identity_profile")
         description = metadata.get("description", "")
 
         # Build comprehensive character profile for image anchor consistency
@@ -1833,10 +1910,8 @@ class StoryService:
         parts.append(f"Name: {child.first_name}")
         parts.append(f"Age Appearance Guidance: {StoryService._age_visual_guidance(child.age)}")
 
-        # Use analysis_text if available (detailed visual analysis from character generation)
-        if analysis_text:
-            parts.append(f"Visual Analysis:\n{analysis_text}")
-        # Fall back to simple description if analysis_text not available
+        if isinstance(identity_profile, dict) and identity_profile:
+            parts.append("Stable Visual Identity:\n" + StoryService._format_character_identity_profile(identity_profile))
         elif description:
             parts.append(f"Description: {description}")
 
@@ -1854,6 +1929,47 @@ class StoryService:
         )
 
         return "\n".join(parts) if parts else f"A friendly {age_str} child named {child.first_name}."
+
+    @staticmethod
+    def _format_character_identity_profile(profile: dict[str, Any]) -> str:
+        lines = []
+        labels = {
+            "face_shape": "Face shape",
+            "skin_tone": "Skin tone",
+            "eye_color": "Eye color",
+            "eye_shape": "Eye shape",
+            "eyebrow_shape": "Eyebrow shape",
+            "nose_shape": "Nose shape",
+            "mouth_shape": "Mouth shape",
+            "smile_characteristics": "Smile characteristics",
+            "smile_type": "Smile type",
+            "mouth_description": "Mouth",
+            "cheek_shape": "Cheek shape",
+            "jawline_shape": "Jawline shape",
+            "chin_shape": "Chin shape",
+            "hair_color": "Hair color",
+            "hair_style": "Hair style",
+            "hair_length": "Hair length",
+            "hair_texture": "Hair texture",
+            "hair_direction": "Hair direction",
+            "eye_size": "Eye size",
+            "eyebrow_thickness": "Eyebrow thickness",
+            "ear_visibility": "Ear visibility",
+            "age_appearance": "Age appearance",
+            "identity_summary": "Identity summary",
+        }
+        for key, label in labels.items():
+            value = profile.get(key)
+            if isinstance(value, str) and value.strip():
+                lines.append(f"- {label}: {value.strip()}")
+
+        features = profile.get("distinctive_features")
+        if isinstance(features, list):
+            clean_features = [item.strip() for item in features if isinstance(item, str) and item.strip()]
+            if clean_features:
+                lines.append("- Distinctive features: " + ", ".join(clean_features))
+
+        return "\n".join(lines)
 
     async def get_story(self, user_id: UUID, story_id: UUID) -> StoryResponse:
         """Retrieve story with ownership validation."""

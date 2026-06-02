@@ -60,3 +60,53 @@ def test_audio_batch_items_use_page_narration_from_story_json():
     assert items[0].voice_style == "expressive cinematic storyteller"
     assert items[0].emotion == "triumph"
     assert "expressive cinematic storyteller" in items[0].prompt
+
+
+def test_audio_batch_items_use_story_age_group_when_page_narration_missing():
+    service = StoryServiceBatchService.__new__(StoryServiceBatchService)
+    service.tts_provider = GoogleTTSProvider()
+    story_json = {
+        "pages": [
+            {
+                "page_number": 1,
+                "text": "Mira listened as the tiny bell chimed.",
+                "emotion": "calm",
+            }
+        ]
+    }
+
+    items = service._build_audio_items(story_json, age_group="2-4")
+
+    assert len(items) == 1
+    assert items[0].tone == "soothing"
+    assert items[0].pace == "slow"
+    assert items[0].voice_style == "gentle bedtime storyteller"
+    assert story_json["pages"][0]["narration"]["voice_style"] == "gentle bedtime storyteller"
+
+
+def test_tts_prompt_marks_story_text_as_only_spoken_content():
+    provider = GoogleTTSProvider()
+
+    prompt = provider.build_prompt(
+        "Mira opened the moon map.",
+        pace="slow",
+        language="en",
+        voice_style="warm animated storyteller",
+        tone="curious",
+        emotion="wonder",
+    )
+
+    assert "Speak the story text only" in prompt
+    assert "Do not add, remove, translate, summarize, or rewrite any words." in prompt
+    assert "<<<NARRATION_TEXT" in prompt
+    assert "Mira opened the moon map." in prompt
+
+
+def test_story_reference_image_prompt_uses_rendered_prompt_identity_lock():
+    prompt = StoryServiceBatchService._story_reference_image_prompt(
+        "Scene prompt with Character Identity Lock.",
+    )
+
+    assert "Character Identity Lock inside the rendered prompt" in prompt
+    assert "Scene prompt with Character Identity Lock." in prompt
+    assert "only attached image" in prompt

@@ -28,6 +28,24 @@ def get_mock_story_plan(child_name: str = "Emma", age_group: str = "5-7") -> dic
         "moral_theme": "courage and kindness",
         "setting": "a magical garden kingdom with rolling hills and sparkling streams",
         "tone": "whimsical and adventurous",
+        "central_problem": "The magical garden is fading because its crystal spring has stopped flowing.",
+        "hero_want": f"{child_name} wants to help Luna bring the garden back to life.",
+        "emotional_need": f"{child_name} needs to trust their courage and keep trying when the path feels uncertain.",
+        "stakes": "If the spring stays dry, the flowers and small garden creatures will lose their home.",
+        "climax_choice": f"{child_name} chooses to carefully unblock the waterfall instead of giving up.",
+        "resolution_payoff": f"The water flows again, the garden blooms, and {child_name} feels proud and brave.",
+        "moral_explanation": "Brave, kind actions can grow when we keep trying step by step.",
+        "content_anchors": {
+            "required_names": ["magical garden", "golden gate", "crystal spring", "waterfall", "moonlight"],
+            "required_facts": [
+                "Flowers need water and sunlight to grow.",
+                "A spring can feed streams and waterfalls.",
+            ],
+            "age_safe_explanations": [
+                "When water flows again, thirsty plants can perk up.",
+                "Small careful steps can solve a bigger problem.",
+            ],
+        },
         "visual_bible": {
             "style": "soft pastel watercolor with hand-drawn charcoal outlines",
             "hero": {
@@ -216,6 +234,8 @@ def get_mock_story_plan(child_name: str = "Emma", age_group: str = "5-7") -> dic
                 "child_action": "Emma keeps going with courage and kindness",
                 "learning_goal_integration": "Shows steady personal growth through action",
                 "mood": "hopeful determination",
+                "growth_step": "Emma uses what she learned from the earlier path.",
+                "page_turn_hook": "A new clue appears farther ahead.",
                 "visual_continuity_notes": "Emma keeps the compass and Luna stays nearby",
             }
         )
@@ -223,6 +243,9 @@ def get_mock_story_plan(child_name: str = "Emma", age_group: str = "5-7") -> dic
     for page in plan["pages"]:
         page["characters_present"] = page.get("characters_present") or [child_name, "Luna"]
         page["emotional_beat"] = page.get("emotional_beat") or page.get("mood") or "wonder"
+        page["growth_step"] = page.get("growth_step") or page.get("learning_goal_integration") or "The hero grows through action."
+        page["domain_detail"] = page.get("domain_detail") or page.get("scene_description") or "A concrete garden detail appears in the scene."
+        page["page_turn_hook"] = page.get("page_turn_hook") or page.get("hook_to_next") or "The next moment continues the journey."
         visual_note = page.get("visual_continuity_notes")
         page["continuity_requirements"] = page.get("continuity_requirements") or ([visual_note] if visual_note else [])
 

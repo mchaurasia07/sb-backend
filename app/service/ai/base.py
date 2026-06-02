@@ -117,14 +117,14 @@ class AIProvider(ABC):
         reference_image_base64: str,
         **kwargs: Any,
     ) -> ImageGenerationResult:
-        """Create a story image using a prompt and base64 child reference image.
+        """Create a story image using a prompt and base64 master character reference image.
 
         Args:
             prompt: Story image generation prompt
-            reference_image_base64: Base64-encoded original child reference image.
+            reference_image_base64: Base64-encoded generated Master Character Reference Portrait.
                 Can be raw base64 or a data URL.
             **kwargs: Provider-specific options such as size, quality,
-                aspect_ratio, model, or consistency_reference_image_base64
+                aspect_ratio, or model
 
         Returns:
             ImageGenerationResult with generated image bytes and metadata
@@ -150,5 +150,27 @@ class AIProvider(ABC):
 
         Returns:
             ImageGenerationResult with generated image bytes and metadata
+        """
+        pass
+
+    @abstractmethod
+    async def describe_character_image(
+        self,
+        image_bytes: bytes,
+        prompt: str,
+        mime_type: str = "image/png",
+        **kwargs: Any,
+    ) -> TextGenerationResult:
+        """Analyze the generated master character image and return a text description.
+
+        Args:
+            image_bytes: Generated master character image bytes
+            prompt: Vision prompt describing the expected output
+            mime_type: MIME type for the image payload
+            **kwargs: Provider-specific options such as max_tokens,
+                temperature, response_format, or vision_model
+
+        Returns:
+            TextGenerationResult with generated text and metadata
         """
         pass

@@ -15,8 +15,10 @@ from app.model.request.child import (
 )
 from app.model.response.child import ActiveChildResponse, ChildProfileResponse, ChildUsernameAvailabilityResponse
 from app.repository.child_repository import ChildRepository
+from app.repository.story_repository import StoryRepository
 from app.repository.user_repository import UserRepository
 from app.service.image_storage_provider import get_image_storage_service
+from app.service.story_audio_storage_provider import get_story_audio_storage_service
 
 
 class ChildService:
@@ -26,6 +28,7 @@ class ChildService:
 
     def __init__(self, session: AsyncSession):
         self.children = ChildRepository(session)
+        self.stories = StoryRepository(session)
         self.users = UserRepository(session)
 
     @staticmethod
@@ -189,3 +192,25 @@ class ChildService:
             raise NotFoundException("Child profile not found", "CHILD_NOT_FOUND")
         await self.users.set_active_child_profile(current_user, child_id)
         return ActiveChildResponse(active_child_profile_id=child_id)
+
+    async def delete(self, current_user: User, child_id: UUID) -> None:
+        child = await self.children.get_for_user(current_user.id, child_id)
+        if child is None:
+            raise NotFoundException("Child profile not found", "CHILD_NOT_FOUND")
+
+        stories = await self.stories.list_by_user(current_user.id, child_id=child.id)
+        story_ids = [story.id for story in stories]
+
+        image_storage = get_image_storage_service()
+        audio_storage = get_story_audio_storage_service()
+
+        for story_id in story_ids:
+            await image_storage.delete_story_directory(story_id)
+            await audio_storage.delete_story_directory(story_id)
+
+        await image_storage.delete_child_profile_directory(current_user.id, child.id)
+
+        if current_user.active_child_profile_id == child.id:
+            current_user.active_child_profile_id = None
+
+        await self.children.delete(child)

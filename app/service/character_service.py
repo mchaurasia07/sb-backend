@@ -1,6 +1,8 @@
 from datetime import datetime, UTC
+import json
 from pathlib import Path
 import tempfile
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +18,32 @@ from app.service.image_storage_provider import get_image_storage_service
 from app.utils.prompt_loader import load_and_render_prompt
 
 logger = get_logger(__name__)
+
+
+CHARACTER_DESCRIPTION_FIELDS = {
+    "age_appearance",
+    "face_shape",
+    "cheek_shape",
+    "jawline_shape",
+    "chin_shape",
+    "skin_tone",
+    "hair_color",
+    "hair_length",
+    "hair_texture",
+    "hair_style",
+    "hair_direction",
+    "eye_color",
+    "eye_shape",
+    "eye_size",
+    "eyebrow_shape",
+    "eyebrow_thickness",
+    "nose_shape",
+    "mouth_shape",
+    "smile_characteristics",
+    "ear_visibility",
+    "distinctive_features",
+    "identity_summary",
+}
 
 
 class CharacterService:
@@ -38,12 +66,11 @@ class CharacterService:
         Flow:
         1. Validate child profile exists and belongs to user
         2. Verify child has profile photo
-        3. Load character generation prompt template
-        4. Call AI provider to generate character image
+        3. Analyze original photo into a permanent identity profile
+        4. Generate the master storybook character from the original photo plus identity profile
         5. Save character image to storage
-        6. Generate character description using vision model
-        7. Update child profile with character data
-        8. Return response
+        6. Update child profile with character data
+        7. Return response
 
         Args:
             child_id: ID of child profile
@@ -80,8 +107,25 @@ class CharacterService:
 
         photo_path = await self._materialize_reference_photo(child.avatar_image_url)
 
-        # Generate character image using AI provider
+        # Analyze original profile photo first. This permanent profile is the
+        # identity lock used for character and story image generation.
         try:
+            photo_bytes = photo_path.read_bytes()
+            photo_mime_type = self._detect_image_mime_type(photo_bytes)
+            logger.info("Generating permanent structured identity profile from original child photo")
+            identity_prompt = load_and_render_prompt("prompts/character_description.txt", {})
+            logger.info(f"Character Identity Prompt:\n{identity_prompt}")
+            identity_result = await ai_service.describe_character_image(
+                image_bytes=photo_bytes,
+                prompt=identity_prompt,
+                mime_type=photo_mime_type,
+                response_format={"type": "json_object"},
+                max_tokens=2000,
+                temperature=0.1,
+            )
+            character_identity_profile = self._parse_character_description_json(identity_result.text)
+            clean_description = self._summarize_character_identity_profile(character_identity_profile)
+
             logger.info(f"Calling {provider_name} AI provider to generate character image from {photo_path.name}")
             character_prompt = load_and_render_prompt(
                 "prompts/character_generation.txt",
@@ -100,6 +144,9 @@ class CharacterService:
                 quality=settings.CHARACTER_IMAGE_QUALITY,
                 child_age_label=self._child_age_label(child),
                 child_age_visual_guidance=self._age_visual_guidance(child.age),
+                identity_profile=character_identity_profile,
+                identity_profile_json=json.dumps(character_identity_profile, ensure_ascii=False),
+                identity_profile_text=clean_description,
             )
         finally:
             try:
@@ -108,6 +155,7 @@ class CharacterService:
                 logger.warning("Failed to remove temporary reference photo: %s", photo_path)
 
         logger.info(f"Successfully generated character image using {image_result.model}")
+        logger.info("Structured identity profile generated from original photo and stored as source of truth")
 
         # Save generated character image
         logger.info("Saving character image to storage")
@@ -119,34 +167,23 @@ class CharacterService:
         )
         logger.info(f"Character image saved to {character_url}")
 
-        # Use analysis text from image generation as character description
-        logger.info("Using analysis text as character description")
-        analysis_text = image_result.metadata.get("analysis_text")
-
-        if not analysis_text:
-            # Fallback if analysis was skipped
-            analysis_text = (
-                f"A beautifully illustrated character representing a {child.age}-year-old child in a premium "
-                "semi-realistic 3D storybook aesthetic."
-            )
-            logger.warning("No analysis text available, using fallback description")
-
-        # Extract clean description from analysis text (remove numbered points if present)
-        clean_description = self._extract_clean_description(analysis_text)
+        image_metadata = image_result.metadata or {}
 
         # Build character metadata
         metadata = {
             "description": clean_description,
+            "identity_summary": clean_description,
+            "identity_profile": character_identity_profile,
+            "identity_profile_source": "original_child_photo",
             "style": "premium semi-realistic 3D storybook",
             "generation_model": image_result.model,
-            "prompt_used": image_result.prompt_used,
-            "revised_prompt": image_result.revised_prompt,
-            "analysis_text": image_result.metadata.get("analysis_text"),
-            "enhanced_prompt": image_result.metadata.get("enhanced_prompt"),
+            "identity_model": identity_result.model,
+            "identity_raw_text": identity_result.text,
+            "identity_usage": (identity_result.metadata or {}).get("usage"),
             "child_age_label": self._child_age_label(child),
             "age_visual_guidance": self._age_visual_guidance(child.age),
-            "size": image_result.metadata.get("size"),
-            "quality": image_result.metadata.get("quality"),
+            "size": image_metadata.get("size"),
+            "quality": image_metadata.get("quality"),
             "generated_at": datetime.now(UTC).isoformat(),
             "generation_status": "completed",
         }
@@ -179,39 +216,126 @@ class CharacterService:
             return Path(temp_file.name)
 
     @staticmethod
-    def _extract_clean_description(analysis_text: str) -> str:
-        """Extract a clean, concise description from LLM analysis text.
+    def _detect_image_mime_type(image_bytes: bytes) -> str:
+        if image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+            return "image/png"
+        if image_bytes.startswith(b"\xff\xd8\xff"):
+            return "image/jpeg"
+        if image_bytes.startswith(b"RIFF") and image_bytes[8:12] == b"WEBP":
+            return "image/webp"
+        return "image/png"
 
-        Removes numbered points and bullet points, keeping only the first sentence or main description.
-        """
-        if not analysis_text:
-            return "A beautifully illustrated character."
+    @staticmethod
+    def _parse_character_description_json(raw_text: str) -> dict[str, Any]:
+        text = (raw_text or "").strip()
+        if text.startswith("```"):
+            text = text.removeprefix("```json").removeprefix("```").strip()
+            if text.endswith("```"):
+                text = text[:-3].strip()
 
-        # Remove markdown formatting and numbered lists
-        lines = analysis_text.split('\n')
-        clean_lines = []
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise AppException(
+                "Character description response was not valid JSON",
+                code="CHARACTER_DESCRIPTION_INVALID_JSON",
+            ) from exc
 
-        for line in lines:
-            # Skip empty lines and numbered/bulleted points
-            line = line.strip()
-            if not line or line[0].isdigit() or line.startswith('*') or line.startswith('-'):
+        if not isinstance(payload, dict):
+            raise AppException(
+                "Character description response must be a JSON object",
+                code="CHARACTER_DESCRIPTION_INVALID_JSON",
+            )
+
+        if not payload.get("mouth_shape") and isinstance(payload.get("mouth_description"), str):
+            payload["mouth_shape"] = payload["mouth_description"]
+        if not payload.get("smile_characteristics") and isinstance(payload.get("smile_type"), str):
+            payload["smile_characteristics"] = payload["smile_type"]
+        if not payload.get("smile_characteristics") and isinstance(payload.get("mouth_description"), str):
+            payload["smile_characteristics"] = payload["mouth_description"]
+        if not payload.get("hair_direction"):
+            payload["hair_direction"] = "not clearly visible"
+        if not payload.get("age_appearance"):
+            payload["age_appearance"] = "not clearly visible"
+        for optional_text_field in (
+            "cheek_shape",
+            "jawline_shape",
+            "chin_shape",
+            "hair_texture",
+            "eye_size",
+            "eyebrow_thickness",
+            "ear_visibility",
+            "identity_summary",
+        ):
+            if not payload.get(optional_text_field):
+                payload[optional_text_field] = "not clearly visible"
+
+        normalized: dict[str, Any] = {}
+        for field in CHARACTER_DESCRIPTION_FIELDS:
+            value = payload.get(field)
+            if field == "distinctive_features":
+                if value is None:
+                    normalized[field] = []
+                elif isinstance(value, list):
+                    normalized[field] = [item.strip() for item in value if isinstance(item, str) and item.strip()]
+                else:
+                    raise AppException(
+                        "Character description distinctive_features must be an array",
+                        code="CHARACTER_DESCRIPTION_SCHEMA_INVALID",
+                    )
                 continue
-            # Remove markdown bold/italic
-            line = line.replace('**', '').replace('__', '').replace('_', '')
-            if line:
-                clean_lines.append(line)
 
-        # Join lines and take first 1-2 sentences max (up to 200 chars)
-        description = ' '.join(clean_lines)
-        if len(description) > 200:
-            # Truncate at first period if available
-            first_period = description.find('.')
-            if first_period > 0 and first_period < 200:
-                description = description[:first_period + 1]
-            else:
-                description = description[:200] + "..."
+            if not isinstance(value, str) or not value.strip():
+                raise AppException(
+                    f"Character description field '{field}' is required",
+                    code="CHARACTER_DESCRIPTION_SCHEMA_INVALID",
+                )
+            normalized[field] = value.strip()
 
-        return description or "A beautifully illustrated character."
+        if not normalized.get("identity_summary") or normalized["identity_summary"] == "not clearly visible":
+            normalized["identity_summary"] = CharacterService._build_identity_summary(normalized)
+
+        # Backward-compatible derived fields for older story prompt helpers.
+        normalized["mouth_description"] = (
+            f"{normalized['mouth_shape']} mouth with {normalized['smile_characteristics']}"
+        )
+        normalized["smile_type"] = normalized["smile_characteristics"]
+
+        return normalized
+
+    @staticmethod
+    def _summarize_character_identity_profile(profile: dict[str, Any]) -> str:
+        identity_summary = profile.get("identity_summary")
+        if isinstance(identity_summary, str) and identity_summary.strip():
+            return identity_summary.strip()
+
+        return CharacterService._build_identity_summary(profile)
+
+    @staticmethod
+    def _build_identity_summary(profile: dict[str, Any]) -> str:
+        parts = [
+            f"{profile['face_shape']} face",
+            f"{profile['cheek_shape']} cheeks",
+            f"{profile['jawline_shape']} jawline",
+            f"{profile['chin_shape']} chin",
+            f"{profile['skin_tone']} skin tone",
+            f"{profile['eye_color']} {profile['eye_shape']} {profile['eye_size']} eyes",
+            f"{profile['eyebrow_shape']} {profile['eyebrow_thickness']} eyebrows",
+            f"{profile['nose_shape']} nose",
+            f"{profile['mouth_shape']} mouth with {profile['smile_characteristics']}",
+            (
+                f"{profile['hair_color']} {profile['hair_length']} {profile['hair_texture']} "
+                f"{profile['hair_style']} hair"
+                f" with {profile['hair_direction']}"
+            ),
+            f"{profile['ear_visibility']} ears",
+            f"{profile['age_appearance']} age appearance",
+        ]
+        features = profile.get("distinctive_features") or []
+        if features:
+            parts.append("distinctive features: " + ", ".join(features[:3]))
+
+        return "A child character with " + "; ".join(parts) + "."
 
     @staticmethod
     def _child_age_label(child) -> str:

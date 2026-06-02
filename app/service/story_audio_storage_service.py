@@ -1,4 +1,5 @@
 import asyncio
+import shutil
 from urllib.parse import urlparse
 from uuid import UUID
 
@@ -32,6 +33,23 @@ class LocalStoryAudioStorageService:
 
         return f"{settings.AUDIO_URL_PREFIX}/stories/{story_id}/{language}/page_{page_number}.wav"
 
+    async def delete_story_directory(self, story_id: UUID) -> None:
+        directory = (settings.audio_root_path / "stories" / str(story_id)).resolve()
+        try:
+            directory.relative_to(settings.audio_root_path)
+        except ValueError as exc:
+            raise AppException("Audio directory must be in audio directory", code="INVALID_AUDIO_PATH") from exc
+
+        if not directory.exists():
+            return
+        if not directory.is_dir():
+            raise AppException("Audio delete target must be a directory", code="INVALID_AUDIO_PATH")
+
+        try:
+            await asyncio.to_thread(shutil.rmtree, directory)
+        except OSError as exc:
+            raise AppException(f"Failed to delete audio directory: {directory}", code="AUDIO_DELETE_FAILED") from exc
+
 
 class CloudflareR2StoryAudioStorageService:
     async def save_story_page_audio(
@@ -48,6 +66,9 @@ class CloudflareR2StoryAudioStorageService:
         key = self._key("stories", str(story_id), language, f"page_{page_number}.wav")
         await self._put_object(key, audio_bytes, "audio/wav")
         return self.public_url(key)
+
+    async def delete_story_directory(self, story_id: UUID) -> None:
+        await self._delete_prefix(self._key("stories", str(story_id)) + "/")
 
     def public_url(self, key: str) -> str:
         clean_key = key.lstrip("/")
@@ -76,6 +97,30 @@ class CloudflareR2StoryAudioStorageService:
                 f"Failed to upload audio to Cloudflare R2: {exc}",
                 status.HTTP_502_BAD_GATEWAY,
                 "R2_AUDIO_UPLOAD_FAILED",
+            ) from exc
+
+    async def _delete_prefix(self, prefix: str) -> None:
+        clean_prefix = prefix.lstrip("/")
+        if not clean_prefix.strip("/"):
+            raise AppException("R2 audio delete prefix cannot be empty", code="INVALID_R2_AUDIO_PREFIX")
+
+        self._validate_config()
+
+        def _delete_prefix() -> None:
+            client = self._client()
+            paginator = client.get_paginator("list_objects_v2")
+            for page in paginator.paginate(Bucket=settings.CLOUDFLARE_R2_BUCKET_NAME, Prefix=clean_prefix):
+                objects = [{"Key": item["Key"]} for item in page.get("Contents", [])]
+                if objects:
+                    client.delete_objects(Bucket=settings.CLOUDFLARE_R2_BUCKET_NAME, Delete={"Objects": objects})
+
+        try:
+            await asyncio.to_thread(_delete_prefix)
+        except self._r2_exceptions() as exc:
+            raise AppException(
+                f"Failed to delete audio from Cloudflare R2: {exc}",
+                status.HTTP_502_BAD_GATEWAY,
+                "R2_AUDIO_DELETE_FAILED",
             ) from exc
 
     def _client(self):

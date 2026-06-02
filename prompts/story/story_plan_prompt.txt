@@ -70,6 +70,14 @@ Adults never solve the conflict.
 
 The learning goal must appear naturally throughout the story.
 
+The Story Context must be used as the emotional or plot seed for the story.
+Do not mention it as a throwaway detail. Make it affect:
+
+- what the hero wants
+- what problem appears
+- what choice the hero must make
+- what the ending emotionally resolves
+
 The story must feel like a real children's book, not an event summary.
 
 Avoid:
@@ -97,6 +105,16 @@ Ending
 AGE ADAPTATION
 --------------------------------------------------
 
+Before adapting by age, build a professional picture-book spine:
+
+- clear hero want
+- concrete central problem
+- gentle stakes the child can understand
+- at least one imperfect attempt before success
+- growth through try, fail, try better
+- climax choice where the child uses the learning goal
+- ending that shows what changed emotionally
+
 Toddler (2-4)
 
 - simple situations
@@ -117,6 +135,88 @@ Advanced (8-12)
 - layered challenges
 - meaningful choices
 - stronger character development
+
+--------------------------------------------------
+STORY QUALITY RULES
+--------------------------------------------------
+
+Create a story with professional picture-book shape:
+
+- a first-page hook that gives the hero a want, surprise, or small worry
+- page-turn momentum on most pages through discovery, decision, or unfinished action
+- escalating but child-safe difficulty
+- specific sensory details from the setting
+- dialogue that reveals feeling or choice, not exposition
+- recurring objects or companions that matter to the plot
+- no random events that do not affect the ending
+
+The hero should grow through a try-fail-try-better pattern:
+
+1. The hero wants something or notices a problem.
+2. The first attempt is incomplete, hesitant, or mistaken.
+3. The hero learns from the attempt.
+4. The final attempt uses the learning goal more clearly.
+5. The ending shows confidence, connection, or understanding.
+
+--------------------------------------------------
+THEME CONTENT ANCHORS
+--------------------------------------------------
+
+Create concrete content anchors for the story theme.
+
+The story must not stay generic. If the theme supports real or familiar named
+details, use them.
+
+Examples:
+
+Space adventure:
+Earth, Moon, Mars, Saturn, rocket, stars, orbit, red planet, rings
+
+Ocean story:
+tide pools, coral reef, shells, sea turtles, waves, floating, tide
+
+Garden story:
+seeds, soil, watering can, sunlight, sprouts, butterflies, tomatoes
+
+The anchors should be:
+
+- age-appropriate
+- accurate enough for children
+- woven naturally into the plot
+- useful for story writing and illustration
+- not a lecture or fact list
+
+For Toddler (2-4), use 2-4 simple anchors.
+
+For Early Reader (5-7), use 4-6 concrete anchors.
+
+For Advanced (8-12), use 5-8 richer anchors.
+
+Every page should include one useful domain_detail when possible. The
+domain_detail should name a concrete place, object, creature, fact, sensory
+detail, or theme-specific feature that belongs in that page.
+
+Avoid vague phrases such as:
+
+- a planet
+- a place
+- a thing
+- a magical object
+- something interesting
+
+when a specific named detail would be better.
+
+--------------------------------------------------
+MORAL DESIGN
+--------------------------------------------------
+
+The moral_theme should be child-friendly and grounded in the story action.
+
+Do not make the moral sound like a lecture.
+
+The ending must make the moral visible before the story writer explains it.
+The final page should show the child feeling or doing something that proves the
+lesson was learned.
 
 --------------------------------------------------
 VISUAL BIBLE GENERATION
@@ -148,6 +248,20 @@ Preserve:
 - skin tone
 - age appearance
 - distinctive features
+
+Every companion, friend, parent, animal, magical helper, or other recurring
+character must also have a locked appearance. Do not write vague descriptions
+such as "cheerful girl" or "friendly animal" by themselves.
+
+For every recurring character, include stable details for:
+
+- skin/fur/feather color
+- face shape or animal head shape
+- eye color/shape
+- hair color and hairstyle, or fur/feather pattern
+- outfit, shoes, and accessories when human
+- size/height relative to the hero
+- one distinctive visual feature
 
 --------------------------------------------------
 STORY OUTFIT RULE
@@ -181,6 +295,13 @@ green forest adventurer outfit
 Beach story:
 bright summer outfit
 
+Water park, pool, beach, rain, or splash-play story:
+modest child-safe water-play outfit with a rash guard shirt that covers the
+shoulders and upper body, knee-length swim shorts or leggings, and water
+shoes. Caregivers should wear modest family-friendly cover-up clothing such as
+a rash guard or t-shirt with knee-length shorts or leggings. Use modest covered
+water-play clothing for every visible person.
+
 Store this outfit inside visual_bible.hero.outfit.
 
 --------------------------------------------------
@@ -199,29 +320,55 @@ Examples:
 
 The recurring character must have a stable appearance.
 
+If the recurring character is human, the appearance MUST lock hair color,
+hair length, hairstyle, skin tone, outfit colors, shoes, and one distinctive
+feature.
+
+If the recurring character is an animal or magical creature, the appearance
+MUST lock fur/feather/coat color, markings, eye color/shape, tail/ears/wings,
+size, and one distinctive feature.
+
 --------------------------------------------------
 NARRATIVE STRUCTURE
 --------------------------------------------------
 
+Use the requested Page Count exactly.
+
+For 6-page toddler stories:
+
 Page 1
 
-Introduce:
+Introduce hero, setting, and goal.
 
-- hero
-- setting
-- goal
+Page 2
+
+Discovery.
+
+Pages 3-4
+
+Gentle challenge and imperfect attempt.
+
+Page 5
+
+Climax choice.
+
+Page 6
+
+Resolution and emotional payoff.
+
+For 10-page and 12-page stories:
+
+Page 1
+
+Introduce hero, setting, goal, and first hook.
 
 Pages 2-3
 
-Discovery
+Discovery and first complication.
 
-Pages 4-6
+Middle pages
 
-Challenges
-
-Pages 7-(last-1)
-
-Escalation
+Attempts, mistakes, growth, and escalation.
 
 Second-to-last page
 
@@ -247,6 +394,19 @@ OUTPUT JSON
   "moral_theme": "",
   "setting": "",
   "tone": "",
+  "central_problem": "",
+  "hero_want": "",
+  "emotional_need": "",
+  "stakes": "",
+  "climax_choice": "",
+  "resolution_payoff": "",
+  "moral_explanation": "",
+
+  "content_anchors": {
+    "required_names": [],
+    "required_facts": [],
+    "age_safe_explanations": []
+  },
 
   "visual_bible": {
     "style": "",
@@ -289,6 +449,9 @@ OUTPUT JSON
       "child_action": "",
       "emotional_beat": "",
       "learning_goal_integration": "",
+      "growth_step": "",
+      "domain_detail": "",
+      "page_turn_hook": "",
       "continuity_requirements": []
     }
   ]
@@ -303,6 +466,19 @@ pages.length MUST equal requested page count.
 The child must solve the conflict.
 
 The learning goal must appear throughout the story.
+
+The Story Context must meaningfully shape the central problem or emotional arc.
+
+The plan must include central_problem, hero_want, emotional_need, stakes,
+climax_choice, resolution_payoff, and moral_explanation.
+
+The plan must include content_anchors with concrete theme details.
+
+Every page must include growth_step, domain_detail, and page_turn_hook.
+
+For concrete themes such as space, dinosaurs, ocean, farm, jungle, city,
+weather, garden, vehicles, or science, content_anchors.required_names must
+include named objects, places, creatures, or terms from that theme.
 
 The story must have:
 

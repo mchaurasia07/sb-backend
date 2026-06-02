@@ -706,7 +706,7 @@ class StoryServiceBatchService:
         await self.session.commit()
 
         try:
-            items = self._build_audio_items(story_json)
+            items = self._build_audio_items(story_json, age_group=story.age_group.value)
             self._log_event("audio_batch_ready", story_id=story.id, expected_items=len(items))
             if settings.GOOGLE_TTS_SKIP_CALL:
                 self._apply_skipped_tts(story_json, items)
@@ -1000,7 +1000,7 @@ class StoryServiceBatchService:
         if story_json is None:
             raise AppException("Story JSON is missing during audio batch reconciliation", code="STORY_JSON_MISSING")
 
-        items = self._build_audio_items(story_json)
+        items = self._build_audio_items(story_json, age_group=story.age_group.value)
         request_keys = set(job.request_keys or [])
         if request_keys:
             items = [item for item in items if item.key in request_keys]
@@ -1154,7 +1154,7 @@ class StoryServiceBatchService:
         if story_json is None:
             raise AppException("Story JSON is missing before audio batch submission", code="STORY_JSON_MISSING")
 
-        items = self._build_audio_items(story_json)
+        items = self._build_audio_items(story_json, age_group=story.age_group.value)
         missing = self._missing_audio_items(story_json, items)
         if not missing:
             return "No missing audio items."
@@ -1343,6 +1343,7 @@ class StoryServiceBatchService:
         cover = image_plan.get("cover") or {}
         if not cover.get("image_prompt"):
             raise AppException("Image plan is missing cover image prompt", code="IMAGE_PLAN_MISSING_COVER")
+        story_title = story_json.get("title") or story.title or ""
         items.append(
             BatchImageItem(
                 key="cover",
@@ -1355,10 +1356,11 @@ class StoryServiceBatchService:
                     visual_bible,
                     cover["image_prompt"],
                     character_context,
-                    page_type="cover",
-                    target_aspect_ratio=settings.STORY_COVER_ASPECT_RATIO,
-                    page_data=cover,
-                ),
+                        page_type="cover",
+                        target_aspect_ratio=settings.STORY_COVER_ASPECT_RATIO,
+                        page_data=cover,
+                        story_title=story_title,
+                    ),
                 aspect_ratio=settings.STORY_COVER_ASPECT_RATIO,
                 image_size=settings.STORY_COVER_IMAGE_SIZE,
                 file_name="cover.png",
@@ -1391,6 +1393,7 @@ class StoryServiceBatchService:
                         page_type="story_page",
                         target_aspect_ratio=settings.STORY_PAGE_ASPECT_RATIO,
                         page_data=img_page,
+                        story_title=story_title,
                     ),
                     aspect_ratio=settings.STORY_PAGE_ASPECT_RATIO,
                     image_size=settings.STORY_PAGE_IMAGE_SIZE,
@@ -1415,10 +1418,11 @@ class StoryServiceBatchService:
                     visual_bible,
                     back_cover["image_prompt"],
                     character_context,
-                    page_type="back_cover",
-                    target_aspect_ratio=settings.STORY_BACK_COVER_ASPECT_RATIO,
-                    page_data=back_cover,
-                ),
+                        page_type="back_cover",
+                        target_aspect_ratio=settings.STORY_BACK_COVER_ASPECT_RATIO,
+                        page_data=back_cover,
+                        story_title=story_title,
+                    ),
                 aspect_ratio=settings.STORY_BACK_COVER_ASPECT_RATIO,
                 image_size=settings.STORY_BACK_COVER_IMAGE_SIZE,
                 file_name="back_cover.png",
@@ -1507,14 +1511,13 @@ class StoryServiceBatchService:
                 return page.get("image_url")
         return None
 
-    async def _load_reference_image_blobs(self, story: Story) -> tuple[types.Part, types.Part, dict[str, str]]:
+    async def _load_reference_image_blobs(self, story: Story) -> tuple[types.Part, dict[str, str]]:
         child = await self.children.get_for_user(story.user_id, story.child_id)
         if child is None:
             raise NotFoundException("Child profile not found during batch reference loading")
-        avatar_part = await self._image_url_to_part(child.avatar_image_url)
         character_part = await self._image_url_to_part(child.character_image_url)
         character_context = StoryService._build_character_reference_context(child)
-        return character_part, avatar_part, character_context
+        return character_part, character_context
 
     async def _image_url_to_part(self, url: str | None) -> types.Part:
         if not url:
@@ -1532,14 +1535,11 @@ class StoryServiceBatchService:
         self,
         item: BatchImageItem,
         *,
-        reference_images: tuple[types.Part, types.Part, dict[str, str]],
+        reference_images: tuple[types.Part, dict[str, str]],
     ) -> types.InlinedRequest:
-        character_part, avatar_part, character_context = reference_images
+        character_part, character_context = reference_images
         prompt = self._story_reference_image_prompt(
             item.rendered_prompt,
-            child_age_label=character_context["child_age_label"],
-            child_age_visual_guidance=character_context["child_age_visual_guidance"],
-            consistency_reference_used=True,
         )
         return types.InlinedRequest(
             contents=[
@@ -1548,7 +1548,6 @@ class StoryServiceBatchService:
                     parts=[
                         types.Part(text=prompt),
                         character_part,
-                        avatar_part,
                     ],
                 )
             ],
@@ -1562,39 +1561,46 @@ class StoryServiceBatchService:
     @staticmethod
     def _story_reference_image_prompt(
         prompt: str,
-        *,
-        child_age_label: str,
-        child_age_visual_guidance: str,
-        consistency_reference_used: bool,
     ) -> str:
-        if consistency_reference_used:
-            consistency_instruction = (
-                "\nThe first attached image after this prompt is the generated master character image from "
-                "character_image_url. It is the PRIMARY reference and must be used as the exact illustrated "
-                "character model. Match the master character's face, facial proportions, eye shape, natural eye "
-                f"size, hairstyle, {child_age_label} age appearance, age-appropriate body proportions, and "
-                "illustration style. The second attached image is the original child profile photo and is only a "
-                "supporting real-identity reference. Do not redesign the face or make the child look older or younger. "
-                f"Preserve this age/body guidance: {child_age_visual_guidance}. "
-                "Clothing may follow the single locked story outfit from the scene prompt, but it must remain "
-                "identical across the whole book. If the scene prompt conflicts with the master character face, "
-                "age, or body proportions, keep the master character design and only change the action/environment.\n"
-            )
-        else:
-            consistency_instruction = "\nOnly the original child profile photo is attached.\n"
+        consistency_instruction = (
+            "\nThe only attached image after this prompt is the generated Master Character Reference Portrait "
+            "from character_image_url. It is the PRIMARY and ONLY visual identity reference. Match the master character's "
+            "face, facial proportions, eye shape, natural eye size, hairstyle, hairline, skin tone, and age appearance. "
+            "No original child avatar photo is attached for story image generation. Do not redesign the face or make "
+            "the child look older or younger. Use the Character Identity Lock inside the rendered prompt for written "
+            "identity and age guidance. "
+            "Use the Visual Bible and scene prompt for the single locked story outfit, shoes, accessories, "
+            "body scale, rendering style, and environment. Do not copy portrait clothing, portrait crop, "
+            "white studio background, or head-and-shoulders framing. If the scene prompt conflicts with "
+            "the master character face, hairstyle, or age appearance, keep the master facial identity and "
+            "only change the action/environment. In water park, pool, beach, splash pad, rain, or water-play "
+            "scenes, all children and adults must wear modest family-friendly clothing: rash guards or "
+            "t-shirts covering shoulders and the upper body, knee-length shorts or leggings, and water shoes. "
+            "Use covered water-play outfits for every visible person and keep background people tiny, "
+            "simplified, fully clothed, or omitted.\n"
+        )
 
         return (
             "Generate one polished children's storybook illustration. Character consistency is more important "
             "than scene costume, theme costume, or decorative story details."
             f"{consistency_instruction}"
             "Use a premium semi-realistic 3D storybook style while following this scene prompt. The child must "
-            f"look like {child_age_label} and keep the same master-character face in every image. Character "
-            "likeness and age consistency are more important than costume or scene details:\n\n"
+            "match the Character Identity Lock and keep the same master-character face and hairstyle in every image. "
+            "Use the same single 3D character model across the full book, as if the Master Character Reference "
+            "Image has been posed in each scene. Character likeness, age consistency, "
+            "modest child-safe clothing coverage, and family-friendly composition are more important than "
+            "decorative scene details:\n\n"
             f"{prompt}"
         )
 
-    def _build_audio_items(self, story_json: dict[str, Any]) -> list[BatchAudioItem]:
+    def _build_audio_items(
+        self,
+        story_json: dict[str, Any],
+        *,
+        age_group: str | None = None,
+    ) -> list[BatchAudioItem]:
         pages = story_json.get("pages", [])
+        narration_age_group = age_group or story_json.get("age_group")
         moral = story_json.get("moral") if isinstance(story_json.get("moral"), dict) else {}
         default_speech_narration = (
             moral.get("speech_narration", {}) if isinstance(moral.get("speech_narration"), dict) else {}
@@ -1610,7 +1616,7 @@ class StoryServiceBatchService:
             narration = page.get("narration") if isinstance(page.get("narration"), dict) else {}
             speech = page.get("speech_narration") or default_speech_narration or {}
             emotion = page.get("emotion") or speech.get("emotion", "wonder")
-            derived_narration = build_page_narration(emotion)
+            derived_narration = build_page_narration(emotion, narration_age_group)
             narration = {
                 "tone": narration.get("tone") or derived_narration["tone"],
                 "pace": narration.get("pace") or derived_narration["pace"],
