@@ -2,21 +2,33 @@ from typing import Literal
 from uuid import UUID
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import AsyncSessionLocal, get_db_session
 from app.core.dependencies import get_current_user, get_auth_context, AuthContext
+from app.core.exceptions import AppException
 from app.entity.notification import NotificationAudience
 from app.entity.user import User
 from app.model.request.generic_story import GenericStoryCreateRequest, GenericStoryUpdateRequest
+from app.model.request.generic_story_workflow import (
+    GenericStoryWorkflowCreateRequest,
+    GenericStoryWorkflowExecuteRequest,
+)
 from app.model.response.common import ApiResponse, PaginatedResponse, success_response
 from app.model.response.generic_story import (
+    GenericStoryAudioUploadResponse,
+    GenericStoryBatchImageSubmitResponse,
+    GenericStoryImageUploadResponse,
     GenericStoryResponse,
 )
+from app.model.response.generic_story_workflow import GenericStoryWorkflowResponse
+from app.model.response.generic_story_workflow import GenericStoryWorkflowStepDetailResponse
 from app.model.response.story_catalog import StoryCatalogResponse
 from app.model.response.story_content import StoryContentResponse
+from app.service.generic_story_batch_service import GenericStoryBatchService
 from app.service.generic_story_service import GenericStoryService
+from app.service.generic_story_workflow_service import GenericStoryWorkflowService
 from app.service.notification_service import NotificationService
 from app.service.story_catalog_service import StoryCatalogService
 
@@ -58,6 +70,198 @@ async def create_generic_story(
             title=data.title,
         )
     return success_response(data, "Generic story created successfully")
+
+
+@router.post("/workflows", response_model=ApiResponse[GenericStoryWorkflowResponse], status_code=status.HTTP_201_CREATED)
+async def create_generic_story_workflow(
+    payload: GenericStoryWorkflowCreateRequest,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[GenericStoryWorkflowResponse]:
+    data = await GenericStoryWorkflowService(session).create(current_user.id, payload)
+    return success_response(data, "Generic story workflow created successfully")
+
+
+@router.get("/workflows", response_model=ApiResponse[PaginatedResponse[GenericStoryWorkflowResponse]])
+async def list_generic_story_workflows(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[PaginatedResponse[GenericStoryWorkflowResponse]]:
+    data = await GenericStoryWorkflowService(session).list(
+        current_user.id,
+        page=page,
+        page_size=page_size,
+    )
+    return success_response(data, "Generic story workflows retrieved successfully")
+
+
+@router.get("/workflows/{workflow_id}", response_model=ApiResponse[GenericStoryWorkflowResponse])
+async def get_generic_story_workflow(
+    workflow_id: UUID,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[GenericStoryWorkflowResponse]:
+    data = await GenericStoryWorkflowService(session).get(current_user.id, workflow_id)
+    return success_response(data, "Generic story workflow retrieved successfully")
+
+
+@router.get("/workflows/{workflow_id}/steps", response_model=ApiResponse[list[GenericStoryWorkflowStepDetailResponse]])
+async def get_generic_story_workflow_steps(
+    workflow_id: UUID,
+    step_name: str | None = Query(default=None),
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[list[GenericStoryWorkflowStepDetailResponse]]:
+    data = await GenericStoryWorkflowService(session).get_steps(current_user.id, workflow_id, step_name=step_name)
+    return success_response(data, "Generic story workflow steps retrieved successfully")
+
+
+@router.post("/workflows/{workflow_id}/execute", response_model=ApiResponse[GenericStoryWorkflowResponse])
+async def execute_generic_story_workflow(
+    workflow_id: UUID,
+    payload: GenericStoryWorkflowExecuteRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[GenericStoryWorkflowResponse]:
+    data = await GenericStoryWorkflowService(session).execute(
+        current_user.id,
+        workflow_id,
+        payload,
+        public_base_url=str(request.base_url).rstrip("/"),
+    )
+    message = (
+        "Generic story workflow completed successfully"
+        if data.status == "COMPLETED"
+        else "Generic story workflow step executed successfully"
+    )
+    return success_response(data, message)
+
+
+@router.post(
+    "/workflows/{workflow_id}/stories/{generic_story_id}/images",
+    response_model=ApiResponse[GenericStoryImageUploadResponse],
+)
+async def upload_generic_story_workflow_images(
+    workflow_id: UUID,
+    generic_story_id: UUID,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[GenericStoryImageUploadResponse]:
+    form = await request.form()
+    uploads: dict[str, UploadFile] = {}
+    for field_name, value in form.multi_items():
+        if not hasattr(value, "read") or not hasattr(value, "filename"):
+            continue
+        normalized_field_name = str(field_name).strip()
+        if normalized_field_name in uploads:
+            raise AppException(
+                f"Duplicate upload field: {normalized_field_name}",
+                code="GENERIC_STORY_IMAGE_UPLOAD_DUPLICATE_FIELD",
+            )
+        uploads[normalized_field_name] = value
+
+    data = await GenericStoryWorkflowService(session).upload_published_story_images(
+        current_user.id,
+        workflow_id,
+        generic_story_id,
+        uploads,
+        public_base_url=str(request.base_url).rstrip("/"),
+    )
+    return success_response(data, "Generic story images uploaded successfully")
+
+
+@router.post(
+    "/workflows/{workflow_id}/stories/{generic_story_id}/audio",
+    response_model=ApiResponse[GenericStoryAudioUploadResponse],
+)
+async def upload_generic_story_workflow_audio(
+    workflow_id: UUID,
+    generic_story_id: UUID,
+    request: Request,
+    language: str = Query(..., min_length=2, max_length=16),
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[GenericStoryAudioUploadResponse]:
+    form = await request.form()
+    uploads: dict[str, UploadFile] = {}
+    for field_name, value in form.multi_items():
+        if not hasattr(value, "read") or not hasattr(value, "filename"):
+            continue
+        normalized_field_name = str(field_name).strip()
+        if normalized_field_name in uploads:
+            raise AppException(
+                f"Duplicate upload field: {normalized_field_name}",
+                code="GENERIC_STORY_AUDIO_UPLOAD_DUPLICATE_FIELD",
+            )
+        uploads[normalized_field_name] = value
+
+    data = await GenericStoryWorkflowService(session).upload_published_story_audio(
+        current_user.id,
+        workflow_id,
+        generic_story_id,
+        language,
+        uploads,
+    )
+    return success_response(data, "Generic story audio uploaded successfully")
+
+
+@router.post(
+    "/{generic_story_id}/images/batch",
+    response_model=ApiResponse[GenericStoryBatchImageSubmitResponse],
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def submit_generic_story_image_batch(
+    generic_story_id: UUID,
+    force: bool = Query(False, description="Regenerate all images even when existing image URLs are readable"),
+    pages: list[int] | None = Query(
+        default=None,
+        description="Optional page numbers to submit, for example ?force=true&pages=7",
+    ),
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[GenericStoryBatchImageSubmitResponse]:
+    data = await GenericStoryBatchService(session).submit_image_batch(
+        user_id=current_user.id,
+        generic_story_id=generic_story_id,
+        force=force,
+        page_numbers=set(pages or []) or None,
+    )
+    return success_response(data, data.message)
+
+
+@router.post(
+    "/{generic_story_id}/images/regenerate",
+    response_model=ApiResponse[GenericStoryBatchImageSubmitResponse],
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def regenerate_generic_story_page_image(
+    generic_story_id: UUID,
+    page_number: int = Query(..., ge=1, description="Story page number to regenerate"),
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[GenericStoryBatchImageSubmitResponse]:
+    data = await GenericStoryBatchService(session).submit_image_batch(
+        user_id=current_user.id,
+        generic_story_id=generic_story_id,
+        force=True,
+        page_numbers={page_number},
+    )
+    return success_response(data, f"Generic story page {page_number} image regeneration submitted")
+
+
+@router.post("/batch-jobs/reconcile", response_model=ApiResponse[dict])
+async def reconcile_generic_story_batch_jobs(
+    limit: int = Query(50, ge=1, le=200),
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[dict]:
+    _ = current_user
+    data = await GenericStoryBatchService(session).reconcile_batch_jobs(limit=limit)
+    return success_response(data, "Generic story batch jobs reconciled successfully")
 
 
 @router.put("/{generic_story_id}", response_model=ApiResponse[GenericStoryResponse])

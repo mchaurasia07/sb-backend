@@ -47,3 +47,32 @@ class GenericStoryListResponse(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class GenericStoryImageUploadResponse(BaseModel):
+    workflow_id: UUID
+    generic_story_id: UUID
+    cover_image_url: str
+    page_image_urls: dict[int, str]
+    updated_languages: list[str]
+
+
+class GenericStoryAudioUploadResponse(BaseModel):
+    workflow_id: UUID
+    generic_story_id: UUID
+    language: str
+    page_audio_urls: dict[int, str]
+    updated_languages: list[str]
+
+
+class GenericStoryBatchImageSubmitResponse(BaseModel):
+    generic_story_id: UUID
+    workflow_id: UUID
+    batch_job_id: UUID | None = None
+    job_type: str
+    status: str
+    provider_job_name: str | None = None
+    provider_state: str | None = None
+    expected_item_count: int
+    submitted_item_count: int
+    message: str

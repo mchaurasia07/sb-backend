@@ -4,17 +4,19 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import suppress
+from datetime import datetime, timedelta
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.logger import get_logger
+from app.service.generic_story_batch_service import GenericStoryBatchService
 from app.service.story_service_batch_service import StoryServiceBatchService
 
 logger = get_logger(__name__)
 
 
 class StoryBatchReconcileScheduler:
-    """Runs story batch reconciliation on a fixed interval in this app process."""
+    """Runs story batch reconciliation hourly at a configured minute."""
 
     def __init__(self) -> None:
         self._task: asyncio.Task[None] | None = None
@@ -34,7 +36,7 @@ class StoryBatchReconcileScheduler:
         self._task = asyncio.create_task(self._run_loop(), name="story-batch-reconcile-scheduler")
         logger.info(
             "story_batch_reconcile_scheduler_started",
-            interval_seconds=settings.STORY_BATCH_RECONCILE_INTERVAL_SECONDS,
+            run_minute=settings.STORY_BATCH_RECONCILE_RUN_MINUTE,
             limit=settings.STORY_BATCH_RECONCILE_LIMIT,
         )
 
@@ -54,13 +56,26 @@ class StoryBatchReconcileScheduler:
         if self._stop_event is None:
             return
 
-        interval_seconds = max(60, settings.STORY_BATCH_RECONCILE_INTERVAL_SECONDS)
         while not self._stop_event.is_set():
-            await self._run_once()
+            delay_seconds = self._seconds_until_next_run()
+            logger.info(
+                "story_batch_reconcile_scheduler_next_run_scheduled",
+                delay_seconds=round(delay_seconds, 2),
+                run_minute=settings.STORY_BATCH_RECONCILE_RUN_MINUTE,
+            )
             try:
-                await asyncio.wait_for(self._stop_event.wait(), timeout=interval_seconds)
+                await asyncio.wait_for(self._stop_event.wait(), timeout=delay_seconds)
             except TimeoutError:
-                continue
+                await self._run_once()
+
+    @staticmethod
+    def _seconds_until_next_run(now: datetime | None = None) -> float:
+        current = now or datetime.now().astimezone()
+        run_minute = min(59, max(0, settings.STORY_BATCH_RECONCILE_RUN_MINUTE))
+        next_run = current.replace(minute=run_minute, second=0, microsecond=0)
+        if next_run <= current:
+            next_run += timedelta(hours=1)
+        return max(0.0, (next_run - current).total_seconds())
 
     async def _run_once(self) -> None:
         if self._run_lock is None:
@@ -72,13 +87,18 @@ class StoryBatchReconcileScheduler:
         async with self._run_lock:
             try:
                 async with AsyncSessionLocal() as session:
-                    result = await StoryServiceBatchService(session).reconcile_batch_jobs(
+                    story_result = await StoryServiceBatchService(session).reconcile_batch_jobs(
+                        limit=settings.STORY_BATCH_RECONCILE_LIMIT
+                    )
+                    generic_result = await GenericStoryBatchService(session).reconcile_batch_jobs(
                         limit=settings.STORY_BATCH_RECONCILE_LIMIT
                     )
                 logger.info(
                     "story_batch_reconcile_scheduler_run_completed",
-                    checked_count=result.get("checked_count"),
-                    processed_count=result.get("processed_count"),
+                    checked_count=story_result.get("checked_count"),
+                    processed_count=story_result.get("processed_count"),
+                    generic_checked_count=generic_result.get("checked_count"),
+                    generic_processed_count=generic_result.get("processed_count"),
                 )
             except Exception as exc:
                 logger.exception("story_batch_reconcile_scheduler_run_failed", error=str(exc))

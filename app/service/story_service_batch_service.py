@@ -92,6 +92,13 @@ class StoryServiceBatchService:
         details = " ".join(f"{key}={value}" for key, value in fields.items() if value is not None)
         logger.info("[story_batch] event=%s %s", event, details)
 
+    @staticmethod
+    def _reference_image_model(story: Story) -> str:
+        model = story.reference_image_model or settings.GOOGLE_REFERENCE_IMAGE_MODEL
+        if model == "gemini-2.5-flash-image":
+            model = settings.GOOGLE_REFERENCE_IMAGE_MODEL
+        return model.removeprefix("models/")
+
     async def cancel_batch_job(
         self,
         *,
@@ -504,7 +511,7 @@ class StoryServiceBatchService:
             self._build_image_inlined_request(item, reference_images=reference_images)
             for item in items
         ]
-        model = (story.reference_image_model or settings.GOOGLE_REFERENCE_IMAGE_MODEL).removeprefix("models/")
+        model = self._reference_image_model(story)
         job = await self.batch_jobs.create(
             story_id=story.id,
             job_type=StoryBatchJobType.IMAGE,
@@ -567,7 +574,7 @@ class StoryServiceBatchService:
             self._build_image_inlined_request(item, reference_images=reference_images)
             for item in items
         ]
-        model = (story.reference_image_model or settings.GOOGLE_REFERENCE_IMAGE_MODEL).removeprefix("models/")
+        model = self._reference_image_model(story)
         job = await self.batch_jobs.create(
             story_id=story.id,
             job_type=StoryBatchJobType.IMAGE,

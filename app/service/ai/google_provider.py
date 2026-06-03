@@ -24,7 +24,7 @@ from app.service.mock_llm_responses import (
 logger = logging.getLogger(__name__)
 
 DEFAULT_IMAGEN_MODEL = "imagen-4.0-generate-001"
-DEFAULT_GEMINI_IMAGE_MODEL = "gemini-2.5-flash-image"
+DEFAULT_GEMINI_IMAGE_MODEL = "gemini-3.1-flash-image"
 
 IMAGE_MODEL_ALIASES = {
     "imagen-4": DEFAULT_IMAGEN_MODEL,

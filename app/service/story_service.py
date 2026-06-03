@@ -281,9 +281,12 @@ class StoryService:
     @staticmethod
     def _story_image_model_kwargs(story: Story) -> dict[str, str]:
         kwargs: dict[str, str] = {}
-        if story.reference_image_model:
-            kwargs["model"] = story.reference_image_model
-            kwargs["reference_image_model"] = story.reference_image_model
+        reference_image_model = story.reference_image_model
+        if reference_image_model == "gemini-2.5-flash-image":
+            reference_image_model = settings.GOOGLE_REFERENCE_IMAGE_MODEL
+        if reference_image_model:
+            kwargs["model"] = reference_image_model
+            kwargs["reference_image_model"] = reference_image_model
         if story.image_model:
             kwargs["image_model"] = story.image_model
         return kwargs

@@ -1,0 +1,35 @@
+**1. Core Child Identifiers**
+
+*   **Age:** Perceived to be approximately 3-5 years old (Toddler/Preschooler).
+*   **Heritage:** Presents with features indicative of Mixed Heritage, likely Hispanic/Latino or Middle Eastern and Caucasian descent, characterized by tan/light olive skin tone and dark hair/eyes.
+*   **Face Shape:** Heart-shaped or subtly inverted triangle, with a broader forehead tapering to a narrow, defined chin and jawline. The cheeks are full, particularly when smiling.
+
+**2. Fixed Facial Features**
+
+*   **Eyes:** Large, prominent, almond-shaped eyes that turn slightly upwards at the outer corners. They are a deep brown color, almost black, with a clear, direct gaze and defined dark lower lashes.
+*   **Eyebrows:** Naturally dark and relatively thin, following a natural, gentle arch that mirrors the brow bone, widening slightly towards the tail.
+*   **Nose:** Small, refined, button-like nose. The bridge is low and soft, and the tip is slightly rounded.
+*   **Lips:** Full and well-defined. The upper lip has a subtle, natural M-shape (Cupid's bow).
+*   **Ears:** Slightly prominent, sticking out from the side of the head, and relatively large in proportion to the face, though the top edge aligns generally with the eyebrow line.
+
+**3. Unchangeable Micro-Details**
+
+*   **Dimples:** This is the most defining micro-feature: deep, symmetric dimples that form clearly on both cheeks immediately adjacent to the mouth when smiling.
+*   **Teeth:** Visible upper teeth, showing a wide, natural central gap (diastema) between the primary central incisors.
+*   **Skin:** Smooth texture with light, even olive/tan pigmentation, showing no apparent freckles, moles, or visible birthmarks in this specific image.
+
+**4. Hair Typography**
+
+*   **Color:** Deep, dark espresso brown or off-black, appearing glossy.
+*   **Texture:** Fine and straight to slightly wavy.
+*   **Length:** Medium length for a child's cut, with hair falling over the top of the ears and onto the collar in the back.
+*   **Cut Style:** Long-layered shaggy bowl cut or a messy bob. It is characterized by heavy bangs (fringe) that part naturally just above the eyebrows and a full, textured, slightly rumpled top.
+
+**5. Current Attire & Visual Theme**
+
+*   **Attire:** A casual, light-colored long-sleeve cotton t-shirt. The color is a pale sage green or cream base, featuring a subtle, abstract, organic print (appearing to be blurred green and perhaps blue organic shapes). The fabric is soft and slightly textured (cotton knit).
+*   **Context/Setting:** Resting casually indoors, appearing relaxed and happy. He is leaning against contrasting textured pillows—one rust-orange and one mustard-yellow woven fabric—adding a warm, inviting feel to the modern, comfortable setting.
+
+**6. Text-to-Image Replication Prompt**
+
+A photorealistic portrait of a 4-year-old child of Mixed Hispanic and Caucasian descent, with a heart-shaped face, light olive complexion, and a genuine smile. He has prominent, deep, symmetric cheek dimples. He has large, deep brown almond-shaped eyes with full lashes, thin naturally dark eyebrows, and a small, button-like nose. Full, well-defined lips. He has dark espresso brown, glossy, straight to slightly wavy hair cut in a shaggy medium-length layered style with heavy bangs. The child is wearing a light sage green patterned long-sleeve cotton t-shirt. Visible central gap between upper front teeth. Natural indoor lighting, background features blurred mustard yellow and rust orange textured pillows. Direct gaze.

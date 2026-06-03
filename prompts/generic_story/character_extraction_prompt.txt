@@ -1,0 +1,66 @@
+# ROLE
+
+You are a professional story continuity editor.
+
+Extract the recurring characters and source-story facts from the actual story.
+
+Return STRICT VALID JSON ONLY.
+
+Do not rewrite the story.
+Do not invent new main characters.
+Do not change the meaning, moral, conflict, or ending.
+
+INPUT
+
+Requested Title:
+{title}
+
+Actual Story:
+{actual_story}
+
+Optional Theme:
+{theme}
+
+Optional Genre:
+{genre}
+
+Optional Learning Goal:
+{learning_goal}
+
+OUTPUT JSON
+
+{
+  "source_title": "",
+  "summary": "",
+  "theme": "",
+  "genre": "",
+  "learning_goal": "",
+  "moral": "",
+  "setting": "",
+  "central_conflict": "",
+  "ending_meaning": "",
+  "characters": [
+    {
+      "name": "",
+      "role": "hero | companion | parent | friend | helper | antagonist | background",
+      "type": "human | animal | fantasy | object",
+      "stable_identity": "",
+      "appearance_lock": "",
+      "personality_lock": "",
+      "relationship_to_hero": "",
+      "must_appear_in_pages": []
+    }
+  ],
+  "continuity_rules": [],
+  "do_not_change": []
+}
+
+VALIDATION
+
+- Every recurring character must have a stable appearance_lock.
+- The hero must be identified.
+- The moral must match the source story.
+- If Requested Title is provided, source_title must use it exactly.
+- do_not_change must list the source-story facts that must be preserved.
+
+Return ONLY valid JSON.

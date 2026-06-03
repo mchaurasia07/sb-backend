@@ -1,0 +1,43 @@
+# ROLE
+
+Generate one polished children's storybook illustration.
+
+PAGE TYPE:
+{page_type}
+
+STORY TITLE:
+{story_title}
+
+VISUAL BIBLE:
+{visual_bible_json}
+
+IMAGE PLAN:
+{page_image_plan_json}
+
+REQUIREMENTS
+
+- Treat the VISUAL BIBLE as the canonical character model sheet.
+- Preserve every character exactly as described in the visual bible and image plan.
+- Keep face shape, skin tone, eye shape, age, body scale, hair, outfit, clothing pattern, markings, size, and accessories consistent.
+- Do not invent, remove, or change accessories such as hair clips, bindis, glasses, rakhis, bracelets, toys, or footwear.
+- Do not add prints, embroidery, motifs, stripes, dots, logos, or decorative patterns to clothing unless the visual bible explicitly says they are present.
+- If the visual bible says plain/no print clothing, render plain fabric with no random designs.
+- Do not switch outfit type between pages, for example do not change a frock into a kurta set or change one saree into a different saree design.
+- Do not change hairstyle, hair length, hair parting, facial structure, apparent age, or expression style across pages.
+- Count hairstyle components literally. If a character has two braids, render exactly two visible braided tails total, one on each side, with no third braid, no duplicate back braid, no extra loose braid-like strand, and no hidden ponytail drawn as another braid.
+- If a character has a bun, render exactly one bun in the locked position. If a character has short hair, do not add braids, ponytails, buns, or long side locks.
+- If IMAGE PLAN conflicts with VISUAL BIBLE, follow the VISUAL BIBLE.
+- Show only the characters listed for this scene.
+- Show one clear action and one clear focal point.
+- Use premium semi-realistic 3D children's storybook illustration style.
+- Use warm cinematic lighting, soft shadows, clean composition, expressive faces.
+- Keep all clothing modest and child-safe.
+- No character redesign, no outfit change, no hairstyle change, no extra braid, no missing braid, no duplicate hair tail, no inconsistent facial features, no changed face shape, no changed age, no changed skin tone, no added clothing prints or motifs unless specified, no missing fixed accessories, no extra characters, no distorted anatomy, no extra fingers, no cropped face, no horror elements, no dark frightening imagery, no watermark.
+
+COVER RULE
+
+If PAGE TYPE is cover, render the exact title text from STORY TITLE as readable
+book-cover typography on natural empty space. Do not use a black rectangle,
+box, label, banner, sticker, plaque, UI panel, or card behind the title.
+
+Return only the image.

@@ -111,7 +111,7 @@ class Settings(BaseSettings):
     STORY_BATCH_POLL_INTERVAL_SECONDS: int = 30
     STORY_BATCH_MAX_WAIT_SECONDS: int = 86400
     STORY_BATCH_RECONCILE_SCHEDULER_ENABLED: bool = True
-    STORY_BATCH_RECONCILE_INTERVAL_SECONDS: int = 1800
+    STORY_BATCH_RECONCILE_RUN_MINUTE: int = 1
     STORY_BATCH_RECONCILE_LIMIT: int = 50
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")

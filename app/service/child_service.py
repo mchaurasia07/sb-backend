@@ -92,15 +92,32 @@ class ChildService:
         children = await self.children.list_by_user(current_user.id)
         return [ChildProfileResponse.model_validate(child) for child in children]
 
-    async def update(self, current_user: User, child_id: UUID, payload: ChildProfileUpdateRequest) -> ChildProfileResponse:
+    async def update(
+        self,
+        current_user: User,
+        child_id: UUID,
+        payload: ChildProfileUpdateRequest,
+        *,
+        photo: UploadFile | None = None,
+        public_base_url: str | None = None,
+    ) -> ChildProfileResponse:
         child = await self.children.get_for_user(current_user.id, child_id)
         if child is None:
             raise NotFoundException("Child profile not found", "CHILD_NOT_FOUND")
-        update_data = payload.model_dump(exclude_unset=True)
+        update_data = payload.model_dump(exclude_unset=True, exclude_none=True)
         if "avatar_image_url" in update_data and update_data["avatar_image_url"] is not None:
             update_data["avatar_image_url"] = str(update_data["avatar_image_url"])
         for field, value in update_data.items():
             setattr(child, field, value)
+        if photo is not None:
+            if not public_base_url:
+                raise AppException("Public base URL is required to upload child profile photo", code="PUBLIC_BASE_URL_REQUIRED")
+            child.avatar_image_url = await get_image_storage_service().save_child_profile_photo(
+                current_user.id,
+                child.id,
+                photo,
+                public_base_url,
+            )
         await self.children.update(child)
         return ChildProfileResponse.model_validate(child)
 

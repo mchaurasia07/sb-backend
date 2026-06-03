@@ -211,12 +211,37 @@ async def check_child_username_availability(
 
 @router.put("/{child_id}", response_model=ApiResponse[ChildProfileResponse])
 async def update_child_profile(
+    request: Request,
     child_id: UUID,
-    payload: ChildProfileUpdateRequest,
+    first_name: str | None = Form(default=None, min_length=1, max_length=60),
+    last_name: str | None = Form(default=None, min_length=1, max_length=60),
+    dob: date | None = Form(default=None),
+    age: int | None = Form(default=None, ge=0, le=12),
+    gender: str | None = Form(default=None, max_length=32),
+    photo: UploadFile | None = File(default=None),
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[ChildProfileResponse]:
-    data = await ChildService(session).update(current_user, child_id, payload)
+    payload = ChildProfileUpdateRequest(
+        **{
+            key: value
+            for key, value in {
+                "first_name": first_name,
+                "last_name": last_name,
+                "dob": dob,
+                "age": age,
+                "gender": gender,
+            }.items()
+            if value is not None
+        }
+    )
+    data = await ChildService(session).update(
+        current_user,
+        child_id,
+        payload,
+        photo=photo,
+        public_base_url=str(request.base_url).rstrip("/"),
+    )
     return success_response(data, "Child profile updated successfully")
 
 

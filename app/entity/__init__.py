@@ -4,6 +4,12 @@ from app.entity.child_book import ChildBook
 from app.entity.child_profile import ChildProfile
 from app.entity.generic_audio import GenericAudio, GenericAudioLanguage
 from app.entity.generic_story import GenericStory, GenericStoryContent, GenericStoryLanguage
+from app.entity.generic_story_batch_job import GenericStoryBatchJob
+from app.entity.generic_story_workflow import (
+    GenericStoryWorkflow,
+    GenericStoryWorkflowStatus,
+    GenericStoryWorkflowStep,
+)
 from app.entity.notification import (
     Notification,
     NotificationAccountType,
@@ -28,8 +34,12 @@ __all__ = [
     "GenericAudio",
     "GenericAudioLanguage",
     "GenericStory",
+    "GenericStoryBatchJob",
     "GenericStoryContent",
     "GenericStoryLanguage",
+    "GenericStoryWorkflow",
+    "GenericStoryWorkflowStatus",
+    "GenericStoryWorkflowStep",
     "Notification",
     "NotificationAccountType",
     "NotificationAudience",
