@@ -2,6 +2,310 @@
 
 This guide covers deploying the Storybook backend application on a Linux VM.
 
+## Current Ubuntu Deployment
+
+This is the deployment shape used for the Ubuntu server.
+
+- Server IP: `129.154.251.149`
+- App directory: `/home/ubuntu/sb-backend`
+- Python: `python3.11`
+- Virtual environment: `/home/ubuntu/sb-backend/.venv`
+- Backend service: `storybook-backend`
+- Backend process: `uvicorn app.main:app --host 127.0.0.1 --port 8000`
+- Nginx public entrypoint: `http://129.154.251.149`
+- API public path: `http://129.154.251.149/api/v1/...`
+- UI public path: `http://129.154.251.149/`
+
+FastAPI already uses `API_V1_PREFIX=/api/v1`, so Nginx should proxy `/api/` to the backend without adding another `/api`.
+
+## First-Time Server Setup
+
+Ubuntu 22.04 does not provide `python3.12` by default. This project supports Python `>=3.11,<3.14`, so use Python 3.11.
+
+```bash
+sudo apt update
+sudo apt install -y python3.11 python3.11-venv python3.11-dev python3-pip nginx mysql-server git build-essential
+```
+
+Clone the repo:
+
+```bash
+cd /home/ubuntu
+git clone <your-repo-url> sb-backend
+cd /home/ubuntu/sb-backend
+```
+
+Create the virtual environment and install dependencies:
+
+```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+Create and edit environment file:
+
+```bash
+cp .env.example .env
+nano .env
+```
+
+Important production values:
+
+```bash
+ENVIRONMENT=production
+APP_DEBUG=false
+DATABASE_URL=mysql+asyncmy://storybook:strong_password@127.0.0.1:3306/storybook
+BACKEND_CORS_ORIGINS=http://129.154.251.149
+MEDIA_ROOT=/home/ubuntu/sb-backend/photo
+AUDIO_ROOT=/home/ubuntu/sb-backend/audio
+MEDIA_URL_PREFIX=/photo
+AUDIO_URL_PREFIX=/audio
+```
+
+Create media directories and fix permissions:
+
+```bash
+mkdir -p /home/ubuntu/sb-backend/photo /home/ubuntu/sb-backend/audio
+sudo chown -R ubuntu:ubuntu /home/ubuntu/sb-backend
+chmod -R u+rwX /home/ubuntu/sb-backend/photo /home/ubuntu/sb-backend/audio
+```
+
+Create MySQL database:
+
+```bash
+sudo mysql
+```
+
+```sql
+CREATE DATABASE storybook CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'storybook'@'localhost' IDENTIFIED BY 'strong_password';
+GRANT ALL PRIVILEGES ON storybook.* TO 'storybook'@'localhost';
+FLUSH PRIVILEGES;
+EXIT;
+```
+
+Run migrations:
+
+```bash
+cd /home/ubuntu/sb-backend
+source .venv/bin/activate
+alembic upgrade head
+```
+
+## systemd Service
+
+Create or edit:
+
+```bash
+sudo nano /etc/systemd/system/storybook-backend.service
+```
+
+Use:
+
+```ini
+[Unit]
+Description=Storybook Backend API
+After=network.target mysql.service
+
+[Service]
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/sb-backend
+Environment="PATH=/home/ubuntu/sb-backend/.venv/bin"
+ExecStart=/home/ubuntu/sb-backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Start the service:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable storybook-backend
+sudo systemctl restart storybook-backend
+sudo systemctl status storybook-backend
+```
+
+Watch logs:
+
+```bash
+sudo journalctl -u storybook-backend -f
+```
+
+The app is healthy when logs show:
+
+```text
+Application startup complete.
+Uvicorn running on http://127.0.0.1:8000
+```
+
+## Nginx For UI And API
+
+The desired Nginx behavior:
+
+- UI served at `/`
+- Backend API proxied at `/api/`
+- Backend media proxied at `/photo/` and `/audio/`
+- Health check proxied at `/health`
+
+Check the active Nginx site:
+
+```bash
+ls -l /etc/nginx/sites-enabled/
+sudo nginx -T | grep -E "server_name|proxy_pass|listen"
+```
+
+In the current server, the active file is:
+
+```text
+/etc/nginx/sites-available/myapp
+```
+
+Back it up:
+
+```bash
+sudo cp /etc/nginx/sites-available/myapp /etc/nginx/sites-available/myapp.backup
+```
+
+Edit it:
+
+```bash
+sudo nano /etc/nginx/sites-available/myapp
+```
+
+Use this if the UI is a static build copied to `/var/www/storybook-ui`:
+
+```nginx
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+
+    server_name 129.154.251.149 _;
+
+    client_max_body_size 50M;
+
+    root /var/www/storybook-ui;
+    index index.html;
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:8000/api/;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /photo/ {
+        proxy_pass http://127.0.0.1:8000/photo/;
+    }
+
+    location /audio/ {
+        proxy_pass http://127.0.0.1:8000/audio/;
+    }
+
+    location /health {
+        proxy_pass http://127.0.0.1:8000/health;
+        access_log off;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
+```
+
+Reload Nginx:
+
+```bash
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+Test from the server:
+
+```bash
+curl http://127.0.0.1:8000/health
+curl http://127.0.0.1/health
+curl http://129.154.251.149/health
+```
+
+Test from local machine:
+
+```text
+http://129.154.251.149/health
+http://129.154.251.149/
+```
+
+If using Oracle Cloud, also allow ingress TCP `80` in the VCN security list or network security group.
+
+## UI Deployment
+
+Build the UI on the UI project:
+
+```bash
+npm install
+npm run build
+```
+
+Copy the generated static files to the server. For Vite/React this is usually `dist/`:
+
+```bash
+sudo mkdir -p /var/www/storybook-ui
+sudo rm -rf /var/www/storybook-ui/*
+sudo cp -r dist/* /var/www/storybook-ui/
+sudo chown -R www-data:www-data /var/www/storybook-ui
+sudo systemctl reload nginx
+```
+
+Frontend API base URL should be:
+
+```text
+/api/v1
+```
+
+Do not use `/api/api/v1`.
+
+## Backend Redeploy Steps
+
+Use this every time backend code changes:
+
+```bash
+cd /home/ubuntu/sb-backend
+git pull
+source .venv/bin/activate
+pip install -r requirements.txt
+alembic upgrade head
+sudo systemctl restart storybook-backend
+sudo journalctl -u storybook-backend -n 50 --no-pager
+```
+
+Check health:
+
+```bash
+curl http://127.0.0.1:8000/health
+curl http://129.154.251.149/health
+```
+
+## UI Redeploy Steps
+
+Build the UI again, copy `dist` files, and reload Nginx:
+
+```bash
+npm run build
+sudo rm -rf /var/www/storybook-ui/*
+sudo cp -r dist/* /var/www/storybook-ui/
+sudo chown -R www-data:www-data /var/www/storybook-ui
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
 ## Storage Configuration
 
 The application uses configurable storage paths for images and audio files. This allows you to store files on any mounted volume or directory.
