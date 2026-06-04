@@ -1,17 +1,17 @@
-# ROLE
-
 You are a professional story continuity editor.
 
-Extract the recurring characters and source-story facts from the actual story.
+Extract the canonical story facts and recurring character details required for future story, illustration, narration, and sequel consistency.
 
 Return STRICT VALID JSON ONLY.
 
+
+
 Do not rewrite the story.
-Do not invent new main characters.
-Do not change the meaning, moral, conflict, or ending.
+Do not invent characters.
+Do not add facts not present in the story.
+Do not change the moral, conflict, relationships, or ending.
 
-INPUT
-
+# INPUT
 Requested Title:
 {title}
 
@@ -24,43 +24,78 @@ Optional Theme:
 Optional Genre:
 {genre}
 
+
 Optional Learning Goal:
 {learning_goal}
 
-OUTPUT JSON
 
+# OUTPUT JSON
 {
-  "source_title": "",
-  "summary": "",
-  "theme": "",
-  "genre": "",
-  "learning_goal": "",
-  "moral": "",
-  "setting": "",
-  "central_conflict": "",
-  "ending_meaning": "",
-  "characters": [
-    {
-      "name": "",
-      "role": "hero | companion | parent | friend | helper | antagonist | background",
-      "type": "human | animal | fantasy | object",
-      "stable_identity": "",
-      "appearance_lock": "",
-      "personality_lock": "",
-      "relationship_to_hero": "",
-      "must_appear_in_pages": []
-    }
-  ],
-  "continuity_rules": [],
-  "do_not_change": []
+"title": "",
+"summary": "",
+"theme": "",
+"genre": "",
+"goal": "",
+"moral": "",
+"setting": "",
+"conflict": "",
+"ending": "",
+
+"chars": [
+{
+
+"name": "",
+"role": "hero|companion|parent|friend|helper|antagonist|background",
+"type": "human|animal|fantasy|object","anchor": "",
+"look": {
+  "age": "",
+  "hair": "",
+  "eyes": "",
+  "skin": "",
+  "outfit": "",
+  "features": []
+},
+"traits": [],
+"relation": "",
+"pages": [],
+"lock": []
 }
 
-VALIDATION
+],
 
-- Every recurring character must have a stable appearance_lock.
-- The hero must be identified.
-- The moral must match the source story.
-- If Requested Title is provided, source_title must use it exactly.
-- do_not_change must list the source-story facts that must be preserved.
+"rules": [],
+"preserve": []
+}
 
-Return ONLY valid JSON.
+
+
+# EXTRACTION RULES
+
+1. title must exactly match Requested Title when provided.
+2. Identify exactly one hero whenever possible.
+3. Extract only recurring or story-important characters.
+4. anchor must be one concise sentence describing the character's permanent visual identity.
+5. look must contain only details explicitly stated or strongly implied by the story.
+6. traits should contain 3-5 stable personality traits.
+7. lock should contain visual traits that must never change.
+8. rules should contain story-world continuity rules that future generations must preserve.
+9. preserve should contain critical facts that must never change, including:
+* moral
+* conflict
+* ending
+* key relationships
+* major story facts
+10. Use empty strings or empty arrays when information is unavailable.
+11. Do not infer ethnicity, religion, nationality, or physical details not supported by the story.
+12. Return STRICT VALID JSON ONLY.
+
+# CHARACTER CONSISTENCY PRIORITY
+For each recurring character, prioritize extracting:
+1. Permanent appearance
+2. Signature outfit
+3. Distinctive visual features
+4. Stable personality traits
+5. Relationship to the hero
+
+Temporary emotions, poses, actions, and scene-specific details should NOT be included unless they define the character throughout the story. 
+

@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+from app.core.age_groups import PAGE_COUNT_BY_AGE_GROUP
+
 
 @dataclass(frozen=True)
 class PlanValidationResult:
@@ -13,11 +15,7 @@ class PlanValidationResult:
 class PlanValidator:
     """Semantic validator for the Story Planner JSON schema."""
 
-    _AGE_GROUP_PAGE_COUNTS: dict[str, int] = {
-        "2-4": 6,
-        "5-7": 10,
-        "8-12": 12,
-    }
+    _AGE_GROUP_PAGE_COUNTS: dict[str, int] = PAGE_COUNT_BY_AGE_GROUP
     def validate(
         self,
         plan: dict[str, Any],

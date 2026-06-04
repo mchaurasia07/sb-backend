@@ -4,6 +4,7 @@ from uuid import UUID
 from sqlalchemy import Boolean, Enum as SAEnum, ForeignKey, Index, JSON, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.age_groups import AGE_GROUP_0_2, AGE_GROUP_2_4, AGE_GROUP_4_6, AGE_GROUP_6_8
 from app.core.database import Base
 from app.entity.base import TimestampMixin, UUIDPrimaryKeyMixin
 
@@ -29,9 +30,10 @@ class StoryGenerationMode(str, Enum):
 class AgeGroup(str, Enum):
     """Age group for story content."""
 
-    TODDLER = "2-4"
-    EARLY_READER = "5-7"
-    ADVANCED = "8-12"
+    INFANT_TODDLER = AGE_GROUP_0_2
+    TODDLER = AGE_GROUP_2_4
+    EARLY_READER = AGE_GROUP_4_6
+    ADVANCED = AGE_GROUP_6_8
 
 
 class Story(UUIDPrimaryKeyMixin, TimestampMixin, Base):

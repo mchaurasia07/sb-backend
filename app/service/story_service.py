@@ -10,6 +10,14 @@ from uuid import UUID
 from PIL import Image, UnidentifiedImageError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.age_groups import (
+    AGE_GROUP_0_2,
+    AGE_GROUP_2_4,
+    AGE_GROUP_4_6,
+    AGE_GROUP_6_8,
+    DEFAULT_AGE_GROUP,
+    page_count_for_age_group,
+)
 from app.core.config import settings
 from app.core.exceptions import AppException, NotFoundException
 from app.entity.story import Story, StoryStatus
@@ -212,14 +220,16 @@ class StoryService:
     MAX_RETRIES = 3
     PLAN_MAX_TOKENS = 14000
     STORY_MAX_TOKENS_BY_AGE = {
-        "2-4": 4000,
-        "5-7": 8000,
-        "8-12": 12000,
+        AGE_GROUP_0_2: 3000,
+        AGE_GROUP_2_4: 4000,
+        AGE_GROUP_4_6: 7000,
+        AGE_GROUP_6_8: 9000,
     }
     IMAGE_PLAN_MAX_TOKENS_BY_AGE = {
-        "2-4": 16000,
-        "5-7": 24000,
-        "8-12": 32000,
+        AGE_GROUP_0_2: 12000,
+        AGE_GROUP_2_4: 16000,
+        AGE_GROUP_4_6: 22000,
+        AGE_GROUP_6_8: 28000,
     }
 
     def __init__(self, session: AsyncSession):
@@ -294,12 +304,12 @@ class StoryService:
     @classmethod
     def _story_max_tokens(cls, age_group: str) -> int:
         value = getattr(age_group, "value", str(age_group))
-        return cls.STORY_MAX_TOKENS_BY_AGE.get(value, cls.STORY_MAX_TOKENS_BY_AGE["5-7"])
+        return cls.STORY_MAX_TOKENS_BY_AGE.get(value, cls.STORY_MAX_TOKENS_BY_AGE[DEFAULT_AGE_GROUP])
 
     @classmethod
     def _image_plan_max_tokens(cls, age_group: str) -> int:
         value = getattr(age_group, "value", str(age_group))
-        return cls.IMAGE_PLAN_MAX_TOKENS_BY_AGE.get(value, cls.IMAGE_PLAN_MAX_TOKENS_BY_AGE["5-7"])
+        return cls.IMAGE_PLAN_MAX_TOKENS_BY_AGE.get(value, cls.IMAGE_PLAN_MAX_TOKENS_BY_AGE[DEFAULT_AGE_GROUP])
 
     async def _set_current_step(self, story: Story, step_name: StoryStepName) -> None:
         story.status = StoryStatus.IN_PROGRESS
@@ -1807,38 +1817,36 @@ class StoryService:
     def _get_age_group_from_dob(dob) -> str:
         """Calculate age group from date of birth."""
         if not dob:
-            return "5-7"  # Default to early reader if no DOB
+            return DEFAULT_AGE_GROUP
 
         from datetime import date
         today = date.today()
         age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
 
-        if age < 5:
-            return "2-4"
-        elif age < 8:
-            return "5-7"
-        else:
-            return "8-12"
+        if age < 2:
+            return AGE_GROUP_0_2
+        if age < 4:
+            return AGE_GROUP_2_4
+        if age < 6:
+            return AGE_GROUP_4_6
+        return AGE_GROUP_6_8
 
     @staticmethod
     def _get_page_count_for_age_group(age_group: str) -> int:
         """Get recommended page count for age group."""
-        age_counts = {
-            "2-4": 6,
-            "5-7": 10,
-            "8-12": 12,
-        }
-        return age_counts.get(age_group, 10)
+        return page_count_for_age_group(age_group)
 
     @staticmethod
     def _get_hobby_for_age_group(age_group: str) -> str:
         """Get age-appropriate hobby/interest suggestions."""
         hobbies = {
-            "2-4": "playing with toys, exploring, drawing, singing",
-            "5-7": "reading, drawing, building with blocks, playing games, riding bikes",
-            "8-12": "reading, creating art, sports, music, science experiments, video games",
+            AGE_GROUP_0_2: "peekaboo, soft toys, music, stacking, sensory play",
+            AGE_GROUP_2_4: "playing with toys, exploring, drawing, singing",
+            AGE_GROUP_4_6: "picture books, drawing, building with blocks, pretend play, simple games",
+            AGE_GROUP_6_8: "reading, creating art, sports, music, science experiments, building games",
         }
-        return hobbies.get(age_group, "creative hobbies and exploration")
+        value = getattr(age_group, "value", age_group)
+        return hobbies.get(str(value), hobbies[DEFAULT_AGE_GROUP])
 
     @staticmethod
     def _child_age_label(child) -> str:

@@ -64,6 +64,8 @@ def get_ai_provider(provider_name: str | None = None) -> AIProvider:
             api_key=settings.OPENAI_API_KEY,
             image_model=settings.OPENAI_IMAGE_MODEL,
             text_model=settings.OPENAI_TEXT_MODEL,
+            organization=settings.OPENAI_ORG_ID,
+            project=settings.OPENAI_PROJECT_ID,
         )
         return _provider_instance
 

@@ -18,6 +18,7 @@ class GenericStoryWorkflowStatus(StrEnum):
 class GenericStoryWorkflowStep(StrEnum):
     CHARACTER_EXTRACTION = "CHARACTER_EXTRACTION"
     SCENE_PLAN_GENERATION = "SCENE_PLAN_GENERATION"
+    VISUAL_BIBLE_GENERATION = "VISUAL_BIBLE_GENERATION"
     STORY_GENERATION = "STORY_GENERATION"
     IMAGE_PLAN_GENERATION = "IMAGE_PLAN_GENERATION"
     IMAGE_GENERATION = "IMAGE_GENERATION"
@@ -35,6 +36,12 @@ class GenericStoryWorkflow(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Index("ix_generic_story_workflows_generic_story_id", "generic_story_id"),
         Index("ix_generic_story_workflows_created_at", "created_at"),
         Index("ix_generic_story_workflows_user_created_at", "user_id", "created_at"),
+        Index(
+            "ix_generic_story_workflows_user_story_created_at",
+            "user_id",
+            "generic_story_id",
+            "created_at",
+        ),
     )
 
     user_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
@@ -56,6 +63,7 @@ class GenericStoryWorkflow(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     character_analysis_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     scene_plan_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    visual_bible_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     story_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     image_plan_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     input_request: Mapped[dict | None] = mapped_column(JSON, nullable=True)

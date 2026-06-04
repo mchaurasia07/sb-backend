@@ -50,13 +50,24 @@ def _extract_base64_image_data(image_path: Path | str) -> str:
 class OpenAIProvider(AIProvider):
     """OpenAI implementation of the AI provider interface."""
 
-    def __init__(self, api_key: str, image_model: str, text_model: str):
+    def __init__(
+        self,
+        api_key: str,
+        image_model: str,
+        text_model: str,
+        organization: str | None = None,
+        project: str | None = None,
+    ):
         if not api_key:
             raise ValueError("OpenAI API key is required")
         self.api_key = api_key
         self.image_model = image_model
         self.text_model = text_model
-        self._client = AsyncOpenAI(api_key=api_key)
+        self._client = AsyncOpenAI(
+            api_key=api_key,
+            organization=organization or None,
+            project=project or None,
+        )
 
     async def create_character_from_photo(
         self,
@@ -233,13 +244,15 @@ Focus only on stable identity details needed for a reusable storybook character 
             logger.info("MOCK MODE: Returning mock LLM response instead of calling OpenAI")
 
             # Extract age_group from prompt for correct mock response
-            age_group = "5-7"  # Default
-            if "2-4" in prompt:
+            age_group = "4-6"  # Default
+            if "0-2" in prompt:
+                age_group = "0-2"
+            elif "2-4" in prompt:
                 age_group = "2-4"
-            elif "5-7" in prompt:
-                age_group = "5-7"
-            elif "8-12" in prompt:
-                age_group = "8-12"
+            elif "4-6" in prompt:
+                age_group = "4-6"
+            elif "6-8" in prompt:
+                age_group = "6-8"
 
             # Determine which mock response to return based on prompt content.
             # Check image planning first because that prompt includes "Story Plan JSON".

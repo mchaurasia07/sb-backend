@@ -2,42 +2,56 @@
 
 Generate one polished children's storybook illustration.
 
+# INPUTS
+
+ASPECT RATIO:
+{aspect_ratio}
+
+ILLUSTRATION STYLE:
+{illustration_style}
+
 PAGE TYPE:
 {page_type}
 
 STORY TITLE:
 {story_title}
 
-VISUAL BIBLE:
-{visual_bible_json}
+AGE GROUP:
+{age_group}
+
+TITLE AND TEXT INSTRUCTION:
+{title_instruction}
+
+SCENE TO DRAW:
+{scene_instruction}
 
 IMAGE PLAN:
 {page_image_plan_json}
 
-REQUIREMENTS
+CHARACTER AND CONTINUITY MODEL SHEET:
+{visual_context}
 
-- Treat the VISUAL BIBLE as the canonical character model sheet.
-- Preserve every character exactly as described in the visual bible and image plan.
-- Keep face shape, skin tone, eye shape, age, body scale, hair, outfit, clothing pattern, markings, size, and accessories consistent.
-- Do not invent, remove, or change accessories such as hair clips, bindis, glasses, rakhis, bracelets, toys, or footwear.
-- Do not add prints, embroidery, motifs, stripes, dots, logos, or decorative patterns to clothing unless the visual bible explicitly says they are present.
-- If the visual bible says plain/no print clothing, render plain fabric with no random designs.
-- Do not switch outfit type between pages, for example do not change a frock into a kurta set or change one saree into a different saree design.
-- Do not change hairstyle, hair length, hair parting, facial structure, apparent age, or expression style across pages.
-- Count hairstyle components literally. If a character has two braids, render exactly two visible braided tails total, one on each side, with no third braid, no duplicate back braid, no extra loose braid-like strand, and no hidden ponytail drawn as another braid.
-- If a character has a bun, render exactly one bun in the locked position. If a character has short hair, do not add braids, ponytails, buns, or long side locks.
-- If IMAGE PLAN conflicts with VISUAL BIBLE, follow the VISUAL BIBLE.
-- Show only the characters listed for this scene.
-- Show one clear action and one clear focal point.
-- Use premium semi-realistic 3D children's storybook illustration style.
-- Use warm cinematic lighting, soft shadows, clean composition, expressive faces.
-- Keep all clothing modest and child-safe.
-- No character redesign, no outfit change, no hairstyle change, no extra braid, no missing braid, no duplicate hair tail, no inconsistent facial features, no changed face shape, no changed age, no changed skin tone, no added clothing prints or motifs unless specified, no missing fixed accessories, no extra characters, no distorted anatomy, no extra fingers, no cropped face, no horror elements, no dark frightening imagery, no watermark.
+# PRIORITY
 
-COVER RULE
+1. If PAGE TYPE is "cover", create a finished front book cover from the whole-story cover direction, title layout, genre signal, and story promise. It must not look like page 1 or any single interior story page.
+2. If PAGE TYPE is an interior story page, draw the exact scene in SCENE TO DRAW and IMAGE PLAN. The page moment, action, environment, character list, objects, emotion, camera shot, and composition are hard requirements.
+3. Use the model sheet only to keep identities and continuity consistent. Do not let continuity notes replace or generalize the page scene.
+4. Follow TITLE AND TEXT INSTRUCTION exactly. For covers, readable exact title typography is required.
 
-If PAGE TYPE is cover, render the exact title text from STORY TITLE as readable
-book-cover typography on natural empty space. Do not use a black rectangle,
-box, label, banner, sticker, plaque, UI panel, or card behind the title.
+# RULES
 
-Return only the image.
+Use only characters listed in the image plan. Do not add extra characters, recurring family members, toys, props, locations, or background story elements unless the image plan explicitly lists them.
+
+Each page must look like its own story moment. Do not reuse a generic family pose, nursery setup, mat scene, toy arrangement, or previous-page composition unless the image plan explicitly asks for that exact repeat.
+
+Do not redesign characters, change outfit, hairstyle, face shape, age, skin tone, body scale, accessories, or fixed objects.
+
+COMPOSITION:
+One clear focal point, child-friendly, clean layout, expressive faces, no clutter.
+
+NEGATIVE RULES:
+No scary elements, no violence, no distorted hands, no extra fingers, no text unless requested, no watermark, no random outfit changes. The only allowed text is the exact cover title when PAGE TYPE is "cover".
+
+# OUTPUT
+
+Return only the finished illustration.

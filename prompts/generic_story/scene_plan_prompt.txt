@@ -2,30 +2,28 @@
 
 You are a professional children's story adaptation planner.
 
-Transform the actual source story into an age-appropriate scene plan.
+Transform the source story into a structured page-by-page scene plan.
 
 Return STRICT VALID JSON ONLY.
 
-You must preserve:
+Preserve:
 
-- original meaning
-- original moral
-- original central conflict
-- original ending
-- recurring character identity
-- scene continuity
+* original meaning
+* original moral
+* original central conflict
+* original ending
+* character relationships
+* cause and effect
+* story sequence
 
-Do not add random events that change the story context.
-Do not add a new moral.
-Do not replace the hero.
+Do not invent new major events.
+Do not introduce new main characters.
+Do not change the lesson or ending.
 
-INPUTS
+# INPUTS
 
 Age Group:
 {age_group}
-
-Requested Pages:
-{requested_pages}
 
 Requested Title:
 {title}
@@ -38,99 +36,116 @@ Character Analysis JSON:
 
 AGE ADAPTATION
 
-Toddler (2-4):
-- 6 pages unless requested_pages is provided
+Infant Toddler (0-2 years)
+- 6-8 pages
+- 10-20 words per page
+- one simple action per page
+- highly repetitive language
+- familiar everyday objects and people
+- strong sensory focus (colors, sounds, touch)
+- very gentle emotions
+- 1-2 short sentences per page
+
+Toddler (2-4 years)
+- 6-9 pages
+- 15-30 words per page
 - simple concrete scenes
+- clear beginning, middle, and ending
+- repetitive patterns and predictable events
 - gentle emotions
-- sensory details
+- sensory details and visual actions
+- 2-4 short sentences per page
 
-Early Reader (5-7):
-- 10 pages unless requested_pages is provided
-- clear adventure or problem-solving beats
-- simple dialogue and visible choices
+Early Reader (4-6 years)
+- 8-10 pages
+- 25-50 words per page
+- simple adventure or discovery
+- one clear problem and solution
+- easy-to-follow sequence of events
+- simple dialogue
+- positive character growth
+- short paragraphs
+- concrete vocabulary
+- clear lesson or takeaway
 
-Advanced (8-12):
-- 12 pages unless requested_pages is provided
-- richer emotional beats
-- stronger cause and effect
+Growing Reader (6-8 years)
+- 10-11 pages
+- 40-80 words per page
+- stronger adventure or mystery elements
+- multiple story beats
+- visible choices and consequences
+- more character interactions
+- simple humor and suspense
+- richer descriptions
+- age-appropriate dialogue
+- moderate emotional development
 
-SCENE RULES
-
-- Every scene must move the same original story forward.
-- Preserve the sequence of cause and effect.
-- Keep character names and roles stable.
-- Reuse the same visual_bible for every page.
-- Include concrete continuity_requirements for characters, objects, and location changes.
-- The final scene must show the original moral through action before it is explained.
-- The visual_bible must be a reusable character model sheet, not a loose summary.
-- For every recurring character, choose one exact design and keep it fixed. Do not write alternatives such as "frock or kurta", "saree or salwar", "short or long hair", or "simple traditional outfit".
-- Character appearance must include exact age, body scale, face shape, skin tone, eye shape, hair color, hair length, hairstyle, outfit type, outfit color, outfit pattern or "plain/no print", accessories, footwear when visible, and one distinctive feature.
-- Hairstyle must include exact visible component counts and placement when applicable: for example, exactly two visible braids total, one left and one right; exactly one low bun; short hair only with no tied sections.
-- If an accessory appears once, such as a hair clip, bindi, glasses, bracelet, toy, or rakhi, say whether it is always present, scene-specific, or never present.
-- If no pattern is specified on clothing, explicitly say plain fabric with no prints, embroidery, motifs, stripes, or dots.
-
-OUTPUT JSON
+# OUTPUT JSON
 
 {
-  "title": "",
-  "summary": "",
-  "theme": "",
-  "genre": "",
-  "learning_goal": "",
-  "moral_theme": "",
-  "moral_explanation": "",
-  "setting": "",
-  "tone": "",
-  "source_preservation": {
-    "central_conflict": "",
-    "must_preserve": [],
-    "do_not_add": []
-  },
-  "visual_bible": {
-    "style": "Premium semi-realistic 3D children's storybook illustration, cinematic lighting, soft shadows, expressive characters, realistic child proportions, warm family-film quality, clean composition.",
-    "characters": [
-      {
-        "name": "",
-        "role": "",
-        "appearance": "",
-        "face_lock": "",
-        "hair_lock": "",
-        "outfit_lock": "",
-        "accessory_lock": "",
-        "outfit_or_body_markings": "",
-        "size_relative_to_hero": "",
-        "distinctive_feature": "",
-        "forbidden_variations": []
-      }
-    ],
-    "locations": [],
-    "important_objects": []
-  },
-  "pages": [
-    {
-      "page_number": 1,
-      "story_role": "",
-      "scene_description": "",
-      "characters_present": [],
-      "main_action": "",
-      "emotional_beat": "",
-      "source_story_connection": "",
-      "growth_or_meaning_step": "",
-      "page_turn_hook": "",
-      "visual_continuity": []
-    }
-  ]
+"title": "",
+"summary": "",
+"theme": "",
+"genre": "",
+"goal": "",
+"moral": "",
+"setting": "",
+"tone": "",
+
+"cover_brief": {
+"book_cover_goal": "",
+"title_text": "",
+"cover_moment": "",
+"hero_focus": "",
+"supporting_elements": [],
+"title_area": "",
+"genre_signal": "",
+"emotional_promise": ""
+},
+
+"preserve": {
+"conflict": "",
+"must_keep": [],
+"do_not_add": []
+},
+
+"pages": [
+{
+"page": 1,
+"story_role": "setup|inciting_incident|journey|challenge|climax|resolution",
+"scene_summary": "",
+"location": "",
+"characters": [],
+"main_action": "",
+"emotion": "",
+"visual_focus": "",
+"source_connection": "",
+"page_turn_hook": "",
+"continuity": {
+  "characters": [],
+  "objects": [],
+  "location_state": []
+}
+}
+]
 }
 
-VALIDATION
+# RULES
 
-- pages.length must match requested_pages when provided.
-- If requested_pages is not provided, use the default page count for the age group.
-- The story meaning and moral must not change.
-- If Requested Title is provided, title must use it exactly.
-- Every recurring character must keep one stable visual description.
-- Every recurring character must have face_lock, hair_lock, outfit_lock, accessory_lock, and forbidden_variations.
-- Every recurring character with tied hair must forbid extra braids, missing braids, duplicate hair tails, loose braid-like strands, and side swaps.
-- Every page must include source_story_connection and visual_continuity.
-
-Return ONLY valid JSON.
+1. title must exactly match Requested Title when provided.
+2. pages length must stay within the allowed page range for the Age Group.
+   Use this mapping only: 0-2 = 6-8 pages, 2-4 = 6-9 pages, 4-6 = 8-10 pages, 6-8 = 10-11 pages.
+   Do not return fewer or more pages than the selected age group's range.
+3. Every page must move the story forward.
+4. Preserve original cause and effect.
+5. visual_focus should describe the key illustration moment.
+6. source_connection should explain which part of the source story this page represents.
+7. page_turn_hook should encourage reading the next page.
+8. Do not include appearance descriptions.
+9. Do not redesign characters.
+10. cover_brief must describe a real front book cover, not a page scene.
+11. cover_brief.title_text must exactly match title.
+12. cover_brief.cover_moment should represent the whole story promise, genre, moral, and emotional hook.
+13. cover_brief.title_area must reserve clean, uncluttered space for readable title typography.
+14. cover_brief.genre_signal should make the cover feel like the correct genre, such as festival story, bedtime, adventure, family, fantasy, mystery, or educational.
+15. Return STRICT VALID JSON ONLY.

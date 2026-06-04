@@ -76,3 +76,15 @@ class GenericStoryBatchImageSubmitResponse(BaseModel):
     expected_item_count: int
     submitted_item_count: int
     message: str
+
+
+class GenericStoryBatchJobCancelResponse(BaseModel):
+    generic_story_id: UUID
+    workflow_id: UUID
+    batch_job_id: UUID
+    job_type: str
+    status: str
+    provider_job_name: str | None
+    provider_state: str | None
+    workflow_status: str
+    message: str

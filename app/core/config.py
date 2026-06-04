@@ -75,6 +75,8 @@ class Settings(BaseSettings):
 
     # OpenAI Configuration
     OPENAI_API_KEY: str
+    OPENAI_ORG_ID: str = ""
+    OPENAI_PROJECT_ID: str = ""
     OPENAI_IMAGE_MODEL: str
     OPENAI_TEXT_MODEL: str
 

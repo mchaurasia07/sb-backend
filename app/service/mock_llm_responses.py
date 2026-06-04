@@ -3,18 +3,26 @@
 import json
 from typing import Any
 
+from app.core.age_groups import (
+    AGE_GROUP_0_2,
+    AGE_GROUP_2_4,
+    AGE_GROUP_6_8,
+    DEFAULT_AGE_GROUP,
+    page_count_for_age_group,
+)
 
-def get_mock_story_plan(child_name: str = "Emma", age_group: str = "5-7") -> dict[str, Any]:
+
+def get_mock_story_plan(child_name: str = "Emma", age_group: str = DEFAULT_AGE_GROUP) -> dict[str, Any]:
     """Return valid mock story plan JSON that passes validation."""
     # Determine page count and age band based on age_group
-    if age_group == "2-4":
-        page_count = 6
+    page_count = page_count_for_age_group(age_group)
+    if age_group == AGE_GROUP_0_2:
+        age_band = "Infant Toddler"
+    elif age_group == AGE_GROUP_2_4:
         age_band = "Toddler"
-    elif age_group == "8-12":
-        page_count = 12
-        age_band = "Advanced"
-    else:  # Default to 5-7 (Early Reader)
-        page_count = 10
+    elif age_group == AGE_GROUP_6_8:
+        age_band = "Growing Reader"
+    else:
         age_band = "Early Reader"
 
     plan = {
@@ -374,7 +382,7 @@ class MockLLMTextGenerationResult:
         self.text = text
 
 
-def get_mock_story_plan_text(child_name: str = "Emma", age_group: str = "5-7") -> str:
+def get_mock_story_plan_text(child_name: str = "Emma", age_group: str = DEFAULT_AGE_GROUP) -> str:
     """Return mock story plan as JSON string."""
     plan = get_mock_story_plan(child_name, age_group)
     return json.dumps(plan)

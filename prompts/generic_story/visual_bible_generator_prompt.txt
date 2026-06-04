@@ -1,0 +1,153 @@
+# ROLE
+
+You are a professional children's character continuity designer.
+
+Create a definitive visual bible for all recurring characters and important story elements.
+
+Return STRICT VALID JSON ONLY.
+
+The visual bible will be used for:
+
+* cover illustrations
+* page illustrations
+* character sheets
+* sequels
+* marketing artwork
+
+Character consistency is critical.
+
+# INPUTS
+
+Requested Title:
+{title}
+
+Actual Story:
+{actual_story}
+
+Character Analysis JSON:
+{character_analysis_json}
+
+Scene Plan JSON:
+{scene_plan_json}
+
+Illustration Style:
+{illustration_style}
+
+# VISUAL DESIGN RULES
+
+1. Every recurring character must have ONE fixed appearance.
+
+2. Never provide alternatives.
+
+3. Never use uncertain alternatives. Avoid words and phrases such as:
+
+   * maybe
+   * possibly
+   * could be
+   * either
+   * or
+
+4. Clothing must have:
+
+   * exact type
+   * exact colors
+   * exact patterns
+
+5. Hair must have:
+
+   * color
+   * length
+   * style
+   * visible structure
+   * exact visible count for braids, ponytails, buns, clips, ribbons, parting, and loose strands when present
+
+6. Accessories must specify:
+
+   * always present
+   * sometimes present
+   * never present
+
+7. If a detail is unknown from the story, create ONE child-friendly design and keep it fixed.
+
+8. If clothing pattern is not story-important, set pattern to "plain fabric, no print, no embroidery, no motifs, no stripes, no dots".
+
+9. Hair locks must explicitly forbid extra braids, missing braids, duplicate hair tails, swapped sides, and loose braid-like strands when tied hair is used.
+
+10. Accessory locks must explicitly forbid missing fixed accessories and random added accessories.
+
+# OUTPUT JSON
+
+{
+"style": "{illustration_style}",
+
+"age_group": "",
+
+"characters": [
+{
+"name": "",
+"role": "",
+"anchor": "",
+"appearance": {
+  "age": "",
+  "height_build": "",
+  "skin_tone": "",
+  "face_shape": "",
+  "eye_shape": "",
+  "eye_color": "",
+  "hair": {
+    "color": "",
+    "length": "",
+    "style": ""
+  },
+  "outfit": {
+    "type": "",
+    "primary_color": "",
+    "secondary_color": "",
+    "pattern": ""
+  },
+  "footwear": "",
+  "accessories": [],
+  "distinctive_feature": ""
+},
+"locks": {
+  "face_lock": "",
+  "hair_lock": "",
+  "outfit_lock": "",
+  "accessory_lock": ""
+},
+"forbidden_variations": [],
+"size_relative_to_hero": ""
+}
+],
+
+"locations": [
+{
+"name": "",
+"description": "",
+"visual_identity": ""
+}
+],
+
+"important_objects": [
+{
+"name": "",
+"description": "",
+"continuity_requirements": []
+}
+]
+}
+
+# VALIDATION
+
+1. Every recurring character must have an anchor.
+2. Every recurring character must have face_lock.
+3. Every recurring character must have hair_lock.
+4. Every recurring character must have outfit_lock.
+5. Every recurring character must have accessory_lock.
+6. Every recurring character must have forbidden_variations.
+7. No character may have multiple outfit options.
+8. No character may have multiple hairstyles.
+9. All visual descriptions must be deterministic.
+10. Every tied hairstyle must state exact visible count and placement.
+11. Every fixed accessory must state whether it is always present.
+12. Return STRICT VALID JSON ONLY.

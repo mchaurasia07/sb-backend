@@ -1,8 +1,9 @@
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
+from app.core.age_groups import validate_age_group
 from app.entity.generic_story import GenericStoryLanguage
 
 
@@ -26,6 +27,11 @@ class GenericStoryCreateRequest(BaseModel):
     status: Literal["active", "inactive"] = "active"
     story_contents: list[GenericStoryContentRequest] = Field(default_factory=list)
 
+    @field_validator("age_group")
+    @classmethod
+    def validate_age_group_value(cls, value):
+        return validate_age_group(value)
+
 
 class GenericStoryUpdateRequest(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=255)
@@ -41,6 +47,13 @@ class GenericStoryUpdateRequest(BaseModel):
     cover_image: str | None = Field(default=None, max_length=1024)
     status: Literal["active", "inactive"] | None = None
     story_contents: list[GenericStoryContentRequest] | None = None
+
+    @field_validator("age_group")
+    @classmethod
+    def validate_age_group_value(cls, value):
+        if value is None:
+            return value
+        return validate_age_group(value)
 
 
 class AddGenericStoryToChildRequest(BaseModel):

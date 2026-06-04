@@ -279,13 +279,15 @@ Format your response as a clear visual identity list."""
             logger.info("MOCK MODE: Returning mock LLM response instead of calling Google Gemini")
 
             # Extract age_group and page count from prompt for correct mock response
-            age_group = "5-7"  # Default
-            if "2-4" in prompt:
+            age_group = "4-6"  # Default
+            if "0-2" in prompt:
+                age_group = "0-2"
+            elif "2-4" in prompt:
                 age_group = "2-4"
-            elif "5-7" in prompt:
-                age_group = "5-7"
-            elif "8-12" in prompt:
-                age_group = "8-12"
+            elif "4-6" in prompt:
+                age_group = "4-6"
+            elif "6-8" in prompt:
+                age_group = "6-8"
 
             # Determine which mock response to return based on prompt content.
             # Check image planning first because that prompt includes "Story Plan JSON".

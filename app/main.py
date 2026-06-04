@@ -7,6 +7,7 @@ from slowapi.errors import RateLimitExceeded
 
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers, rate_limit_handler
+from app.core.illustration_styles import load_illustration_styles
 from app.core.logger import configure_logging, get_logger
 from app.core.rate_limit import limiter
 from app.middleware.auth import AuthenticationContextMiddleware
@@ -22,6 +23,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Configure application resources on startup and shutdown."""
     configure_logging()
     logger.info("application_starting", app_name=settings.APP_NAME, environment=settings.ENVIRONMENT)
+    illustration_styles = load_illustration_styles()
+    logger.info("illustration_styles_loaded", style_count=len(illustration_styles))
     scheduler = StoryBatchReconcileScheduler()
     scheduler.start()
     try:

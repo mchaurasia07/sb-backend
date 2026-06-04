@@ -1,13 +1,20 @@
+import base64
 from datetime import UTC, datetime
+import logging
+from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.dialects import mysql
 
 from app.core.exceptions import AppException
 from app.entity.generic_story_workflow import GenericStoryWorkflow, GenericStoryWorkflowStep
+from app.entity.story_batch_job import StoryBatchJobStatus, StoryBatchJobType
 from app.model.request.generic_story_workflow import GenericStoryWorkflowCreateRequest
-from app.model.response.generic_story_workflow import GenericStoryWorkflowResponse
+from app.model.response.generic_story_workflow import GenericStoryWorkflowListResponse, GenericStoryWorkflowResponse
+from app.repository.generic_story_workflow_repository import GenericStoryWorkflowRepository
+from app.service.generic_story_batch_service import GenericStoryBatchService
 from app.service.generic_story_workflow_service import (
     STORY_LANGUAGE_VARIANTS_KEY,
     GenericStoryWorkflowService,
@@ -21,6 +28,34 @@ def test_generic_story_workflow_has_user_created_at_index():
     }
 
     assert indexes["ix_generic_story_workflows_user_created_at"] == ("user_id", "created_at")
+    assert indexes["ix_generic_story_workflows_user_story_created_at"] == (
+        "user_id",
+        "generic_story_id",
+        "created_at",
+    )
+
+
+def test_latest_workflow_lookup_uses_mysql_index_hint():
+    statement = GenericStoryWorkflowRepository._latest_for_user_generic_story_id_statement(uuid4(), uuid4())
+    sql = str(statement.compile(dialect=mysql.dialect()))
+
+    assert "FORCE INDEX (ix_generic_story_workflows_user_story_created_at)" in sql
+    assert "ORDER BY generic_story_workflows.created_at DESC" in sql
+    assert "LIMIT" in sql
+
+
+def test_workflow_list_lookup_does_not_select_large_json_columns():
+    statement = GenericStoryWorkflowRepository._list_for_user_statement(uuid4(), page=1, page_size=20)
+    sql = str(statement.compile(dialect=mysql.dialect()))
+
+    assert "character_analysis_json" not in sql
+    assert "scene_plan_json" not in sql
+    assert "visual_bible_json" not in sql
+    assert "story_json" not in sql
+    assert "image_plan_json" not in sql
+    assert "input_request" not in sql
+    assert "generic_story_workflows.title" in sql
+    assert "generic_story_workflows.status" in sql
 
 
 def test_workflow_response_serializes_generic_story_id_like_db_value():
@@ -33,7 +68,7 @@ def test_workflow_response_serializes_generic_story_id_like_db_value():
         error_message=None,
         generic_story_id=generic_story_id,
         actual_story="A story with enough text.",
-        age_group="5-7",
+        age_group="4-6",
         language="en",
         requested_pages=10,
         title="Story",
@@ -45,6 +80,7 @@ def test_workflow_response_serializes_generic_story_id_like_db_value():
         cover_image=None,
         character_analysis_json=None,
         scene_plan_json=None,
+        visual_bible_json=None,
         story_json=None,
         image_plan_json=None,
         input_request=None,
@@ -60,10 +96,89 @@ def test_workflow_response_serializes_generic_story_id_like_db_value():
     assert dumped["generic_story_id"] == generic_story_id.hex
 
 
+def test_workflow_list_response_omits_large_json_payloads():
+    fields = GenericStoryWorkflowListResponse.model_fields
+
+    assert "character_analysis_json" not in fields
+    assert "scene_plan_json" not in fields
+    assert "visual_bible_json" not in fields
+    assert "story_json" not in fields
+    assert "image_plan_json" not in fields
+    assert "input_request" not in fields
+    assert "title" in fields
+    assert "status" in fields
+
+
+def test_workflow_create_request_has_illustration_type_without_requested_pages():
+    fields = GenericStoryWorkflowCreateRequest.model_fields
+
+    assert "illustration_type" in fields
+    assert "requested_pages" not in fields
+
+
+def test_scene_plan_prompt_does_not_accept_requested_pages_override():
+    prompt = Path("prompts/generic_story/scene_plan_prompt.txt").read_text(encoding="utf-8")
+
+    assert "requested_pages" not in prompt
+    assert "0-2 = 6-8 pages" in prompt
+    assert "2-4 = 6-9 pages" in prompt
+    assert "4-6 = 8-10 pages" in prompt
+    assert "6-8 = 10-11 pages" in prompt
+
+
+def test_generic_scene_plan_page_count_ranges_match_prompt():
+    assert GenericStoryWorkflowService._scene_plan_page_count_range("0-2") == (6, 8)
+    assert GenericStoryWorkflowService._scene_plan_page_count_range("2-4") == (6, 9)
+    assert GenericStoryWorkflowService._scene_plan_page_count_range("4-6") == (8, 10)
+    assert GenericStoryWorkflowService._scene_plan_page_count_range("6-8") == (10, 11)
+
+
+def test_story_generation_prompt_requires_natural_hindi_marathi_localization():
+    prompt = Path("prompts/generic_story/story_generation_prompt.txt").read_text(encoding="utf-8")
+
+    assert "Do not write Hindi or Marathi as word-for-word translations of English." in prompt
+    assert "semantic" in prompt.lower()
+    assert "natural Devanagari Hindi" in prompt
+    assert "natural Devanagari Marathi" in prompt
+    assert "अपनी तत्काल दुनिया की पड़ताल करता है" in prompt
+    assert "आपल्या जवळच्या जगाचा शोध घेते" in prompt
+
+
+def test_workflow_log_event_uses_consistent_ids_and_fields(caplog):
+    service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
+    workflow_id = uuid4()
+    generic_story_id = uuid4()
+    workflow = SimpleNamespace(
+        id=workflow_id,
+        generic_story_id=generic_story_id,
+        current_step="STORY_GENERATION",
+        status="IN_PROGRESS",
+    )
+
+    with caplog.at_level(logging.INFO, logger="app.service.generic_story_workflow_service"):
+        service._log_workflow_event(
+            "step_started",
+            workflow,
+            step=GenericStoryWorkflowStep.STORY_GENERATION,
+            reason="manual run",
+            page_number=2,
+        )
+
+    assert len(caplog.records) == 1
+    message = caplog.records[0].message
+    assert message.startswith("generic_story_workflow event=step_started")
+    assert f"workflow_id={workflow_id}" in message
+    assert f"generic_story_id={generic_story_id}" in message
+    assert "step=STORY_GENERATION" in message
+    assert "status=IN_PROGRESS" in message
+    assert 'reason="manual run"' in message
+    assert "page_number=2" in message
+
+
 def test_normalize_story_json_matches_existing_story_contract():
     service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
     workflow = SimpleNamespace(
-        age_group="5-7",
+        age_group="4-6",
         scene_plan_json={
             "title": "The Moon Bell",
             "summary": "A child helps restore the moon bell.",
@@ -97,7 +212,7 @@ def test_normalize_story_json_matches_existing_story_contract():
 def test_normalize_story_json_keeps_multilingual_page_text_variants():
     service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
     workflow = SimpleNamespace(
-        age_group="5-7",
+        age_group="4-6",
         language="hi",
         scene_plan_json={
             "title": "The Moon Bell",
@@ -143,7 +258,7 @@ def test_normalize_story_json_keeps_multilingual_page_text_variants():
 
 def test_normalize_story_json_rejects_scene_page_count_mismatch():
     service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
-    workflow = SimpleNamespace(age_group="5-7", scene_plan_json={"pages": [{"page_number": 1}, {"page_number": 2}]})
+    workflow = SimpleNamespace(age_group="4-6", scene_plan_json={"pages": [{"page_number": 1}, {"page_number": 2}]})
 
     with pytest.raises(AppException, match="expected 2"):
         service._normalize_story_json(
@@ -189,15 +304,406 @@ def test_generate_dummy_images_saves_prompts_and_data_urls():
 
     assert workflow.cover_image.startswith("data:image/png;base64,")
     assert workflow.story_json["cover_image_url"] == workflow.cover_image
-    assert "VISUAL BIBLE" in workflow.story_json["cover_image_prompt"]
+    assert "CHARACTER AND CONTINUITY MODEL SHEET" in workflow.story_json["cover_image_prompt"]
     assert "Round face, short black hair, yellow dress." in workflow.story_json["cover_image_prompt"]
     assert workflow.story_json["cover_planned_image_prompt"] == "Cover prompt with Mars and title."
     assert workflow.story_json["cover_image_dummy"] is True
     assert workflow.story_json["pages"][0]["image_url"].startswith("data:image/png;base64,")
-    assert "VISUAL BIBLE" in workflow.story_json["pages"][0]["image_prompt"]
+    assert "CHARACTER AND CONTINUITY MODEL SHEET" in workflow.story_json["pages"][0]["image_prompt"]
     assert "Page 1 Mars prompt." in workflow.story_json["pages"][0]["image_prompt"]
     assert workflow.story_json["pages"][0]["planned_image_prompt"] == "Page 1 Mars prompt."
     assert workflow.story_json["pages"][0]["image_dummy"] is True
+
+
+def test_render_image_prompt_uses_page_scoped_visual_context():
+    service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
+    prompt = service._render_image_prompt(
+        page_type="story_page",
+        story_title="The Moon Bell",
+        visual_bible={
+            "style": "Premium storybook style.",
+            "age_group": "4-6",
+            "characters": [
+                {
+                    "name": "Mira",
+                    "role": "hero",
+                    "anchor": "Mira anchor.",
+                    "appearance": {
+                        "face_shape": "round face",
+                        "hair": {"color": "black", "length": "short", "style": "bob"},
+                        "outfit": {"type": "dress", "primary_color": "yellow", "pattern": "plain"},
+                        "accessories": ["red bracelet always present"],
+                    },
+                    "locks": {
+                        "face_lock": "round face",
+                        "hair_lock": "short black bob",
+                        "outfit_lock": "plain yellow dress",
+                        "accessory_lock": "red bracelet always present",
+                    },
+                    "forbidden_variations": ["blue dress", "long hair"],
+                },
+                {
+                    "name": "Rohan",
+                    "anchor": "Rohan anchor.",
+                    "appearance": "green kurta",
+                },
+            ],
+            "locations": [{"name": "garden", "visual_identity": "moonlit garden"}],
+            "important_objects": [
+                {"name": "moon bell", "description": "silver bell", "continuity_requirements": ["always silver"]},
+                {"name": "red kite", "description": "small kite"},
+            ],
+        },
+        page_image_plan={
+            "page": 1,
+            "visual_focus": "Mira rings the moon bell in the garden.",
+            "composition": "Mira centered.",
+            "environment": "moonlit garden",
+            "emotion": "quiet wonder",
+            "camera_shot": "medium",
+            "characters": ["Mira"],
+            "important_objects": ["moon bell"],
+        },
+    )
+
+    assert "plain yellow dress" in prompt
+    assert "moon bell" in prompt
+    assert "SCENE TO DRAW:\nVisual focus: Mira rings the moon bell in the garden." in prompt
+    assert "Action and composition: Mira centered." in prompt
+    assert "Environment: moonlit garden" in prompt
+    assert "Allowed characters only: Mira" in prompt
+    assert "Required objects only: moon bell" in prompt
+    assert prompt.index("SCENE TO DRAW:") < prompt.index("CHARACTER AND CONTINUITY MODEL SHEET:")
+    assert "ILLUSTRATION STYLE:\nPremium storybook style." in prompt
+    assert "AGE GROUP:\n4-6" in prompt
+    assert "ASPECT RATIO:\n1:1" in prompt
+    assert "Rohan anchor" not in prompt
+    assert "red kite" not in prompt
+
+
+def test_render_image_prompt_does_not_fallback_to_all_characters_when_page_lists_characters():
+    service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
+    prompt = service._render_image_prompt(
+        page_type="story_page",
+        story_title="Baby's Little World",
+        visual_bible={
+            "characters": [
+                {"name": "Mama", "appearance": "soft teal kurta"},
+                {"name": "Papa", "appearance": "light blue shirt"},
+            ],
+            "locations": [],
+            "important_objects": [],
+        },
+        page_image_plan={
+            "page": 3,
+            "visual_focus": "Dadi holds Baby near flowers.",
+            "characters": ["Dadi", "Baby"],
+        },
+    )
+
+    assert "Allowed characters only: Dadi, Baby" in prompt
+    assert "soft teal kurta" not in prompt
+    assert "light blue shirt" not in prompt
+
+
+def test_render_cover_prompt_prioritizes_exact_title_text():
+    service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
+    prompt = service._render_image_prompt(
+        page_type="cover",
+        story_title="Grandma's Rakhi Story",
+        visual_bible={"characters": [], "locations": [], "important_objects": []},
+        page_image_plan={
+            "book_cover_prompt": "A finished front cover showing the whole Rakhi story promise.",
+            "visual_focus": "Rohan and Meera smiling together.",
+            "genre_signal": "warm family festival story",
+            "composition": "Characters below a clear title area.",
+            "title_layout": "Large title centered in the top third with clean space.",
+        },
+    )
+
+    assert "This is a finished front book cover based on the whole story" in prompt
+    assert "Overall cover direction: A finished front cover showing the whole Rakhi story promise." in prompt
+    assert "Story promise and genre signal: warm family festival story" in prompt
+    assert "Required title layout: Large title centered in the top third with clean space." in prompt
+    assert "Do not copy page 1 or any interior page composition" in prompt
+    assert 'Render this exact visible title text: "Grandma\'s Rakhi Story"' in prompt
+    assert '"title_text":"Grandma\'s Rakhi Story"' in prompt
+    assert "ASPECT RATIO:\n3:4" in prompt
+    assert "fully readable, correctly spelled, and unobstructed" in prompt
+    assert "Do not use a banner, label, card, sticker, plaque, black rectangle" in prompt
+
+
+def test_render_page_prompt_forbids_written_text():
+    service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
+    prompt = service._render_image_prompt(
+        page_type="story_page",
+        story_title="Grandma's Rakhi Story",
+        visual_bible={"characters": [], "locations": [], "important_objects": []},
+        page_image_plan={"page": 1, "visual_focus": "Grandma smiles."},
+    )
+
+    assert "This is an interior story page" in prompt
+    assert "Do not render any written text" in prompt
+    assert '"title_text"' not in prompt
+
+
+def test_generic_batch_cover_prompt_uses_current_image_prompt_contract():
+    prompt = GenericStoryBatchService._render_image_prompt(
+        page_type="cover",
+        story_title="Grandma's Rakhi Story",
+        visual_bible={
+            "characters": [{"name": "Rohan", "appearance": "small boy in blue kurta"}],
+            "locations": [],
+            "important_objects": [],
+        },
+        page_image_plan={
+            "characters": ["Rohan"],
+            "visual_focus": "Rohan smiles with his family.",
+            "composition": "Rohan below a clean title area.",
+        },
+    )
+
+    assert "{title_instruction}" not in prompt
+    assert "{visual_context}" not in prompt
+    assert "Bright cartoon children's illustration" in prompt
+    assert 'Render this exact visible title text: "Grandma\'s Rakhi Story"' in prompt
+    assert '"title_text":"Grandma\'s Rakhi Story"' in prompt
+    assert "small boy in blue kurta" in prompt
+
+
+def test_generic_batch_builds_openai_image_batch_request():
+    service = GenericStoryBatchService.__new__(GenericStoryBatchService)
+    item = SimpleNamespace(
+        key="cover",
+        page_type="cover",
+        rendered_prompt="Create a readable book cover.",
+    )
+
+    request = service._build_openai_image_batch_request(item, model="gpt-image-1-mini")
+
+    assert request["custom_id"] == "cover"
+    assert request["method"] == "POST"
+    assert request["url"] == "/v1/responses"
+    assert request["body"]["model"] != "gpt-image-1-mini"
+    assert request["body"]["input"] == "Create a readable book cover."
+    image_tool = request["body"]["tools"][0]
+    assert image_tool["type"] == "image_generation"
+    assert image_tool["model"] == "gpt-image-1-mini"
+    assert image_tool["size"]
+    assert image_tool["quality"] in {"low", "medium", "high", "auto"}
+
+
+def test_generic_batch_extracts_openai_image_response_bytes():
+    png_bytes = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00"
+        b"\x00\x01\x01\x00\x05\x18\r*\xfe\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    body = {
+        "output": [
+            {"type": "message", "content": []},
+            {
+                "type": "image_generation_call",
+                "result": base64.b64encode(png_bytes).decode("ascii"),
+                "revised_prompt": "revised",
+            },
+        ]
+    }
+
+    image_bytes, revised_prompt = GenericStoryBatchService._extract_openai_image_bytes(body)
+
+    assert image_bytes == png_bytes
+    assert revised_prompt == "revised"
+
+
+def test_generic_batch_summarizes_openai_response_error_body():
+    body = {
+        "error": {
+            "message": "Your organization must be verified to use the model.",
+            "type": "invalid_request_error",
+            "param": None,
+            "code": None,
+            "extra": "not exposed",
+        }
+    }
+
+    assert GenericStoryBatchService._openai_response_error_summary(body) == {
+        "message": "Your organization must be verified to use the model.",
+        "type": "invalid_request_error",
+        "param": None,
+        "code": None,
+    }
+
+
+def test_generic_batch_extracts_legacy_openai_image_response_bytes():
+    png_bytes = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00"
+        b"\x00\x01\x01\x00\x05\x18\r*\xfe\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    body = {"data": [{"b64_json": base64.b64encode(png_bytes).decode("ascii"), "revised_prompt": "revised"}]}
+
+    image_bytes, revised_prompt = GenericStoryBatchService._extract_openai_image_bytes(body)
+
+    assert image_bytes == png_bytes
+    assert revised_prompt == "revised"
+
+
+@pytest.mark.asyncio
+async def test_generic_image_batch_duplicate_check_is_provider_scoped():
+    generic_story_id = uuid4()
+    workflow_id = uuid4()
+    batch_job_id = uuid4()
+    service = GenericStoryBatchService.__new__(GenericStoryBatchService)
+    service.generic_stories = SimpleNamespace()
+    service.workflows = SimpleNamespace()
+    service.batch_jobs = SimpleNamespace()
+    service.session = SimpleNamespace()
+    workflow = SimpleNamespace(
+        id=workflow_id,
+        image_plan_json={"cover": {"image_prompt": "Cover"}},
+        status="COMPLETED",
+        current_step=None,
+        error_message=None,
+    )
+    submitted_provider = None
+
+    async def _get_story(story_id):
+        assert story_id == generic_story_id
+        return SimpleNamespace(id=generic_story_id)
+
+    async def _latest_for_story_type(story_id, job_type, provider=None):
+        assert story_id == generic_story_id
+        assert job_type == StoryBatchJobType.IMAGE
+        assert provider == "openai"
+        return None
+
+    async def _latest_workflow(user_id, story_id):
+        assert story_id == generic_story_id
+        return workflow
+
+    async def _update_workflow(updated_workflow):
+        return updated_workflow
+
+    async def _commit():
+        return None
+
+    async def _missing_image_items(story_json, items):
+        return items
+
+    async def _submit_image_batch_job_only(workflow_arg, story_id, items, *, attempt, force=False, provider="google"):
+        nonlocal submitted_provider
+        submitted_provider = provider
+        return SimpleNamespace(
+            id=batch_job_id,
+            generic_story_id=story_id,
+            workflow_id=workflow_arg.id,
+            job_type=StoryBatchJobType.IMAGE,
+            status=StoryBatchJobStatus.SUBMITTED,
+            provider_job_name="batch_openai",
+            provider_state="validating",
+            expected_item_count=len(items),
+        )
+
+    service.generic_stories.get_by_id = _get_story
+    service.workflows.latest_for_user_generic_story = _latest_workflow
+    service.workflows.update = _update_workflow
+    service.batch_jobs.latest_for_story_type = _latest_for_story_type
+    service.session.commit = _commit
+    service._story_json_for_image_plan = lambda workflow_arg, story_arg: {"title": "Story", "pages": []}
+    service._build_image_items = lambda workflow_arg, story_json: [
+        SimpleNamespace(key="cover", page_type="cover", page_number=0)
+    ]
+    service._missing_image_items = _missing_image_items
+    service._submit_image_batch_job_only = _submit_image_batch_job_only
+
+    response = await service.submit_image_batch(
+        user_id=uuid4(),
+        generic_story_id=generic_story_id,
+        force=True,
+        provider="openai",
+    )
+
+    assert submitted_provider == "openai"
+    assert response.batch_job_id == batch_job_id
+    assert response.provider_job_name == "batch_openai"
+
+
+def test_validate_image_cover_plan_normalizes_exact_story_title():
+    service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
+    workflow = SimpleNamespace(story_json={"title": "Grandma's Rakhi Story"}, title="Wrong Title", scene_plan_json={})
+    image_plan = {
+        "cover": {
+            "title_text": "Wrong Title",
+            "visual_focus": "Rohan and Meera carry a mango together.",
+            "camera_shot": "medium",
+            "composition": "Characters below a clean top title area that presents the family festival story.",
+        },
+        "pages": [],
+    }
+
+    service._validate_and_normalize_image_cover_plan(image_plan, workflow)
+
+    assert image_plan["cover"]["title_text"] == "Grandma's Rakhi Story"
+
+
+def test_validate_image_cover_plan_requires_title_layout_context():
+    service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
+    workflow = SimpleNamespace(story_json={"title": "Grandma's Rakhi Story"}, title=None, scene_plan_json={})
+    image_plan = {
+        "cover": {
+            "title_text": "Grandma's Rakhi Story",
+            "visual_focus": "Rohan and Meera carry a mango together.",
+            "camera_shot": "medium",
+            "composition": "Rohan and Meera stand near Grandma in the courtyard.",
+        },
+        "pages": [],
+    }
+
+    with pytest.raises(AppException, match="title placement"):
+        service._validate_and_normalize_image_cover_plan(image_plan, workflow)
+
+
+def test_story_json_for_image_plan_prompt_removes_generated_artifacts():
+    service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
+
+    compact_story = service._story_json_for_image_plan_prompt(
+        {
+            "title": "The Moon Bell",
+            "summary": "A child listens carefully.",
+            "cover_image_prompt": "large rendered cover prompt",
+            STORY_LANGUAGE_VARIANTS_KEY: {"hi": {"title": "Hindi title"}},
+            "pages": [
+                {
+                    "page_number": 1,
+                    "emotion": "wonder",
+                    "text": "Mira listened.",
+                    "narration": {"tone": "warm", "pace": "slow", "voice_style": "gentle", "extra": "drop"},
+                    "image_prompt": "large rendered page prompt",
+                    "planned_image_prompt": "short plan",
+                    "image_url": "https://cdn.example.test/page.png",
+                    "audio_url": "https://cdn.example.test/page.wav",
+                    "word_timestamps": [{"word": "Mira"}],
+                    "tts_prompt": "large tts prompt",
+                }
+            ],
+            "moral": "Listening helps.",
+        }
+    )
+
+    assert compact_story == {
+        "title": "The Moon Bell",
+        "summary": "A child listens carefully.",
+        "moral": "Listening helps.",
+        "pages": [
+            {
+                "page_number": 1,
+                "emotion": "wonder",
+                "text": "Mira listened.",
+                "narration": {"tone": "warm", "pace": "slow", "voice_style": "gentle"},
+            }
+        ],
+    }
 
 
 def test_generate_dummy_narration_saves_wav_data_urls_and_rendered_tts_prompt(monkeypatch):
@@ -216,7 +722,7 @@ def test_generate_dummy_narration_saves_wav_data_urls_and_rendered_tts_prompt(mo
     monkeypatch.setattr("app.service.generic_story_workflow_service.GoogleTTSProvider", _FakeTTSProvider)
     service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
     workflow = SimpleNamespace(
-        age_group="5-7",
+        age_group="4-6",
         language="en",
         story_json={
             "pages": [
@@ -250,7 +756,7 @@ def test_generate_dummy_narration_saves_audio_for_each_language_variant(monkeypa
     monkeypatch.setattr("app.service.generic_story_workflow_service.GoogleTTSProvider", _FakeTTSProvider)
     service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
     workflow = SimpleNamespace(
-        age_group="5-7",
+        age_group="4-6",
         language="en",
         story_json={
             "title": "The Moon Bell",
@@ -391,7 +897,7 @@ async def test_generate_google_narration_calls_narration_service_once_per_langua
     workflow_id = uuid4()
     workflow = SimpleNamespace(
         id=workflow_id,
-        age_group="5-7",
+        age_group="4-6",
         language="en",
         story_json={
             "title": "The Moon Bell",
@@ -459,6 +965,11 @@ async def test_get_steps_returns_details_for_all_workflow_steps():
             "title": "Journey to Mars",
             "pages": [{"page_number": 1}, {"page_number": 2}],
         },
+        visual_bible_json={
+            "characters": [{"name": "Mira", "appearance": "Yellow dress and short black hair."}],
+            "locations": [{"name": "Mars garden"}],
+            "important_objects": [{"name": "red rocket"}],
+        },
         story_json={
             "title": "Journey to Mars",
             "moral": "Curiosity grows with careful questions.",
@@ -481,9 +992,6 @@ async def test_get_steps_returns_details_for_all_workflow_steps():
             ],
         },
         image_plan_json={
-            "visual_bible": {
-                "characters": [{"name": "Mira", "appearance": "Yellow dress and short black hair."}]
-            },
             "cover": {"image_prompt": "Cover prompt."},
             "pages": [{"page_number": 1, "image_prompt": "Page image prompt."}],
         },
@@ -499,10 +1007,20 @@ async def test_get_steps_returns_details_for_all_workflow_steps():
     steps = await service.get_steps(uuid4(), workflow_id)
     by_name = {step.step_name: step for step in steps}
 
-    assert len(steps) == 7
+    assert [step.step_name for step in steps] == [
+        "VISUAL_BIBLE_GENERATION",
+        "STORY_GENERATION",
+        "IMAGE_GENERATION",
+        "NARRATION_GENERATION",
+    ]
     assert steps[0].genric_story_id == generic_story_id.hex
-    assert by_name["CHARACTER_EXTRACTION"].status == "COMPLETED"
-    assert by_name["CHARACTER_EXTRACTION"].summary["character_count"] == 2
+    assert "CHARACTER_EXTRACTION" not in by_name
+    assert "SCENE_PLAN_GENERATION" not in by_name
+    assert "IMAGE_PLAN_GENERATION" not in by_name
+    assert "PUBLISH_GENERIC_STORY" not in by_name
+    assert by_name["VISUAL_BIBLE_GENERATION"].summary["character_count"] == 1
+    assert by_name["VISUAL_BIBLE_GENERATION"].output["characters"][0]["name"] == "Mira"
+    assert by_name["STORY_GENERATION"].output["title"] == "Journey to Mars"
     assert by_name["IMAGE_GENERATION"].summary["uses_dummy_images"] is True
     assert by_name["IMAGE_GENERATION"].output["visual_bible"]["characters"][0]["name"] == "Mira"
     assert by_name["IMAGE_GENERATION"].output["final_prompts"] == [
@@ -512,13 +1030,61 @@ async def test_get_steps_returns_details_for_all_workflow_steps():
     assert by_name["IMAGE_GENERATION"].output["pages"][0]["planned_image_prompt"] == "Page image prompt."
     assert by_name["NARRATION_GENERATION"].summary["uses_dummy_audio"] is True
     assert "professional children's audiobook narrator" in by_name["NARRATION_GENERATION"].output["pages"][0]["tts_prompt"]
-    assert by_name["PUBLISH_GENERIC_STORY"].summary["generic_story_id"] == str(generic_story_id)
 
     image_steps = await service.get_steps(uuid4(), workflow_id, step_name="IMAGE_GENERATION")
 
     assert len(image_steps) == 1
     assert image_steps[0].step_name == "IMAGE_GENERATION"
     assert image_steps[0].output["final_prompts"][0]["page"] == "cover"
+
+    with pytest.raises(AppException) as exc_info:
+        await service.get_steps(uuid4(), workflow_id, step_name="CHARACTER_EXTRACTION")
+
+    assert exc_info.value.code == "GENERIC_STORY_STEP_NOT_EXPOSED"
+
+
+@pytest.mark.asyncio
+async def test_get_steps_uses_visual_bible_fallback_for_legacy_workflows():
+    workflow_id = uuid4()
+    workflow = SimpleNamespace(
+        id=workflow_id,
+        status="COMPLETED",
+        current_step=None,
+        error_message=None,
+        generic_story_id=uuid4(),
+        requested_pages=None,
+        title="Journey to Mars",
+        cover_image=None,
+        visual_bible_json=None,
+        story_json={"title": "Journey to Mars", "pages": []},
+        image_plan_json={
+            "visual_bible": {
+                "style": "Watercolor storybook.",
+                "characters": [{"name": "Mira"}],
+                "locations": [{"name": "Mars garden"}],
+                "important_objects": [{"name": "red rocket"}],
+            },
+            "pages": [],
+        },
+    )
+    service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
+
+    async def _get_owned(user_id, requested_workflow_id):
+        assert requested_workflow_id == workflow_id
+        return workflow
+
+    service._get_owned = _get_owned
+
+    steps = await service.get_steps(uuid4(), workflow_id, step_name="VISUAL_BIBLE_GENERATION")
+
+    assert len(steps) == 1
+    assert steps[0].status == "COMPLETED"
+    assert steps[0].summary == {
+        "character_count": 1,
+        "location_count": 1,
+        "object_count": 1,
+    }
+    assert steps[0].output["characters"][0]["name"] == "Mira"
 
 
 @pytest.mark.asyncio
@@ -536,11 +1102,18 @@ async def test_execute_scene_plan_step_requires_character_extraction():
 
 
 class _FakeGenericStories:
-    def __init__(self):
+    def __init__(self, *, existing_by_title=None):
         self.created = None
         self.contents = None
+        self.existing_by_title = existing_by_title or {}
 
     async def get_by_title(self, title):
+        return self.existing_by_title.get(title)
+
+    async def get_by_id(self, generic_story_id):
+        for story in self.existing_by_title.values():
+            if story.id == generic_story_id:
+                return story
         return None
 
     async def create(self, **data):
@@ -564,6 +1137,7 @@ class _FakeWorkflows:
             "error_message": None,
             "character_analysis_json": None,
             "scene_plan_json": None,
+            "visual_bible_json": None,
             "story_json": None,
             "image_plan_json": None,
             "summary": None,
@@ -630,11 +1204,197 @@ class _FakeGenericStoryContentRepository:
         return content
 
 
+class _FakeBatchesClient:
+    def __init__(self, provider_state="JOB_STATE_CANCELLED"):
+        self.cancelled_names = []
+        self.provider_state = provider_state
+
+    async def cancel(self, *, name):
+        self.cancelled_names.append(name)
+
+    async def get(self, *, name):
+        return SimpleNamespace(state=SimpleNamespace(name=self.provider_state))
+
+
+class _FakeGoogleClient:
+    def __init__(self, batches):
+        self.aio = SimpleNamespace(batches=batches)
+
+
+@pytest.mark.asyncio
+async def test_cancel_generic_story_batch_job_marks_job_and_workflow_cancelled():
+    user_id = uuid4()
+    generic_story_id = uuid4()
+    workflow_id = uuid4()
+    batch_job_id = uuid4()
+    workflow = SimpleNamespace(
+        id=workflow_id,
+        status="IN_PROGRESS",
+        current_step="IMAGE_GENERATION",
+        error_message=None,
+    )
+    job = SimpleNamespace(
+        id=batch_job_id,
+        generic_story_id=generic_story_id,
+        workflow_id=workflow_id,
+        job_type=StoryBatchJobType.IMAGE,
+        status=StoryBatchJobStatus.RUNNING,
+        provider_job_name="batches/test-generic-job",
+        provider_state="JOB_STATE_PENDING",
+        request_keys=["cover", "page_1"],
+        missing_keys=[],
+        error_message=None,
+    )
+    batches = _FakeBatchesClient()
+    service = GenericStoryBatchService.__new__(GenericStoryBatchService)
+    service.generic_stories = SimpleNamespace(get_by_id=lambda story_id: None)
+    service.batch_jobs = SimpleNamespace()
+    service.workflows = SimpleNamespace()
+    service.google_client = _FakeGoogleClient(batches)
+    service.session = SimpleNamespace()
+
+    async def _get_story(story_id):
+        assert story_id == generic_story_id
+        return SimpleNamespace(id=generic_story_id)
+
+    async def _get_job(story_id, requested_batch_job_id):
+        assert story_id == generic_story_id
+        assert requested_batch_job_id == batch_job_id
+        return job
+
+    async def _get_workflow(requested_user_id, requested_workflow_id):
+        assert requested_user_id == user_id
+        assert requested_workflow_id == workflow_id
+        return workflow
+
+    async def _update_job(updated_job):
+        return updated_job
+
+    async def _update_workflow(updated_workflow):
+        return updated_workflow
+
+    async def _commit():
+        return None
+
+    service.generic_stories.get_by_id = _get_story
+    service.batch_jobs.get_for_story = _get_job
+    service.batch_jobs.update = _update_job
+    service.workflows.get_for_user = _get_workflow
+    service.workflows.update = _update_workflow
+    service.session.commit = _commit
+
+    response = await service.cancel_batch_job(
+        user_id=user_id,
+        generic_story_id=generic_story_id,
+        batch_job_id=batch_job_id,
+    )
+
+    assert batches.cancelled_names == ["batches/test-generic-job"]
+    assert job.status == StoryBatchJobStatus.CANCELLED
+    assert job.provider_state == "JOB_STATE_CANCELLED"
+    assert job.missing_keys == ["cover", "page_1"]
+    assert workflow.status == "FAILED"
+    assert workflow.current_step is None
+    assert response["generic_story_id"] == generic_story_id
+    assert response["workflow_id"] == workflow_id
+    assert response["batch_job_id"] == batch_job_id
+    assert response["status"] == "CANCELLED"
+    assert response["workflow_status"] == "FAILED"
+
+
+@pytest.mark.asyncio
+async def test_cancel_generic_story_batch_job_rejects_completed_job():
+    user_id = uuid4()
+    generic_story_id = uuid4()
+    workflow_id = uuid4()
+    job = SimpleNamespace(
+        id=uuid4(),
+        generic_story_id=generic_story_id,
+        workflow_id=workflow_id,
+        job_type=StoryBatchJobType.IMAGE,
+        status=StoryBatchJobStatus.SUCCEEDED,
+        provider_job_name="batches/completed",
+        provider_state="JOB_STATE_SUCCEEDED",
+    )
+    service = GenericStoryBatchService.__new__(GenericStoryBatchService)
+    service.generic_stories = SimpleNamespace()
+    service.batch_jobs = SimpleNamespace()
+    service.workflows = SimpleNamespace()
+
+    async def _get_story(story_id):
+        return SimpleNamespace(id=story_id)
+
+    async def _get_job(story_id, batch_job_id):
+        return job
+
+    async def _get_workflow(requested_user_id, requested_workflow_id):
+        return SimpleNamespace(id=requested_workflow_id, status="COMPLETED")
+
+    service.generic_stories.get_by_id = _get_story
+    service.batch_jobs.get_for_story = _get_job
+    service.workflows.get_for_user = _get_workflow
+
+    with pytest.raises(AppException) as exc_info:
+        await service.cancel_batch_job(
+            user_id=user_id,
+            generic_story_id=generic_story_id,
+            batch_job_id=job.id,
+        )
+
+    assert exc_info.value.code == "BATCH_JOB_ALREADY_COMPLETED"
+
+
+@pytest.mark.asyncio
+async def test_generic_story_batch_reconcile_logs_counts_and_job_details(caplog):
+    service = GenericStoryBatchService.__new__(GenericStoryBatchService)
+    job = SimpleNamespace(
+        id=uuid4(),
+        generic_story_id=uuid4(),
+        workflow_id=uuid4(),
+        job_type=StoryBatchJobType.IMAGE,
+        status=StoryBatchJobStatus.RUNNING,
+        provider_state="JOB_STATE_PENDING",
+    )
+    service.batch_jobs = SimpleNamespace()
+
+    async def _list_reconcilable(limit):
+        assert limit == 50
+        return [job]
+
+    async def _reconcile_batch_job(reconcile_job):
+        assert reconcile_job == job
+        return {
+            "generic_story_id": job.generic_story_id,
+            "workflow_id": job.workflow_id,
+            "batch_job_id": job.id,
+            "job_type": job.job_type.value,
+            "status": "RUNNING",
+            "provider_state": "JOB_STATE_PENDING",
+            "action": "still_running",
+            "message": "Provider state is JOB_STATE_PENDING",
+        }
+
+    service.batch_jobs.list_reconcilable = _list_reconcilable
+    service._reconcile_batch_job = _reconcile_batch_job
+
+    with caplog.at_level(logging.INFO, logger="app.service.generic_story_batch_service"):
+        result = await service.reconcile_batch_jobs(limit=50)
+
+    assert result["checked_count"] == 1
+    assert result["processed_count"] == 0
+    messages = [record.message for record in caplog.records]
+    assert any("[generic_story_batch] event=reconcile_started job_count=1 limit=50" in message for message in messages)
+    assert any("event=reconcile_job_started" in message and f"batch_job_id={job.id}" in message for message in messages)
+    assert any("event=reconcile_job_completed" in message and "action=still_running" in message for message in messages)
+    assert any("[generic_story_batch] event=reconcile_completed checked_count=1 processed_count=0" in message for message in messages)
+
+
 @pytest.mark.asyncio
 async def test_create_workflow_persists_requested_title(monkeypatch):
     service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
     fake_workflows = _FakeWorkflows()
     service.workflows = fake_workflows
+    service.generic_stories = _FakeGenericStories()
     service.session = SimpleNamespace(commit=lambda: None)
 
     async def _commit():
@@ -647,18 +1407,89 @@ async def test_create_workflow_persists_requested_title(monkeypatch):
         GenericStoryWorkflowCreateRequest(
             title="Journey to Mars",
             actual_story="Mira built a small rocket, visited Mars, and learned that curiosity grows when we ask careful questions.",
-            age_group="5-7",
-            requested_pages=6,
+            age_group="4-6",
             theme="space adventure",
             genre="adventure",
             learning_goal="curiosity",
+            illustration_type="Watercolor",
         ),
     )
 
     assert fake_workflows.created["title"] == "Journey to Mars"
+    assert fake_workflows.created["requested_pages"] is None
     assert fake_workflows.created["input_request"]["title"] == "Journey to Mars"
+    assert fake_workflows.created["input_request"]["illustration_type"] == "watercolor"
+    assert "requested_pages" not in fake_workflows.created["input_request"]
     assert fake_workflows.created["ai_provider"] == "google"
     assert response.title == "Journey to Mars"
+
+
+@pytest.mark.asyncio
+async def test_create_workflow_rejects_duplicate_generic_story_title():
+    service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
+    service.workflows = _FakeWorkflows()
+    service.generic_stories = _FakeGenericStories(
+        existing_by_title={"Journey to Mars": SimpleNamespace(id=uuid4(), title="Journey to Mars")}
+    )
+
+    with pytest.raises(AppException) as exc_info:
+        await service.create(
+            uuid4(),
+            GenericStoryWorkflowCreateRequest(
+                title="Journey to Mars",
+                actual_story=(
+                    "Mira built a small rocket, visited Mars, and learned that curiosity grows "
+                    "when we ask careful questions."
+                ),
+                age_group="4-6",
+            ),
+        )
+
+    assert exc_info.value.code == "GENERIC_STORY_TITLE_EXISTS"
+
+
+@pytest.mark.asyncio
+async def test_create_workflow_rejects_unsupported_illustration_type():
+    service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
+    service.workflows = _FakeWorkflows()
+    service.generic_stories = _FakeGenericStories()
+
+    with pytest.raises(AppException) as exc_info:
+        await service.create(
+            uuid4(),
+            GenericStoryWorkflowCreateRequest(
+                title="Journey to Mars",
+                actual_story=(
+                    "Mira built a small rocket, visited Mars, and learned that curiosity grows "
+                    "when we ask careful questions."
+                ),
+                age_group="4-6",
+                illustration_type="claymation",
+            ),
+        )
+
+    assert exc_info.value.code == "ILLUSTRATION_TYPE_UNSUPPORTED"
+
+
+@pytest.mark.asyncio
+async def test_create_workflow_requires_title_for_unique_generic_story_validation():
+    service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
+    service.workflows = _FakeWorkflows()
+    service.generic_stories = _FakeGenericStories()
+
+    with pytest.raises(AppException) as exc_info:
+        await service.create(
+            uuid4(),
+            GenericStoryWorkflowCreateRequest(
+                actual_story=(
+                    "Mira built a small rocket, visited Mars, and learned that curiosity grows "
+                    "when we ask careful questions."
+                ),
+                age_group="4-6",
+            ),
+        )
+
+    assert exc_info.value.code == "GENERIC_STORY_TITLE_REQUIRED"
 
 
 @pytest.mark.asyncio
@@ -806,10 +1637,16 @@ async def test_upload_published_story_audio_updates_requested_language(monkeypat
     )
     generic_story = SimpleNamespace(id=generic_story_id, cover_image=None, contents=[hi_content, en_content])
     audio_storage = _FakeAudioStorage()
+    audio_durations = {b"hi-1": 2.0, b"hi-2": 4.0}
 
     monkeypatch.setattr(
         "app.service.generic_story_workflow_service.get_story_audio_storage_service",
         lambda: audio_storage,
+    )
+    monkeypatch.setattr(
+        GenericStoryWorkflowService,
+        "_uploaded_wav_duration_seconds",
+        staticmethod(lambda audio_bytes: audio_durations[audio_bytes]),
     )
     service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
     service.session = SimpleNamespace()
@@ -850,8 +1687,20 @@ async def test_upload_published_story_audio_updates_requested_language(monkeypat
     assert en_content.story_json["pages"][1]["audio_url"] == "old-en-2"
     assert hi_content.story_json["pages"][0]["audio_url"] == response.page_audio_urls[1]
     assert hi_content.story_json["pages"][1]["audio_url"] == response.page_audio_urls[2]
+    assert hi_content.story_json["pages"][0]["duration"] == 2.0
+    assert hi_content.story_json["pages"][0]["word_timestamps"] == [
+        {"word": "Hindi page 1.", "start": 0.0, "end": 2.0}
+    ]
+    assert hi_content.story_json["pages"][1]["duration"] == 4.0
+    assert hi_content.story_json["pages"][1]["word_timestamps"] == [
+        {"word": "Hindi page 2.", "start": 0.0, "end": 4.0}
+    ]
     assert workflow.story_json["pages"][0]["audio_url"] == "old-en-1"
     assert workflow.story_json[STORY_LANGUAGE_VARIANTS_KEY]["hi"]["pages"][1]["audio_url"] == response.page_audio_urls[2]
+    assert workflow.story_json[STORY_LANGUAGE_VARIANTS_KEY]["hi"]["pages"][1]["duration"] == 4.0
+    assert workflow.story_json[STORY_LANGUAGE_VARIANTS_KEY]["hi"]["pages"][1]["word_timestamps"] == [
+        {"word": "Hindi page 2.", "start": 0.0, "end": 4.0}
+    ]
 
 
 @pytest.mark.asyncio
@@ -865,7 +1714,7 @@ async def test_publish_generic_story_creates_catalog_item_and_content(monkeypatc
     workflow = SimpleNamespace(
         id=uuid4(),
         generic_story_id=None,
-        age_group="5-7",
+        age_group="4-6",
         language="en",
         title="The Moon Bell",
         summary="A child helps restore the moon bell.",
@@ -880,8 +1729,16 @@ async def test_publish_generic_story_creates_catalog_item_and_content(monkeypatc
         story_json={
             "title": "The Moon Bell",
             "summary": "A child helps restore the moon bell.",
+            "cover_image_prompt": "Large rendered cover prompt",
+            "cover_planned_image_prompt": "Short cover plan prompt",
             "pages": [
-                {"page_number": 1, "text": "Mira listened."},
+                {
+                    "page_number": 1,
+                    "text": "Mira listened.",
+                    "image_prompt": "Large rendered page prompt",
+                    "planned_image_prompt": "Short page plan prompt",
+                    "tts_prompt": "Large rendered TTS prompt",
+                },
                 {"page_number": 2, "text": "The bell rang."},
             ],
             "moral": "Listening helps friends solve problems.",
@@ -896,9 +1753,64 @@ async def test_publish_generic_story_creates_catalog_item_and_content(monkeypatc
     assert service.generic_stories.created["status"] == "active"
     assert service.generic_stories.created["total_pages"] == 2
     assert service.generic_stories.created["character_type"] == "animal, human"
-    assert service.generic_stories.contents[1] == [{"language": "en", "story_json": workflow.story_json}]
+    content_story_json = service.generic_stories.contents[1][0]["story_json"]
+    assert service.generic_stories.contents[1][0]["language"] == "en"
+    assert content_story_json["title"] == workflow.story_json["title"]
+    assert "cover_image_prompt" not in content_story_json
+    assert "cover_planned_image_prompt" not in content_story_json
+    assert "image_prompt" not in content_story_json["pages"][0]
+    assert "planned_image_prompt" not in content_story_json["pages"][0]
+    assert "tts_prompt" not in content_story_json["pages"][0]
+    assert workflow.story_json["pages"][0]["image_prompt"] == "Large rendered page prompt"
     assert workflow.generic_story_id is not None
     assert workflow.status == "COMPLETED"
+
+
+@pytest.mark.asyncio
+async def test_publish_generic_story_rejects_existing_title(monkeypatch):
+    service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
+    service.generic_stories = _FakeGenericStories(
+        existing_by_title={"The Moon Bell": SimpleNamespace(id=uuid4(), title="The Moon Bell")}
+    )
+    monkeypatch.setattr(
+        "app.service.generic_story_workflow_service.get_image_storage_service",
+        lambda: _FakeImageStorage(),
+    )
+    workflow = SimpleNamespace(
+        id=uuid4(),
+        generic_story_id=None,
+        age_group="4-6",
+        language="en",
+        title="The Moon Bell",
+        summary="A child helps restore the moon bell.",
+        theme="listening",
+        genre="adventure",
+        moral="Listening helps friends solve problems.",
+        learning_goal="careful listening",
+        cover_image=None,
+        input_request={"status": "inactive"},
+        character_analysis_json={"characters": [{"type": "human"}]},
+        status="IN_PROGRESS",
+        story_json={
+            "title": "The Moon Bell",
+            "summary": "A child helps restore the moon bell.",
+            "pages": [{"page_number": 1, "text": "Mira listened."}],
+            "moral": "Listening helps friends solve problems.",
+        },
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+
+    with pytest.raises(AppException) as exc_info:
+        await service._publish_generic_story(
+            workflow,
+            publish_status="active",
+            public_base_url="https://api.example.test",
+        )
+
+    assert exc_info.value.code == "GENERIC_STORY_TITLE_EXISTS"
+    assert service.generic_stories.created is None
+    assert workflow.generic_story_id is None
 
 
 @pytest.mark.asyncio
@@ -917,7 +1829,7 @@ async def test_publish_generic_story_expands_multilingual_variants_to_content_ro
     workflow = SimpleNamespace(
         id=uuid4(),
         generic_story_id=None,
-        age_group="5-7",
+        age_group="4-6",
         language="en",
         title="The Moon Bell",
         summary="A child helps restore the moon bell.",
@@ -933,13 +1845,18 @@ async def test_publish_generic_story_expands_multilingual_variants_to_content_ro
             "title": "The Moon Bell",
             "summary": "A child helps restore the moon bell.",
             "cover_image_url": "https://cdn.example.test/cover.png",
+            "cover_image_prompt": "Large rendered cover prompt.",
+            "cover_planned_image_prompt": "Short cover plan prompt.",
             "pages": [
                 {
                     "page_number": 1,
                     "emotion": "wonder",
                     "text": "Mira listened.",
                     "image_url": "https://cdn.example.test/page-1.png",
+                    "image_prompt": "Large rendered page prompt.",
+                    "planned_image_prompt": "Short page plan prompt.",
                     "audio_url": "https://cdn.example.test/page-1.wav",
+                    "tts_prompt": "Large rendered TTS prompt.",
                     "duration": 1.5,
                 }
             ],
@@ -978,6 +1895,12 @@ async def test_publish_generic_story_expands_multilingual_variants_to_content_ro
     assert by_language["hi"]["pages"][0]["text"] == "मीरा ने ध्यान से सुना."
     assert by_language["mr"]["title"] == "चंद्राची घंटा"
     assert STORY_LANGUAGE_VARIANTS_KEY not in by_language["en"]
+    for content_story_json in by_language.values():
+        assert "cover_image_prompt" not in content_story_json
+        assert "cover_planned_image_prompt" not in content_story_json
+        assert "image_prompt" not in content_story_json["pages"][0]
+        assert "planned_image_prompt" not in content_story_json["pages"][0]
+        assert "tts_prompt" not in content_story_json["pages"][0]
     assert by_language["hi"]["pages"][0]["image_url"].endswith(f"/{generic_story_id}/page_1.png")
     assert "audio_url" not in by_language["hi"]["pages"][0]
     assert by_language["en"]["pages"][0]["audio_url"] == "https://cdn.example.test/page-1.wav"

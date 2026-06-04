@@ -1,17 +1,22 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import io
 import json
 import logging
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 from uuid import UUID
+import wave
 
 from fastapi import UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.age_groups import page_count_range_for_age_group, validate_age_group
 from app.core.config import settings
 from app.core.exceptions import AppException, NotFoundException
+from app.core.illustration_styles import illustration_style_block, normalize_illustration_type
 from app.entity.generic_story_workflow import (
     GenericStoryWorkflow,
     GenericStoryWorkflowStatus,
@@ -24,6 +29,7 @@ from app.model.request.generic_story_workflow import (
 from app.model.response.common import PaginatedResponse
 from app.model.response.generic_story import GenericStoryAudioUploadResponse, GenericStoryImageUploadResponse
 from app.model.response.generic_story_workflow import (
+    GenericStoryWorkflowListResponse,
     GenericStoryWorkflowResponse,
     GenericStoryWorkflowStepDetailResponse,
 )
@@ -36,6 +42,7 @@ from app.service.story_narration_service import StoryNarrationService
 from app.service.story_narration_profile import build_page_narration, normalize_page_emotion
 from app.utils.google_tts_utils import GoogleTTSProvider
 from app.utils.prompt_loader import load_and_render_prompt
+from app.utils.word_timestamps import generate_word_timestamps
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +54,15 @@ STORY_LANGUAGE_NAMES = {
     "mr": "Marathi",
 }
 STORY_LANGUAGE_VARIANTS_KEY = "language_variants"
+CONTENT_STORY_TOP_LEVEL_EXCLUDED_FIELDS = {
+    "cover_image_prompt",
+    "cover_planned_image_prompt",
+}
+CONTENT_STORY_PAGE_EXCLUDED_FIELDS = {
+    "image_prompt",
+    "planned_image_prompt",
+    "tts_prompt",
+}
 LANGUAGE_SPECIFIC_PAGE_FIELDS = {
     "audio_url",
     "audio_dummy",
@@ -101,11 +117,18 @@ class GenericStoryWorkflowService:
     ORDERED_STEPS = [
         GenericStoryWorkflowStep.CHARACTER_EXTRACTION,
         GenericStoryWorkflowStep.SCENE_PLAN_GENERATION,
+        GenericStoryWorkflowStep.VISUAL_BIBLE_GENERATION,
         GenericStoryWorkflowStep.STORY_GENERATION,
         GenericStoryWorkflowStep.IMAGE_PLAN_GENERATION,
         GenericStoryWorkflowStep.IMAGE_GENERATION,
         GenericStoryWorkflowStep.NARRATION_GENERATION,
         GenericStoryWorkflowStep.PUBLISH_GENERIC_STORY,
+    ]
+    DETAIL_STEPS = [
+        GenericStoryWorkflowStep.VISUAL_BIBLE_GENERATION,
+        GenericStoryWorkflowStep.STORY_GENERATION,
+        GenericStoryWorkflowStep.IMAGE_GENERATION,
+        GenericStoryWorkflowStep.NARRATION_GENERATION,
     ]
 
     def __init__(self, session: AsyncSession):
@@ -124,16 +147,26 @@ class GenericStoryWorkflowService:
         user_id: UUID,
         payload: GenericStoryWorkflowCreateRequest,
     ) -> GenericStoryWorkflowResponse:
+        title = self._validated_unique_workflow_title(payload.title)
+        age_group = validate_age_group(payload.age_group)
+        await self._ensure_generic_story_title_available(title)
+        illustration_style_block(payload.illustration_type)
+
+        input_request = payload.model_dump()
+        input_request["title"] = title
+        input_request["age_group"] = age_group
+        input_request["illustration_type"] = normalize_illustration_type(payload.illustration_type)
+
         workflow = await self.workflows.create(
             user_id=user_id,
             workflow_name="generic_story",
             actual_story=payload.actual_story,
-            age_group=payload.age_group,
+            age_group=age_group,
             language=payload.language.strip().lower(),
-            requested_pages=payload.requested_pages,
+            requested_pages=None,
             status=GenericStoryWorkflowStatus.PENDING.value,
-            input_request=payload.model_dump(),
-            title=payload.title,
+            input_request=input_request,
+            title=title,
             theme=payload.theme,
             genre=payload.genre,
             learning_goal=payload.learning_goal,
@@ -143,6 +176,27 @@ class GenericStoryWorkflowService:
         )
         await self.session.commit()
         return GenericStoryWorkflowResponse.model_validate(workflow)
+
+    async def _ensure_generic_story_title_available(self, title: str, *, current_story_id: UUID | None = None) -> None:
+        existing = await self.generic_stories.get_by_title(title)
+        if existing is None or (current_story_id is not None and existing.id == current_story_id):
+            return
+        raise AppException(
+            "A generic story with this title already exists",
+            status.HTTP_409_CONFLICT,
+            "GENERIC_STORY_TITLE_EXISTS",
+        )
+
+    @staticmethod
+    def _validated_unique_workflow_title(title: str | None) -> str:
+        normalized = str(title or "").strip()
+        if not normalized:
+            raise AppException(
+                "Generic story workflow title is required",
+                status.HTTP_400_BAD_REQUEST,
+                "GENERIC_STORY_TITLE_REQUIRED",
+            )
+        return normalized[:255]
 
     async def get(self, user_id: UUID, workflow_id: UUID) -> GenericStoryWorkflowResponse:
         workflow = await self._get_owned(user_id, workflow_id)
@@ -154,10 +208,10 @@ class GenericStoryWorkflowService:
         *,
         page: int,
         page_size: int,
-    ) -> PaginatedResponse[GenericStoryWorkflowResponse]:
+    ) -> PaginatedResponse[GenericStoryWorkflowListResponse]:
         workflows, total = await self.workflows.list_for_user(user_id, page=page, page_size=page_size)
-        return PaginatedResponse[GenericStoryWorkflowResponse].create(
-            items=[GenericStoryWorkflowResponse.model_validate(workflow) for workflow in workflows],
+        return PaginatedResponse[GenericStoryWorkflowListResponse].create(
+            items=[GenericStoryWorkflowListResponse.model_validate(workflow) for workflow in workflows],
             total=total,
             page=page,
             page_size=page_size,
@@ -171,15 +225,21 @@ class GenericStoryWorkflowService:
         step_name: str | None = None,
     ) -> list[GenericStoryWorkflowStepDetailResponse]:
         workflow = await self._get_owned(user_id, workflow_id)
-        steps = self.ORDERED_STEPS
+        steps = self.DETAIL_STEPS
         if step_name:
             try:
-                steps = [GenericStoryWorkflowStep(step_name)]
+                requested_step = GenericStoryWorkflowStep(step_name)
             except ValueError as exc:
                 raise AppException(
                     f"Invalid generic story workflow step: {step_name}",
                     code="GENERIC_STORY_STEP_INVALID",
                 ) from exc
+            if requested_step not in self.DETAIL_STEPS:
+                raise AppException(
+                    f"Generic story workflow step is not exposed by this endpoint: {step_name}",
+                    code="GENERIC_STORY_STEP_NOT_EXPOSED",
+                )
+            steps = [requested_step]
         return [
             GenericStoryWorkflowStepDetailResponse(
                 workflow_id=workflow.id,
@@ -206,49 +266,99 @@ class GenericStoryWorkflowService:
     ) -> GenericStoryWorkflowResponse:
         workflow = await self._get_owned(user_id, workflow_id)
         steps = self.ORDERED_STEPS if payload.step_name == "ALL" else [GenericStoryWorkflowStep(payload.step_name)]
+        workflow_started_at = perf_counter()
 
         try:
             workflow.status = GenericStoryWorkflowStatus.IN_PROGRESS.value
             workflow.error_message = None
             await self.workflows.update(workflow)
             await self.session.commit()
+            self._log_workflow_event(
+                "workflow_started",
+                workflow,
+                requested_step=payload.step_name,
+                step_count=len(steps),
+                skip_image_generation=payload.skip_image_generation,
+                skip_narration_generation=payload.skip_narration_generation,
+            )
 
             for step in steps:
+                step_started_at = perf_counter()
                 if step == GenericStoryWorkflowStep.IMAGE_GENERATION and payload.skip_image_generation:
                     workflow.current_step = step.value
                     await self.workflows.update(workflow)
                     await self.session.commit()
+                    self._log_workflow_event("step_skipped_started", workflow, step=step, reason="skip_image_generation")
                     self._generate_dummy_images(workflow)
                     await self.workflows.update(workflow)
                     await self.session.commit()
+                    self._log_workflow_event(
+                        "step_skipped_completed",
+                        workflow,
+                        step=step,
+                        reason="skip_image_generation",
+                        duration_ms=self._duration_ms(step_started_at),
+                    )
                     continue
                 if step == GenericStoryWorkflowStep.NARRATION_GENERATION and payload.skip_narration_generation:
                     workflow.current_step = step.value
                     await self.workflows.update(workflow)
                     await self.session.commit()
+                    self._log_workflow_event(
+                        "step_skipped_started",
+                        workflow,
+                        step=step,
+                        reason="skip_narration_generation",
+                    )
                     self._generate_dummy_narration(workflow)
                     await self.workflows.update(workflow)
                     await self.session.commit()
+                    self._log_workflow_event(
+                        "step_skipped_completed",
+                        workflow,
+                        step=step,
+                        reason="skip_narration_generation",
+                        duration_ms=self._duration_ms(step_started_at),
+                    )
                     continue
 
                 workflow.current_step = step.value
                 await self.workflows.update(workflow)
                 await self.session.commit()
+                self._log_workflow_event("step_started", workflow, step=step)
                 await self._execute_single_step(workflow, step, public_base_url=public_base_url, payload=payload)
                 await self.workflows.update(workflow)
                 await self.session.commit()
+                self._log_workflow_event(
+                    "step_completed",
+                    workflow,
+                    step=step,
+                    duration_ms=self._duration_ms(step_started_at),
+                )
 
             workflow.current_step = None
             if workflow.generic_story_id is not None:
                 workflow.status = GenericStoryWorkflowStatus.COMPLETED.value
             await self.workflows.update(workflow)
             await self.session.commit()
+            self._log_workflow_event(
+                "workflow_completed",
+                workflow,
+                duration_ms=self._duration_ms(workflow_started_at),
+            )
             return GenericStoryWorkflowResponse.model_validate(workflow)
 
         except Exception as exc:
-            logger.exception("Generic story workflow failed: workflow_id=%s step=%s", workflow.id, workflow.current_step)
             workflow.status = GenericStoryWorkflowStatus.FAILED.value
             workflow.error_message = str(exc)
+            self._log_workflow_event(
+                "workflow_failed",
+                workflow,
+                level=logging.ERROR,
+                error=str(exc),
+                duration_ms=self._duration_ms(workflow_started_at),
+            )
+            logger.exception("Generic story workflow failed: workflow_id=%s step=%s", workflow.id, workflow.current_step)
             workflow.current_step = None
             await self.workflows.update(workflow)
             await self.session.commit()
@@ -333,7 +443,7 @@ class GenericStoryWorkflowService:
                 cover_image_url=cover_image_url,
                 page_image_urls=page_image_urls,
             )
-            content.story_json = content_story_json
+            content.story_json = self._story_json_for_content_table(content_story_json)
             await self.generic_stories.update_content(content)
             updated_languages.append(str(content.language))
 
@@ -404,8 +514,15 @@ class GenericStoryWorkflowService:
 
         audio_storage = get_story_audio_storage_service()
         page_audio_urls: dict[int, str] = {}
+        page_audio_metadata: dict[int, dict[str, Any]] = {}
         for page_number in page_numbers:
             audio_bytes = await self._read_uploaded_story_audio(audio_uploads[page_number])
+            duration = self._uploaded_wav_duration_seconds(audio_bytes)
+            page_text = self._story_page_text(content_story_json, page_number)
+            page_audio_metadata[page_number] = {
+                "duration": round(duration, 2),
+                "word_timestamps": generate_word_timestamps(page_text, duration),
+            }
             page_audio_urls[page_number] = await audio_storage.save_story_page_audio(
                 story_id=workflow.id,
                 language=normalized_language,
@@ -413,13 +530,18 @@ class GenericStoryWorkflowService:
                 audio_bytes=audio_bytes,
             )
 
-        self._apply_story_audio_urls(content_story_json, page_audio_urls=page_audio_urls)
-        content.story_json = content_story_json
+        self._apply_story_audio_urls(
+            content_story_json,
+            page_audio_urls=page_audio_urls,
+            page_audio_metadata=page_audio_metadata,
+        )
+        content.story_json = self._story_json_for_content_table(content_story_json)
         await self.generic_stories.update_content(content)
 
         self._apply_workflow_audio_urls(
             workflow,
             page_audio_urls={normalized_language: page_audio_urls},
+            page_audio_metadata={normalized_language: page_audio_metadata},
             workflow_language=self._default_story_language(workflow.language),
         )
         await self.workflows.update(workflow)
@@ -452,15 +574,23 @@ class GenericStoryWorkflowService:
             self._apply_workflow_metadata(workflow)
             return
 
+        if step == GenericStoryWorkflowStep.VISUAL_BIBLE_GENERATION:
+            self._require(workflow.character_analysis_json, "Run CHARACTER_EXTRACTION before VISUAL_BIBLE_GENERATION.")
+            self._require(workflow.scene_plan_json, "Run SCENE_PLAN_GENERATION before VISUAL_BIBLE_GENERATION.")
+            workflow.visual_bible_json = await self._generate_visual_bible(workflow)
+            return
+
         if step == GenericStoryWorkflowStep.STORY_GENERATION:
             self._require(workflow.character_analysis_json, "Run CHARACTER_EXTRACTION before STORY_GENERATION.")
             self._require(workflow.scene_plan_json, "Run SCENE_PLAN_GENERATION before STORY_GENERATION.")
+            self._require(workflow.visual_bible_json, "Run VISUAL_BIBLE_GENERATION before STORY_GENERATION.")
             workflow.story_json = await self._generate_story_json(workflow)
             self._apply_workflow_metadata(workflow)
             return
 
         if step == GenericStoryWorkflowStep.IMAGE_PLAN_GENERATION:
             self._require(workflow.scene_plan_json, "Run SCENE_PLAN_GENERATION before IMAGE_PLAN_GENERATION.")
+            self._require(workflow.visual_bible_json, "Run VISUAL_BIBLE_GENERATION before IMAGE_PLAN_GENERATION.")
             self._require(workflow.story_json, "Run STORY_GENERATION before IMAGE_PLAN_GENERATION.")
             workflow.image_plan_json = await self._generate_image_plan(workflow)
             return
@@ -510,21 +640,42 @@ class GenericStoryWorkflowService:
             "prompts/generic_story/scene_plan_prompt.txt",
             {
                 "age_group": workflow.age_group,
-                "requested_pages": workflow.requested_pages or "",
                 "title": workflow.title or "",
                 "actual_story": workflow.actual_story,
                 "character_analysis_json": _compact_json(workflow.character_analysis_json),
             },
         )
         plan = await self._generate_json(prompt, max_tokens=12000)
-        expected_pages = workflow.requested_pages or self._default_page_count(workflow.age_group)
+        min_pages, max_pages = self._scene_plan_page_count_range(workflow.age_group)
         pages = plan.get("pages")
-        if not isinstance(pages, list) or len(pages) != expected_pages:
+        page_count = len(pages) if isinstance(pages, list) else 0
+        if not isinstance(pages, list) or page_count < min_pages or page_count > max_pages:
             raise AppException(
-                f"Scene plan returned {len(pages) if isinstance(pages, list) else 0} pages; expected {expected_pages}",
+                f"Scene plan returned {page_count} pages; expected {min_pages}-{max_pages}",
                 code="GENERIC_SCENE_PLAN_PAGE_COUNT_MISMATCH",
             )
         return plan
+
+    async def _generate_visual_bible(self, workflow: GenericStoryWorkflow) -> dict[str, Any]:
+        if settings.STORY_MOCK_LLM_RESPONSES:
+            return self._mock_visual_bible(workflow)
+        prompt = load_and_render_prompt(
+            "prompts/generic_story/visual_bible_generator_prompt.txt",
+            {
+                "title": workflow.title or "",
+                "actual_story": workflow.actual_story,
+                "character_analysis_json": _compact_json(workflow.character_analysis_json),
+                "scene_plan_json": _compact_json(workflow.scene_plan_json),
+                "illustration_style": self._workflow_illustration_style(workflow),
+            },
+        )
+        visual_bible = await self._generate_json(prompt, max_tokens=12000)
+        visual_bible["style"] = self._workflow_illustration_style(workflow)
+        visual_bible["age_group"] = workflow.age_group
+        characters = visual_bible.get("characters")
+        if not isinstance(characters, list) or not characters:
+            raise AppException("Visual bible must include characters.", code="GENERIC_VISUAL_BIBLE_CHARACTERS_MISSING")
+        return visual_bible
 
     async def _generate_story_json(self, workflow: GenericStoryWorkflow) -> dict[str, Any]:
         if settings.STORY_MOCK_LLM_RESPONSES:
@@ -538,6 +689,7 @@ class GenericStoryWorkflowService:
                 "requested_language": self._default_story_language(workflow.language),
                 "character_analysis_json": _compact_json(workflow.character_analysis_json),
                 "scene_plan_json": _compact_json(workflow.scene_plan_json),
+                "visual_bible_json": _compact_json(self._workflow_visual_bible(workflow)),
             },
         )
         raw = await self._generate_json(prompt, max_tokens=24000)
@@ -550,26 +702,31 @@ class GenericStoryWorkflowService:
             "prompts/generic_story/image_plan_prompt.txt",
             {
                 "scene_plan_json": _compact_json(workflow.scene_plan_json),
-                "story_json": _compact_json(self._story_json_without_language_variants(workflow.story_json or {})),
-                "character_analysis_json": _compact_json(workflow.character_analysis_json),
+                "visual_bible_json": _compact_json(self._workflow_visual_bible(workflow)),
+                "story_json": _compact_json(self._story_json_for_image_plan_prompt(workflow.story_json or {})),
+                "illustration_style": self._workflow_illustration_style(workflow),
             },
         )
         image_plan = await self._generate_json(prompt, max_tokens=16000)
+        image_plan["style"] = self._workflow_illustration_style(workflow)
         pages = image_plan.get("pages")
         story_pages = (workflow.story_json or {}).get("pages") or []
         if not isinstance(pages, list) or len(pages) != len(story_pages):
             raise AppException("Image plan page count must match story JSON pages.", code="GENERIC_IMAGE_PLAN_PAGE_COUNT_MISMATCH")
+        self._validate_and_normalize_image_cover_plan(image_plan, workflow)
         return image_plan
 
     async def _generate_images(self, workflow: GenericStoryWorkflow, *, public_base_url: str) -> None:
         image_storage = get_image_storage_service()
         story_json = workflow.story_json or {}
         image_plan = workflow.image_plan_json or {}
-        visual_bible = image_plan.get("visual_bible") or (workflow.scene_plan_json or {}).get("visual_bible") or {}
+        visual_bible = self._workflow_visual_bible(workflow)
         story_title = story_json.get("title") or workflow.title or "Untitled Story"
 
         cover_plan = image_plan.get("cover") if isinstance(image_plan.get("cover"), dict) else {}
         if cover_plan:
+            image_started_at = perf_counter()
+            self._log_workflow_event("image_generation_cover_started", workflow, step=GenericStoryWorkflowStep.IMAGE_GENERATION)
             cover_prompt = self._render_image_prompt(
                 page_type="cover",
                 story_title=story_title,
@@ -588,7 +745,13 @@ class GenericStoryWorkflowService:
             )
             story_json["cover_image_url"] = workflow.cover_image
             story_json["cover_image_prompt"] = cover_prompt
-            story_json["cover_planned_image_prompt"] = cover_plan.get("image_prompt")
+            story_json["cover_planned_image_prompt"] = self._image_plan_summary(cover_plan)
+            self._log_workflow_event(
+                "image_generation_cover_completed",
+                workflow,
+                step=GenericStoryWorkflowStep.IMAGE_GENERATION,
+                duration_ms=self._duration_ms(image_started_at),
+            )
 
         plan_pages = image_plan.get("pages") if isinstance(image_plan.get("pages"), list) else []
         story_pages = story_json.get("pages") if isinstance(story_json.get("pages"), list) else []
@@ -600,9 +763,16 @@ class GenericStoryWorkflowService:
         for plan_page in plan_pages:
             if not isinstance(plan_page, dict):
                 continue
-            page_number = plan_page.get("page_number")
-            if not isinstance(page_number, int):
+            page_number = self._image_plan_page_number(plan_page)
+            if page_number is None:
                 continue
+            image_started_at = perf_counter()
+            self._log_workflow_event(
+                "image_generation_page_started",
+                workflow,
+                step=GenericStoryWorkflowStep.IMAGE_GENERATION,
+                page_number=page_number,
+            )
             page_prompt = self._render_image_prompt(
                 page_type="story_page",
                 story_title=story_title,
@@ -623,7 +793,14 @@ class GenericStoryWorkflowService:
             if story_page is not None:
                 story_page["image_url"] = image_url
                 story_page["image_prompt"] = page_prompt
-                story_page["planned_image_prompt"] = plan_page.get("image_prompt")
+                story_page["planned_image_prompt"] = self._image_plan_summary(plan_page)
+            self._log_workflow_event(
+                "image_generation_page_completed",
+                workflow,
+                step=GenericStoryWorkflowStep.IMAGE_GENERATION,
+                page_number=page_number,
+                duration_ms=self._duration_ms(image_started_at),
+            )
 
         workflow.story_json = story_json
 
@@ -631,7 +808,7 @@ class GenericStoryWorkflowService:
         """Attach generated image prompts and dummy image URLs without image LLM/storage calls."""
         story_json = workflow.story_json or {}
         image_plan = workflow.image_plan_json or {}
-        visual_bible = image_plan.get("visual_bible") or (workflow.scene_plan_json or {}).get("visual_bible") or {}
+        visual_bible = self._workflow_visual_bible(workflow)
         story_title = story_json.get("title") or workflow.title or "Untitled Story"
 
         cover_plan = image_plan.get("cover") if isinstance(image_plan.get("cover"), dict) else {}
@@ -645,14 +822,14 @@ class GenericStoryWorkflowService:
             workflow.cover_image = self.DUMMY_PNG_DATA_URL
             story_json["cover_image_url"] = self.DUMMY_PNG_DATA_URL
             story_json["cover_image_prompt"] = cover_prompt
-            story_json["cover_planned_image_prompt"] = cover_plan.get("image_prompt")
+            story_json["cover_planned_image_prompt"] = self._image_plan_summary(cover_plan)
             story_json["cover_image_dummy"] = True
 
         plan_pages = image_plan.get("pages") if isinstance(image_plan.get("pages"), list) else []
         prompts_by_page = {
-            page.get("page_number"): page
+            self._image_plan_page_number(page): page
             for page in plan_pages
-            if isinstance(page, dict) and isinstance(page.get("page_number"), int)
+            if isinstance(page, dict) and self._image_plan_page_number(page) is not None
         }
         pages = story_json.get("pages") if isinstance(story_json.get("pages"), list) else []
         for page in pages:
@@ -669,7 +846,7 @@ class GenericStoryWorkflowService:
                     visual_bible=visual_bible,
                     page_image_plan=plan_page,
                 )
-                page["planned_image_prompt"] = plan_page.get("image_prompt")
+                page["planned_image_prompt"] = self._image_plan_summary(plan_page)
 
         workflow.story_json = story_json
 
@@ -677,7 +854,14 @@ class GenericStoryWorkflowService:
         story_json = dict(workflow.story_json or {})
         variants = story_json.get(STORY_LANGUAGE_VARIANTS_KEY)
         if not isinstance(variants, dict):
-            return await StoryNarrationService(self.session).generate_story_json_narration(
+            narration_started_at = perf_counter()
+            self._log_workflow_event(
+                "narration_language_started",
+                workflow,
+                step=GenericStoryWorkflowStep.NARRATION_GENERATION,
+                language=workflow.language,
+            )
+            narrated_story_json = await StoryNarrationService(self.session).generate_story_json_narration(
                 story_json,
                 story_id=workflow.id,
                 language=workflow.language,
@@ -685,6 +869,14 @@ class GenericStoryWorkflowService:
                 source="generic_story_workflow",
                 age_group=workflow.age_group,
             )
+            self._log_workflow_event(
+                "narration_language_completed",
+                workflow,
+                step=GenericStoryWorkflowStep.NARRATION_GENERATION,
+                language=workflow.language,
+                duration_ms=self._duration_ms(narration_started_at),
+            )
+            return narrated_story_json
 
         narration_service = StoryNarrationService(self.session)
         workflow_language = self._default_story_language(workflow.language)
@@ -694,6 +886,13 @@ class GenericStoryWorkflowService:
         for language in SUPPORTED_STORY_LANGUAGES:
             if not isinstance(variants.get(language), dict):
                 continue
+            narration_started_at = perf_counter()
+            self._log_workflow_event(
+                "narration_language_started",
+                workflow,
+                step=GenericStoryWorkflowStep.NARRATION_GENERATION,
+                language=language,
+            )
             language_story_json = self._story_json_for_language(
                 story_json,
                 variants,
@@ -711,6 +910,13 @@ class GenericStoryWorkflowService:
             narrated_variants[language] = self._story_json_without_language_variants(narrated_story_json)
             if language == workflow_language:
                 default_story_json = narrated_story_json
+            self._log_workflow_event(
+                "narration_language_completed",
+                workflow,
+                step=GenericStoryWorkflowStep.NARRATION_GENERATION,
+                language=language,
+                duration_ms=self._duration_ms(narration_started_at),
+            )
 
         if default_story_json is None:
             default_story_json = next(iter(narrated_variants.values()), self._story_json_without_language_variants(story_json))
@@ -826,12 +1032,17 @@ class GenericStoryWorkflowService:
             "status": publish_status or (workflow.input_request or {}).get("status") or "inactive",
         }
 
-        generic_story = await self.generic_stories.get_by_title(title)
-        if generic_story is None:
-            generic_story = await self.generic_stories.create(**data)
+        if workflow.generic_story_id is not None:
+            generic_story = await self.generic_stories.get_by_id(workflow.generic_story_id)
+            if generic_story is None:
+                raise NotFoundException("Generic story not found", "GENERIC_STORY_NOT_FOUND")
+            await self._ensure_generic_story_title_available(title, current_story_id=generic_story.id)
         else:
-            for field, value in data.items():
-                setattr(generic_story, field, value)
+            await self._ensure_generic_story_title_available(title)
+            generic_story = await self.generic_stories.create(**data)
+
+        for field, value in data.items():
+            setattr(generic_story, field, value)
 
         story_json = await self._copy_story_images_to_generic_story_storage(
             story_json,
@@ -848,6 +1059,12 @@ class GenericStoryWorkflowService:
         )
         workflow.generic_story_id = generic_story.id
         workflow.status = GenericStoryWorkflowStatus.COMPLETED.value
+        self._log_workflow_event(
+            "generic_story_published",
+            workflow,
+            step=GenericStoryWorkflowStep.PUBLISH_GENERIC_STORY,
+            publish_status=data["status"],
+        )
 
     async def _copy_story_images_to_generic_story_storage(
         self,
@@ -945,15 +1162,387 @@ class GenericStoryWorkflowService:
         visual_bible: dict[str, Any],
         page_image_plan: dict[str, Any],
     ) -> str:
+        rendered_plan = self._image_plan_for_render(page_type, story_title, page_image_plan)
         return load_and_render_prompt(
             "prompts/generic_story/image_generation_prompt.txt",
             {
                 "page_type": page_type,
+                "aspect_ratio": self._image_prompt_aspect_ratio(page_type),
                 "story_title": story_title,
-                "visual_bible_json": _compact_json(visual_bible),
-                "page_image_plan_json": _compact_json(page_image_plan),
+                "age_group": self._image_prompt_age_group(visual_bible),
+                "illustration_style": self._image_prompt_illustration_style(visual_bible),
+                "title_instruction": self._image_title_instruction(page_type, story_title),
+                "scene_instruction": self._image_scene_instruction(page_type, rendered_plan),
+                "visual_context": self._image_visual_context(visual_bible, page_image_plan),
+                "page_image_plan_json": _compact_json(rendered_plan),
             },
         )
+
+    @staticmethod
+    def _image_plan_for_render(
+        page_type: str,
+        story_title: str,
+        page_image_plan: dict[str, Any],
+    ) -> dict[str, Any]:
+        rendered_plan = dict(page_image_plan)
+        if page_type == "cover" and story_title:
+            rendered_plan["title_text"] = story_title
+        return rendered_plan
+
+    @classmethod
+    def _image_scene_instruction(cls, page_type: str, page_image_plan: dict[str, Any]) -> str:
+        lines: list[str] = []
+
+        if page_type == "cover":
+            lines.append(
+                "This is a finished front book cover based on the whole story, not an interior page illustration."
+            )
+            cover_direction = cls._image_scene_value(page_image_plan.get("book_cover_prompt"))
+            if cover_direction:
+                lines.append(f"Overall cover direction: {cover_direction}")
+            genre_signal = cls._image_scene_value(page_image_plan.get("genre_signal"))
+            if genre_signal:
+                lines.append(f"Story promise and genre signal: {genre_signal}")
+            title_layout = cls._image_scene_value(page_image_plan.get("title_layout"))
+            if title_layout:
+                lines.append(f"Required title layout: {title_layout}")
+            lines.append(
+                "Do not copy page 1 or any interior page composition; use a cover-style hierarchy with title first, story world second."
+            )
+
+        if page_type == "cover" and str(page_image_plan.get("title_text") or "").strip():
+            lines.append(f"Required cover title: {str(page_image_plan.get('title_text')).strip()}")
+
+        for label, key in (
+            ("Visual focus", "visual_focus"),
+            ("Action and composition", "composition"),
+            ("Environment", "environment"),
+            ("Emotion", "emotion"),
+            ("Camera shot", "camera_shot"),
+        ):
+            text = cls._image_scene_value(page_image_plan.get(key))
+            if text:
+                lines.append(f"{label}: {text}")
+
+        characters = cls._image_scene_value(page_image_plan.get("characters"))
+        if characters:
+            lines.append(f"Allowed characters only: {characters}")
+
+        objects = cls._image_scene_value(page_image_plan.get("important_objects"))
+        if objects:
+            lines.append(f"Required objects only: {objects}")
+
+        if lines:
+            return "\n".join(lines)
+        return cls._image_plan_summary(page_image_plan) or "Use the IMAGE PLAN as the exact scene contract."
+
+    @staticmethod
+    def _image_scene_value(value: Any) -> str:
+        if isinstance(value, list):
+            return ", ".join(str(item).strip() for item in value if str(item).strip())
+        if isinstance(value, dict):
+            return _compact_json(value)
+        return str(value or "").strip()
+
+    def _validate_and_normalize_image_cover_plan(
+        self,
+        image_plan: dict[str, Any],
+        workflow: GenericStoryWorkflow,
+    ) -> None:
+        cover = image_plan.get("cover")
+        if not isinstance(cover, dict):
+            raise AppException("Image plan must include a cover plan.", code="GENERIC_IMAGE_PLAN_COVER_MISSING")
+
+        story_title = self._image_plan_story_title(workflow)
+        cover["title_text"] = story_title
+
+        missing_fields = [
+            field
+            for field in ("visual_focus", "composition", "camera_shot", "title_text")
+            if not str(cover.get(field) or "").strip()
+        ]
+        if missing_fields:
+            raise AppException(
+                "Image plan cover is missing required book-cover fields.",
+                code="GENERIC_IMAGE_PLAN_COVER_INCOMPLETE",
+                details={"missing_fields": missing_fields},
+            )
+
+        title_context = " ".join(
+            str(cover.get(field) or "")
+            for field in ("composition", "title_layout", "book_cover_prompt")
+        ).lower()
+        if not any(keyword in title_context for keyword in ("title", "typography", "text", "letter")):
+            raise AppException(
+                "Image plan cover must describe title placement/readability.",
+                code="GENERIC_IMAGE_PLAN_COVER_TITLE_LAYOUT_MISSING",
+            )
+
+    @staticmethod
+    def _image_plan_story_title(workflow: GenericStoryWorkflow) -> str:
+        story_json = getattr(workflow, "story_json", None)
+        if isinstance(story_json, dict) and str(story_json.get("title") or "").strip():
+            return str(story_json["title"]).strip()
+        if str(getattr(workflow, "title", "") or "").strip():
+            return str(workflow.title).strip()
+        scene_plan_json = getattr(workflow, "scene_plan_json", None)
+        if isinstance(scene_plan_json, dict) and str(scene_plan_json.get("title") or "").strip():
+            return str(scene_plan_json["title"]).strip()
+        return "Untitled Story"
+
+    @staticmethod
+    def _workflow_illustration_type(workflow: GenericStoryWorkflow) -> str:
+        input_request = getattr(workflow, "input_request", None)
+        if isinstance(input_request, dict):
+            return normalize_illustration_type(input_request.get("illustration_type"))
+        return normalize_illustration_type(None)
+
+    @classmethod
+    def _workflow_illustration_style(cls, workflow: GenericStoryWorkflow) -> str:
+        return illustration_style_block(cls._workflow_illustration_type(workflow))
+
+    @staticmethod
+    def _image_prompt_illustration_style(visual_bible: dict[str, Any]) -> str:
+        style = str((visual_bible or {}).get("style") or "").strip()
+        return style or illustration_style_block(None)
+
+    @staticmethod
+    def _image_prompt_age_group(visual_bible: dict[str, Any]) -> str:
+        age_group = str((visual_bible or {}).get("age_group") or "").strip()
+        return age_group or "children"
+
+    @staticmethod
+    def _image_prompt_aspect_ratio(page_type: str) -> str:
+        if page_type == "cover":
+            return settings.STORY_COVER_ASPECT_RATIO
+        return settings.STORY_PAGE_ASPECT_RATIO
+
+    @staticmethod
+    def _image_title_instruction(page_type: str, story_title: str) -> str:
+        if page_type != "cover":
+            return (
+                "This is an interior story page. Do not render any written text, letters, captions, signs, "
+                "labels, logos, or typography."
+            )
+        title = str(story_title or "").strip() or "Untitled Story"
+        return (
+            "COVER TITLE CONTRACT:\n"
+            "This is a finished front book cover, not an interior page.\n"
+            f"Render this exact visible title text: \"{title}\"\n"
+            "The title must be large, centered or top-centered, fully readable, correctly spelled, and unobstructed.\n"
+            "Use clean storybook cover typography integrated directly into the artwork.\n"
+            "Leave a calm clear title area with simple background behind the letters.\n"
+            "Do not use a banner, label, card, sticker, plaque, black rectangle, UI panel, watermark, subtitle, "
+            "extra words, alternate spelling, or decorative text.\n"
+            "Do not let characters, trees, objects, clouds, hands, or decorations overlap the title."
+        )
+
+    def _image_visual_context(self, visual_bible: dict[str, Any], page_image_plan: dict[str, Any]) -> str:
+        """Build a compact page-scoped model sheet for image generation."""
+        if not isinstance(visual_bible, dict):
+            return ""
+
+        character_refs = page_image_plan.get("characters") if isinstance(page_image_plan.get("characters"), list) else []
+        object_refs = (
+            page_image_plan.get("important_objects")
+            if isinstance(page_image_plan.get("important_objects"), list)
+            else []
+        )
+        scene_text = " ".join(
+            str(page_image_plan.get(field) or "")
+            for field in ("environment", "visual_focus", "composition", "continuity_notes")
+        )
+
+        characters = self._matching_character_visual_bible_items(
+            visual_bible.get("characters"),
+            character_refs,
+            fallback_all=not bool(character_refs),
+        )
+        objects = self._matching_visual_bible_items(visual_bible.get("important_objects"), object_refs, fallback_all=False)
+        locations = self._matching_visual_bible_items(
+            visual_bible.get("locations"),
+            [scene_text],
+            fallback_all=True,
+        )
+
+        lines: list[str] = []
+        style = str(visual_bible.get("style") or "").strip()
+        if style:
+            lines.append(f"STYLE: {style}")
+
+        if characters:
+            lines.append("CHARACTER MODEL SHEET:")
+            for character in characters:
+                lines.append(f"- {self._character_visual_context(character)}")
+
+        if locations:
+            lines.append("LOCATION CONTINUITY:")
+            for location in locations:
+                name = str(location.get("name") or "").strip()
+                identity = str(location.get("visual_identity") or location.get("description") or "").strip()
+                if name or identity:
+                    lines.append(f"- {name}: {identity}".strip())
+
+        if objects:
+            lines.append("OBJECT CONTINUITY:")
+            for obj in objects:
+                name = str(obj.get("name") or "").strip()
+                description = str(obj.get("description") or "").strip()
+                requirements = self._join_text_list(obj.get("continuity_requirements"), limit=3)
+                details = "; ".join(part for part in (description, f"keep {requirements}" if requirements else "") if part)
+                if name or details:
+                    lines.append(f"- {name}: {details}".strip())
+
+        return "\n".join(lines)
+
+    @classmethod
+    def _matching_visual_bible_items(
+        cls,
+        items: Any,
+        references: list[Any],
+        *,
+        fallback_all: bool,
+    ) -> list[dict[str, Any]]:
+        if not isinstance(items, list):
+            return []
+        dict_items = [item for item in items if isinstance(item, dict)]
+        normalized_refs = [cls._normalize_visual_ref(ref) for ref in references if cls._normalize_visual_ref(ref)]
+        if not normalized_refs:
+            return dict_items if fallback_all else []
+
+        matches = [
+            item
+            for item in dict_items
+            if any(cls._visual_item_matches_ref(item, ref) for ref in normalized_refs)
+        ]
+        return matches or (dict_items if fallback_all else [])
+
+    @classmethod
+    def _matching_character_visual_bible_items(
+        cls,
+        items: Any,
+        references: list[Any],
+        *,
+        fallback_all: bool,
+    ) -> list[dict[str, Any]]:
+        if not isinstance(items, list):
+            return []
+        dict_items = [item for item in items if isinstance(item, dict)]
+        normalized_refs = [cls._normalize_visual_ref(ref) for ref in references if cls._normalize_visual_ref(ref)]
+        if not normalized_refs:
+            return dict_items if fallback_all else []
+
+        matches = [
+            item
+            for item in dict_items
+            if any(cls._character_item_matches_ref(item, ref) for ref in normalized_refs)
+        ]
+        return matches or (dict_items if fallback_all else [])
+
+    @classmethod
+    def _character_item_matches_ref(cls, item: dict[str, Any], normalized_ref: str) -> bool:
+        for candidate in (item.get("name"), item.get("anchor")):
+            normalized_candidate = cls._normalize_visual_ref(candidate)
+            if normalized_candidate and (
+                normalized_candidate in normalized_ref or normalized_ref in normalized_candidate
+            ):
+                return True
+        return False
+
+    @classmethod
+    def _visual_item_matches_ref(cls, item: dict[str, Any], normalized_ref: str) -> bool:
+        candidates = [
+            item.get("name"),
+            item.get("anchor"),
+            item.get("description"),
+            item.get("visual_identity"),
+        ]
+        for candidate in candidates:
+            normalized_candidate = cls._normalize_visual_ref(candidate)
+            if normalized_candidate and (
+                normalized_candidate in normalized_ref or normalized_ref in normalized_candidate
+            ):
+                return True
+        return False
+
+    @staticmethod
+    def _normalize_visual_ref(value: Any) -> str:
+        return "".join(char for char in str(value or "").lower() if char.isalnum())
+
+    @classmethod
+    def _character_visual_context(cls, character: dict[str, Any]) -> str:
+        name = str(character.get("name") or "").strip()
+        role = str(character.get("role") or "").strip()
+        anchor = str(character.get("anchor") or "").strip()
+        raw_appearance = character.get("appearance")
+        appearance_text = str(raw_appearance or "").strip() if not isinstance(raw_appearance, dict) else ""
+        appearance = raw_appearance if isinstance(raw_appearance, dict) else {}
+        locks = character.get("locks") if isinstance(character.get("locks"), dict) else {}
+        hair = appearance.get("hair") if isinstance(appearance.get("hair"), dict) else {}
+        outfit = appearance.get("outfit") if isinstance(appearance.get("outfit"), dict) else {}
+        parts = [
+            name,
+            f"role={role}" if role else "",
+            anchor,
+            appearance_text,
+            f"face={locks.get('face_lock') or appearance.get('face_shape') or ''}".strip(),
+            f"hair={locks.get('hair_lock') or cls._join_mapping_values(hair)}".strip(),
+            f"outfit={locks.get('outfit_lock') or cls._join_mapping_values(outfit)}".strip(),
+            f"accessory={locks.get('accessory_lock') or cls._join_text_list(appearance.get('accessories'), limit=4)}".strip(),
+            f"feature={appearance.get('distinctive_feature') or ''}".strip(),
+            f"scale={character.get('size_relative_to_hero') or ''}".strip(),
+            f"forbid={cls._join_text_list(character.get('forbidden_variations'), limit=6)}".strip(),
+        ]
+        return "; ".join(part for part in parts if part and not part.endswith("="))
+
+    @staticmethod
+    def _join_mapping_values(value: dict[str, Any]) -> str:
+        return ", ".join(str(item).strip() for item in value.values() if str(item or "").strip())
+
+    @staticmethod
+    def _join_text_list(value: Any, *, limit: int) -> str:
+        if isinstance(value, list):
+            return ", ".join(str(item).strip() for item in value[:limit] if str(item or "").strip())
+        return str(value or "").strip()
+
+    @staticmethod
+    def _workflow_visual_bible(workflow: GenericStoryWorkflow) -> dict[str, Any]:
+        visual_bible_json = getattr(workflow, "visual_bible_json", None)
+        if isinstance(visual_bible_json, dict):
+            return visual_bible_json
+        image_plan_json = getattr(workflow, "image_plan_json", None)
+        image_plan = image_plan_json if isinstance(image_plan_json, dict) else {}
+        if isinstance(image_plan.get("visual_bible"), dict):
+            return image_plan["visual_bible"]
+        scene_plan_json = getattr(workflow, "scene_plan_json", None)
+        scene_plan = scene_plan_json if isinstance(scene_plan_json, dict) else {}
+        if isinstance(scene_plan.get("visual_bible"), dict):
+            return scene_plan["visual_bible"]
+        return {}
+
+    @staticmethod
+    def _image_plan_page_number(page_plan: dict[str, Any]) -> int | None:
+        raw_page_number = page_plan.get("page_number", page_plan.get("page"))
+        try:
+            page_number = int(raw_page_number)
+        except (TypeError, ValueError):
+            return None
+        return page_number if page_number > 0 else None
+
+    @staticmethod
+    def _image_plan_summary(page_plan: dict[str, Any]) -> str:
+        if isinstance(page_plan.get("image_prompt"), str) and page_plan["image_prompt"].strip():
+            return page_plan["image_prompt"].strip()
+        return _compact_json(page_plan)
+
+    @staticmethod
+    def _scene_page_number(scene_page: dict[str, Any], fallback: int) -> int:
+        raw_page_number = scene_page.get("page_number", scene_page.get("page", fallback))
+        try:
+            page_number = int(raw_page_number)
+        except (TypeError, ValueError):
+            return fallback
+        return page_number if page_number > 0 else fallback
 
     def _normalize_story_json(self, raw: dict[str, Any], workflow: GenericStoryWorkflow) -> dict[str, Any]:
         default_language = self._default_story_language(getattr(workflow, "language", None))
@@ -1008,7 +1597,9 @@ class GenericStoryWorkflowService:
         moral_by_language = self._localized_text_map(
             raw.get("moral"),
             default_language=default_language,
-            fallback=(workflow.scene_plan_json or {}).get("moral_explanation") or "",
+            fallback=(workflow.scene_plan_json or {}).get("moral")
+            or (workflow.scene_plan_json or {}).get("moral_explanation")
+            or "",
         )
         language_variants = {
             language: {
@@ -1039,6 +1630,51 @@ class GenericStoryWorkflowService:
     def _story_json_without_language_variants(story_json: dict[str, Any]) -> dict[str, Any]:
         cleaned = dict(story_json)
         cleaned.pop(STORY_LANGUAGE_VARIANTS_KEY, None)
+        return cleaned
+
+    def _story_json_for_image_plan_prompt(self, story_json: dict[str, Any]) -> dict[str, Any]:
+        source = self._story_json_without_language_variants(story_json)
+        compact_story = {
+            key: source[key]
+            for key in ("title", "summary", "moral")
+            if source.get(key) is not None
+        }
+        pages = source.get("pages") if isinstance(source.get("pages"), list) else []
+        compact_pages: list[dict[str, Any]] = []
+        for index, page in enumerate(pages, start=1):
+            if not isinstance(page, dict):
+                continue
+            compact_page = {
+                key: page[key]
+                for key in ("page_number", "emotion", "text")
+                if page.get(key) is not None
+            }
+            if "page_number" not in compact_page:
+                compact_page["page_number"] = index
+            narration = page.get("narration") if isinstance(page.get("narration"), dict) else None
+            if narration:
+                compact_page["narration"] = {
+                    key: narration[key]
+                    for key in ("tone", "pace", "voice_style")
+                    if narration.get(key) is not None
+                }
+            compact_pages.append(compact_page)
+        compact_story["pages"] = compact_pages
+        return compact_story
+
+    @staticmethod
+    def _story_json_for_content_table(story_json: dict[str, Any]) -> dict[str, Any]:
+        cleaned = deepcopy(story_json)
+        cleaned.pop(STORY_LANGUAGE_VARIANTS_KEY, None)
+        for field in CONTENT_STORY_TOP_LEVEL_EXCLUDED_FIELDS:
+            cleaned.pop(field, None)
+        pages = cleaned.get("pages")
+        if isinstance(pages, list):
+            for page in pages:
+                if not isinstance(page, dict):
+                    continue
+                for field in CONTENT_STORY_PAGE_EXCLUDED_FIELDS:
+                    page.pop(field, None)
         return cleaned
 
     def _localized_text_map(
@@ -1083,7 +1719,7 @@ class GenericStoryWorkflowService:
             return [
                 {
                     "language": self._default_story_language(workflow_language),
-                    "story_json": self._story_json_without_language_variants(story_json),
+                    "story_json": self._story_json_for_content_table(story_json),
                 }
             ]
 
@@ -1091,11 +1727,13 @@ class GenericStoryWorkflowService:
         return [
             {
                 "language": language,
-                "story_json": self._story_json_for_language(
-                    story_json,
-                    variants,
-                    language=language,
-                    workflow_language=default_language,
+                "story_json": self._story_json_for_content_table(
+                    self._story_json_for_language(
+                        story_json,
+                        variants,
+                        language=language,
+                        workflow_language=default_language,
+                    )
                 ),
             }
             for language in SUPPORTED_STORY_LANGUAGES
@@ -1159,6 +1797,21 @@ class GenericStoryWorkflowService:
             if page_number > 0:
                 page_numbers.append(page_number)
         return sorted(set(page_numbers))
+
+    @staticmethod
+    def _story_page_text(story_json: dict[str, Any], page_number: int) -> str:
+        pages = story_json.get("pages") if isinstance(story_json.get("pages"), list) else []
+        for index, page in enumerate(pages, start=1):
+            if not isinstance(page, dict):
+                continue
+            raw_page_number = page.get("page_number", index)
+            try:
+                current_page_number = int(raw_page_number)
+            except (TypeError, ValueError):
+                continue
+            if current_page_number == page_number:
+                return str(page.get("text") or "").strip()
+        return ""
 
     @staticmethod
     def _extract_page_uploads(uploads: dict[str, UploadFile]) -> dict[int, UploadFile]:
@@ -1261,6 +1914,27 @@ class GenericStoryWorkflowService:
         return content
 
     @staticmethod
+    def _uploaded_wav_duration_seconds(audio_bytes: bytes) -> float:
+        try:
+            with wave.open(io.BytesIO(audio_bytes), "rb") as wav_file:
+                frame_rate = wav_file.getframerate()
+                frame_count = wav_file.getnframes()
+        except (EOFError, wave.Error) as exc:
+            raise AppException(
+                "Audio must be a valid WAV file",
+                status.HTTP_400_BAD_REQUEST,
+                "INVALID_AUDIO_WAV",
+            ) from exc
+
+        if frame_rate <= 0 or frame_count <= 0:
+            raise AppException(
+                "Audio WAV file has no duration",
+                status.HTTP_400_BAD_REQUEST,
+                "INVALID_AUDIO_DURATION",
+            )
+        return frame_count / frame_rate
+
+    @staticmethod
     def _validate_audio_upload_type(upload: UploadFile) -> None:
         content_type = str(upload.content_type or "").lower()
         if content_type in UPLOAD_AUDIO_CONTENT_TYPES:
@@ -1306,7 +1980,9 @@ class GenericStoryWorkflowService:
         story_json: dict[str, Any],
         *,
         page_audio_urls: dict[int, str],
+        page_audio_metadata: dict[int, dict[str, Any]] | None = None,
     ) -> None:
+        metadata_by_page = page_audio_metadata or {}
         pages = story_json.get("pages") if isinstance(story_json.get("pages"), list) else []
         for index, page in enumerate(pages, start=1):
             if not isinstance(page, dict):
@@ -1322,18 +1998,28 @@ class GenericStoryWorkflowService:
             page["audio_url"] = audio_url
             page.pop("audio_dummy", None)
             page.pop("tts_skipped", None)
+            metadata = metadata_by_page.get(page_number)
+            if isinstance(metadata, dict):
+                if isinstance(metadata.get("duration"), (int, float)):
+                    page["duration"] = round(float(metadata["duration"]), 2)
+                timestamps = metadata.get("word_timestamps")
+                if isinstance(timestamps, list):
+                    page["word_timestamps"] = timestamps
 
     def _apply_workflow_audio_urls(
         self,
         workflow: GenericStoryWorkflow,
         *,
         page_audio_urls: dict[str, dict[int, str]],
+        page_audio_metadata: dict[str, dict[int, dict[str, Any]]] | None = None,
         workflow_language: str,
     ) -> None:
+        metadata_by_language = page_audio_metadata or {}
         story_json = workflow.story_json if isinstance(workflow.story_json, dict) else {}
         self._apply_story_audio_urls(
             story_json,
             page_audio_urls=page_audio_urls.get(workflow_language, {}),
+            page_audio_metadata=metadata_by_language.get(workflow_language, {}),
         )
         variants = story_json.get(STORY_LANGUAGE_VARIANTS_KEY)
         if isinstance(variants, dict):
@@ -1343,48 +2029,51 @@ class GenericStoryWorkflowService:
                 self._apply_story_audio_urls(
                     language_story_json,
                     page_audio_urls=page_audio_urls.get(str(language).strip().lower(), {}),
+                    page_audio_metadata=metadata_by_language.get(str(language).strip().lower(), {}),
                 )
         workflow.story_json = story_json
 
     def _mock_character_analysis(self, workflow: GenericStoryWorkflow) -> dict[str, Any]:
         return {
-            "source_title": workflow.title or "The Helpful Adventure",
+            "title": workflow.title or "The Helpful Adventure",
             "summary": "A hero notices a problem, helps carefully, and learns the original lesson.",
             "theme": workflow.theme or "kindness",
             "genre": workflow.genre or "adventure",
-            "learning_goal": workflow.learning_goal or "helping others",
+            "goal": workflow.learning_goal or "helping others",
             "moral": "Small helpful actions can make a big difference.",
             "setting": "a bright storybook village",
-            "central_conflict": "Something important is not working and the hero must help without giving up.",
-            "ending_meaning": "The hero learns that careful, kind effort matters.",
-            "characters": [
+            "conflict": "Something important is not working and the hero must help without giving up.",
+            "ending": "The hero learns that careful, kind effort matters.",
+            "chars": [
                 {
                     "name": "Mira",
                     "role": "hero",
                     "type": "human",
-                    "stable_identity": "A kind child hero who wants to help.",
-                    "appearance_lock": "Mira has a round face, warm brown eyes, short dark hair, a blue tunic, yellow scarf, and red shoes.",
-                    "personality_lock": "curious, kind, and persistent",
-                    "relationship_to_hero": "self",
-                    "must_appear_in_pages": [],
+                    "anchor": "A kind child hero with a yellow scarf.",
+                    "look": {"age": "child", "hair": "short dark hair", "eyes": "warm brown", "skin": "", "outfit": "blue tunic, yellow scarf, red shoes", "features": ["yellow scarf"]},
+                    "traits": ["curious", "kind", "persistent"],
+                    "relation": "self",
+                    "pages": [],
+                    "lock": ["yellow scarf", "blue tunic", "red shoes"],
                 },
                 {
                     "name": "Luma",
                     "role": "companion",
                     "type": "animal",
-                    "stable_identity": "A small silver owl companion.",
-                    "appearance_lock": "Luma is a tiny silver owl with round amber eyes, soft speckled wings, and a little green ribbon.",
-                    "personality_lock": "gentle and encouraging",
-                    "relationship_to_hero": "companion",
-                    "must_appear_in_pages": [],
+                    "anchor": "A tiny silver owl companion with a green ribbon.",
+                    "look": {"age": "", "hair": "", "eyes": "round amber", "skin": "", "outfit": "green ribbon", "features": ["speckled wings"]},
+                    "traits": ["gentle", "encouraging"],
+                    "relation": "companion",
+                    "pages": [],
+                    "lock": ["silver feathers", "green ribbon"],
                 },
             ],
-            "continuity_rules": ["Mira and Luma keep the same appearance on every page."],
-            "do_not_change": ["Preserve the original problem, helping action, and moral."],
+            "rules": ["Mira and Luma keep the same identity on every page."],
+            "preserve": ["Preserve the original problem, helping action, and moral."],
         }
 
     def _mock_scene_plan(self, workflow: GenericStoryWorkflow) -> dict[str, Any]:
-        page_count = workflow.requested_pages or self._default_page_count(workflow.age_group)
+        page_count = self._default_page_count(workflow.age_group)
         pages = []
         for page_number in range(1, page_count + 1):
             if page_number == 1:
@@ -1397,16 +2086,21 @@ class GenericStoryWorkflowService:
                 role = "build"
             pages.append(
                 {
-                    "page_number": page_number,
+                    "page": page_number,
                     "story_role": role,
-                    "scene_description": f"Mira and Luma follow the source story moment {page_number}.",
-                    "characters_present": ["Mira", "Luma"],
+                    "scene_summary": f"Mira and Luma follow the source story moment {page_number}.",
+                    "location": "storybook village",
+                    "characters": ["Mira", "Luma"],
                     "main_action": "Mira helps carefully while Luma stays beside her.",
-                    "emotional_beat": "wonder" if page_number == 1 else "determination",
-                    "source_story_connection": "This page preserves the original story sequence.",
-                    "growth_or_meaning_step": "Mira keeps trying with kindness.",
+                    "emotion": "wonder" if page_number == 1 else "determination",
+                    "visual_focus": "Mira and Luma acting out the source story moment.",
+                    "source_connection": "This page preserves the original story sequence.",
                     "page_turn_hook": "The next clue waits ahead.",
-                    "visual_continuity": ["Mira keeps the blue tunic, yellow scarf, and red shoes.", "Luma keeps the green ribbon."],
+                    "continuity": {
+                        "characters": ["Mira and Luma keep their identities."],
+                        "objects": ["helpful clue remains important"],
+                        "location_state": ["storybook village stays bright"],
+                    },
                 }
             )
         return {
@@ -1414,50 +2108,98 @@ class GenericStoryWorkflowService:
             "summary": "Mira follows the original story and learns that helpful actions matter.",
             "theme": workflow.theme or "kindness",
             "genre": workflow.genre or "adventure",
-            "learning_goal": workflow.learning_goal or "helping others",
-            "moral_theme": "kindness and persistence",
-            "moral_explanation": "Small helpful actions can make a big difference.",
+            "goal": workflow.learning_goal or "helping others",
+            "moral": "Small helpful actions can make a big difference.",
             "setting": "a bright storybook village",
             "tone": "warm and adventurous",
-            "source_preservation": {
-                "central_conflict": "The original problem is preserved.",
-                "must_preserve": ["original meaning", "original moral", "original ending"],
+            "cover_brief": {
+                "book_cover_goal": "Present the story as a warm adventure about helpful effort.",
+                "title_text": workflow.title or "The Helpful Adventure",
+                "cover_moment": "Mira and Luma stand together in the bright village with the helpful clue.",
+                "hero_focus": "Mira is the clear hero with Luma beside her.",
+                "supporting_elements": ["storybook village", "helpful clue"],
+                "title_area": "Clean open sky area at the top for large readable title typography.",
+                "genre_signal": "warm adventure storybook",
+                "emotional_promise": "curiosity, kindness, and gentle courage",
+            },
+            "preserve": {
+                "conflict": "The original problem is preserved.",
+                "must_keep": ["original meaning", "original moral", "original ending"],
                 "do_not_add": ["random new characters", "new moral", "changed conflict"],
             },
-            "visual_bible": {
-                "style": "Premium semi-realistic 3D children's storybook illustration.",
-                "characters": [
-                    {
-                        "name": "Mira",
-                        "role": "hero",
-                        "appearance": "Round face, warm brown eyes, short dark hair.",
-                        "outfit_or_body_markings": "Blue tunic, yellow scarf, red shoes.",
-                        "size_relative_to_hero": "hero",
+            "pages": pages,
+        }
+
+    def _mock_visual_bible(self, workflow: GenericStoryWorkflow) -> dict[str, Any]:
+        return {
+            "style": self._workflow_illustration_style(workflow),
+            "age_group": workflow.age_group,
+            "characters": [
+                {
+                    "name": "Mira",
+                    "role": "hero",
+                    "anchor": "A kind child hero with a yellow scarf.",
+                    "appearance": {
+                        "age": "young child",
+                        "height_build": "average child height, slim build",
+                        "skin_tone": "warm medium skin tone",
+                        "face_shape": "round face",
+                        "eye_shape": "large round eyes",
+                        "eye_color": "warm brown",
+                        "hair": {"color": "dark brown", "length": "short", "style": "neatly combed bob"},
+                        "outfit": {"type": "tunic", "primary_color": "blue", "secondary_color": "yellow scarf", "pattern": "plain fabric"},
+                        "footwear": "red shoes",
+                        "accessories": ["yellow scarf always present"],
                         "distinctive_feature": "yellow scarf",
                     },
-                    {
-                        "name": "Luma",
-                        "role": "companion",
-                        "appearance": "Small silver owl with amber eyes.",
-                        "outfit_or_body_markings": "Speckled wings and green ribbon.",
-                        "size_relative_to_hero": "tiny beside Mira",
+                    "locks": {
+                        "face_lock": "round face with warm brown eyes",
+                        "hair_lock": "short dark brown neatly combed bob",
+                        "outfit_lock": "blue tunic, yellow scarf, and red shoes",
+                        "accessory_lock": "yellow scarf always present",
+                    },
+                    "forbidden_variations": ["different scarf color", "different outfit", "long hair"],
+                    "size_relative_to_hero": "hero",
+                },
+                {
+                    "name": "Luma",
+                    "role": "companion",
+                    "anchor": "A tiny silver owl companion with a green ribbon.",
+                    "appearance": {
+                        "age": "",
+                        "height_build": "tiny beside Mira",
+                        "skin_tone": "",
+                        "face_shape": "round owl face",
+                        "eye_shape": "round eyes",
+                        "eye_color": "amber",
+                        "hair": {"color": "", "length": "", "style": "soft silver feathers"},
+                        "outfit": {"type": "ribbon", "primary_color": "green", "secondary_color": "", "pattern": "plain"},
+                        "footwear": "",
+                        "accessories": ["green ribbon always present"],
                         "distinctive_feature": "green ribbon",
                     },
-                ],
-                "locations": ["storybook village"],
-                "important_objects": ["helpful clue"],
-            },
-            "pages": pages,
+                    "locks": {
+                        "face_lock": "round owl face with amber eyes",
+                        "hair_lock": "soft silver feathers",
+                        "outfit_lock": "green ribbon",
+                        "accessory_lock": "green ribbon always present",
+                    },
+                    "forbidden_variations": ["different ribbon color", "different species", "missing ribbon"],
+                    "size_relative_to_hero": "tiny beside Mira",
+                },
+            ],
+            "locations": [{"name": "storybook village", "description": "bright friendly village", "visual_identity": "warm colorful homes and sunny paths"}],
+            "important_objects": [{"name": "helpful clue", "description": "small story clue", "continuity_requirements": ["keep recognizable when shown"]}],
         }
 
     def _mock_story_json(self, workflow: GenericStoryWorkflow) -> dict[str, Any]:
         pages = []
         for page in (workflow.scene_plan_json or {}).get("pages") or []:
-            page_number = page.get("page_number", len(pages) + 1)
+            page_number = self._scene_page_number(page, len(pages) + 1)
             pages.append(
                 {
                     "page_number": page_number,
-                    "emotion": page.get("emotional_beat") or "wonder",
+                    "emotion": page.get("emotion") or page.get("emotional_beat") or "wonder",
                     "text": {
                         "en": f"Mira and Luma moved through page {page_number} of the adventure, keeping the original story's meaning safe.",
                         "hi": f"मीरा और लूमा ने रोमांच के पेज {page_number} में आगे बढ़कर मूल कहानी का अर्थ सुरक्षित रखा.",
@@ -1478,37 +2220,54 @@ class GenericStoryWorkflowService:
             },
             "pages": pages,
             "moral": {
-                "en": (workflow.scene_plan_json or {}).get("moral_explanation") or "Kindness matters.",
+                "en": (workflow.scene_plan_json or {}).get("moral") or (workflow.scene_plan_json or {}).get("moral_explanation") or "Kindness matters.",
                 "hi": "दयालुता मायने रखती है.",
                 "mr": "दयाळूपणा महत्त्वाचा असतो.",
             },
         }
 
     def _mock_image_plan(self, workflow: GenericStoryWorkflow) -> dict[str, Any]:
-        scene_plan = workflow.scene_plan_json or {}
         story_json = workflow.story_json or {}
-        visual_bible = scene_plan.get("visual_bible") or {}
         pages = []
         for page in story_json.get("pages") or []:
             page_number = page.get("page_number", len(pages) + 1)
             pages.append(
                 {
-                    "page_number": page_number,
+                    "page": page_number,
                     "story_role": "build",
+                    "visual_focus": "Mira and Luma act out the planned source-story moment.",
+                    "camera_shot": "medium shot",
+                    "composition": "Mira centered with Luma beside her, clear action, no extra characters.",
                     "emotion": page.get("emotion") or "wonder",
-                    "scene_action": "Mira and Luma act out the planned source-story moment.",
                     "environment": "bright storybook village",
-                    "characters_present": ["Mira", "Luma"],
-                    "image_prompt": "Mira in blue tunic and yellow scarf with Luma the silver owl, consistent storybook scene, no character redesign.",
+                    "characters": ["Mira", "Luma"],
+                    "important_objects": ["helpful clue"],
+                    "continuity_notes": [
+                        "Mira keeps blue tunic, yellow scarf, red shoes, short dark bob.",
+                        "Luma remains a tiny silver owl with a green ribbon.",
+                    ],
                 }
             )
         return {
-            "visual_bible": visual_bible,
+            "style": self._workflow_illustration_style(workflow),
             "cover": {
                 "title_text": story_json.get("title") or "The Helpful Adventure",
+                "book_cover_prompt": (
+                    "Front book cover showing Mira and Luma in the storybook village with clean title space "
+                    f"for \"{story_json.get('title') or 'The Helpful Adventure'}\"."
+                ),
                 "visual_focus": "Mira and Luma in the storybook village",
                 "emotion": "wonder",
-                "image_prompt": "Clean storybook cover with Mira and Luma, exact title text, no black rectangle.",
+                "camera_shot": "wide shot",
+                "composition": "Clean cover composition with title area, Mira and Luma clearly visible.",
+                "title_layout": "Large readable title at the top over a calm clean sky area.",
+                "genre_signal": "warm adventure storybook",
+                "characters": ["Mira", "Luma"],
+                "important_objects": ["helpful clue"],
+                "continuity_notes": [
+                    "Mira keeps blue tunic, yellow scarf, red shoes, short dark bob.",
+                    "Luma remains a tiny silver owl with a green ribbon.",
+                ],
             },
             "pages": pages,
         }
@@ -1517,12 +2276,12 @@ class GenericStoryWorkflowService:
         character = workflow.character_analysis_json or {}
         scene_plan = workflow.scene_plan_json or {}
         story_json = workflow.story_json or {}
-        workflow.title = str(story_json.get("title") or scene_plan.get("title") or character.get("source_title") or "")[:255] or None
+        workflow.title = str(story_json.get("title") or scene_plan.get("title") or character.get("title") or character.get("source_title") or "")[:255] or None
         workflow.summary = str(story_json.get("summary") or scene_plan.get("summary") or character.get("summary") or "") or None
         workflow.theme = str(scene_plan.get("theme") or character.get("theme") or workflow.theme or "")[:100] or None
         workflow.genre = str(scene_plan.get("genre") or character.get("genre") or workflow.genre or "")[:100] or None
-        workflow.learning_goal = str(scene_plan.get("learning_goal") or character.get("learning_goal") or workflow.learning_goal or "")[:500] or None
-        workflow.moral = str(story_json.get("moral") or scene_plan.get("moral_explanation") or character.get("moral") or "")[:255] or None
+        workflow.learning_goal = str(scene_plan.get("goal") or scene_plan.get("learning_goal") or character.get("goal") or character.get("learning_goal") or workflow.learning_goal or "")[:500] or None
+        workflow.moral = str(story_json.get("moral") or scene_plan.get("moral") or scene_plan.get("moral_explanation") or character.get("moral") or "")[:255] or None
 
     async def _get_owned(self, user_id: UUID, workflow_id: UUID) -> GenericStoryWorkflow:
         workflow = await self.workflows.get_for_user(user_id, workflow_id)
@@ -1543,6 +2302,57 @@ class GenericStoryWorkflowService:
         if not value:
             raise AppException(message, code="GENERIC_STORY_WORKFLOW_DEPENDENCY_MISSING")
 
+    def _log_workflow_event(
+        self,
+        event: str,
+        workflow: GenericStoryWorkflow,
+        *,
+        step: GenericStoryWorkflowStep | str | None = None,
+        level: int = logging.INFO,
+        **details: Any,
+    ) -> None:
+        step_name = self._log_step_name(step) or getattr(workflow, "current_step", None)
+        fields = {
+            "event": event,
+            "workflow_id": getattr(workflow, "id", None),
+            "generic_story_id": getattr(workflow, "generic_story_id", None),
+            "step": step_name,
+            "status": getattr(workflow, "status", None),
+        }
+        fields.update({key: value for key, value in details.items() if value is not None})
+        message = "generic_story_workflow " + " ".join(
+            f"{key}={self._log_field_value(value)}"
+            for key, value in fields.items()
+        )
+        logger.log(level, message)
+
+    @staticmethod
+    def _log_step_name(step: GenericStoryWorkflowStep | str | None) -> str | None:
+        if step is None:
+            return None
+        if isinstance(step, GenericStoryWorkflowStep):
+            return step.value
+        return str(step)
+
+    @staticmethod
+    def _log_field_value(value: Any) -> str:
+        if value is None:
+            return "none"
+        if isinstance(value, bool):
+            return str(value).lower()
+        if isinstance(value, (int, float)):
+            return str(value)
+        text = str(value).replace("\n", "\\n")
+        if not text:
+            return '""'
+        if any(char.isspace() for char in text) or "=" in text:
+            return json.dumps(text, ensure_ascii=False)
+        return text
+
+    @staticmethod
+    def _duration_ms(started_at: float) -> int:
+        return int((perf_counter() - started_at) * 1000)
+
     def _step_status(self, workflow: GenericStoryWorkflow, step: GenericStoryWorkflowStep) -> str:
         if workflow.current_step == step.value and workflow.status == GenericStoryWorkflowStatus.IN_PROGRESS.value:
             return "IN_PROGRESS"
@@ -1556,6 +2366,8 @@ class GenericStoryWorkflowService:
             return bool(workflow.character_analysis_json)
         if step == GenericStoryWorkflowStep.SCENE_PLAN_GENERATION:
             return bool(workflow.scene_plan_json)
+        if step == GenericStoryWorkflowStep.VISUAL_BIBLE_GENERATION:
+            return bool(self._workflow_visual_bible(workflow))
         if step == GenericStoryWorkflowStep.STORY_GENERATION:
             return bool(workflow.story_json)
         if step == GenericStoryWorkflowStep.IMAGE_PLAN_GENERATION:
@@ -1570,9 +2382,9 @@ class GenericStoryWorkflowService:
 
     def _step_summary(self, workflow: GenericStoryWorkflow, step: GenericStoryWorkflowStep) -> dict[str, Any]:
         if step == GenericStoryWorkflowStep.CHARACTER_EXTRACTION:
-            characters = (workflow.character_analysis_json or {}).get("characters") or []
+            characters = (workflow.character_analysis_json or {}).get("chars") or (workflow.character_analysis_json or {}).get("characters") or []
             return {
-                "title": (workflow.character_analysis_json or {}).get("source_title") or workflow.title,
+                "title": (workflow.character_analysis_json or {}).get("title") or (workflow.character_analysis_json or {}).get("source_title") or workflow.title,
                 "character_count": len(characters) if isinstance(characters, list) else 0,
             }
         if step == GenericStoryWorkflowStep.SCENE_PLAN_GENERATION:
@@ -1581,6 +2393,14 @@ class GenericStoryWorkflowService:
                 "title": (workflow.scene_plan_json or {}).get("title") or workflow.title,
                 "page_count": len(pages) if isinstance(pages, list) else 0,
                 "requested_pages": workflow.requested_pages,
+            }
+        if step == GenericStoryWorkflowStep.VISUAL_BIBLE_GENERATION:
+            visual_bible_json = self._workflow_visual_bible(workflow)
+            characters = visual_bible_json.get("characters") or []
+            return {
+                "character_count": len(characters) if isinstance(characters, list) else 0,
+                "location_count": len(visual_bible_json.get("locations") or []),
+                "object_count": len(visual_bible_json.get("important_objects") or []),
             }
         if step == GenericStoryWorkflowStep.STORY_GENERATION:
             pages = (workflow.story_json or {}).get("pages") or []
@@ -1618,6 +2438,9 @@ class GenericStoryWorkflowService:
             return workflow.character_analysis_json
         if step == GenericStoryWorkflowStep.SCENE_PLAN_GENERATION:
             return workflow.scene_plan_json
+        if step == GenericStoryWorkflowStep.VISUAL_BIBLE_GENERATION:
+            visual_bible = self._workflow_visual_bible(workflow)
+            return visual_bible or None
         if step == GenericStoryWorkflowStep.STORY_GENERATION:
             return workflow.story_json
         if step == GenericStoryWorkflowStep.IMAGE_PLAN_GENERATION:
@@ -1625,8 +2448,7 @@ class GenericStoryWorkflowService:
         if step == GenericStoryWorkflowStep.IMAGE_GENERATION:
             story_json = workflow.story_json or {}
             return {
-                "visual_bible": (workflow.image_plan_json or {}).get("visual_bible")
-                or (workflow.scene_plan_json or {}).get("visual_bible"),
+                "visual_bible": self._workflow_visual_bible(workflow),
                 "final_prompts": self._image_generation_final_prompts(story_json),
                 "cover_image_url": story_json.get("cover_image_url") or workflow.cover_image,
                 "cover_image_prompt": story_json.get("cover_image_prompt"),
@@ -1726,11 +2548,11 @@ class GenericStoryWorkflowService:
 
     @staticmethod
     def _default_page_count(age_group: str) -> int:
-        if age_group == "2-4":
-            return 6
-        if age_group == "8-12":
-            return 12
-        return 10
+        return page_count_range_for_age_group(age_group)[0]
+
+    @staticmethod
+    def _scene_plan_page_count_range(age_group: str) -> tuple[int, int]:
+        return page_count_range_for_age_group(age_group)
 
     @staticmethod
     def _story_has_images(story_json: dict[str, Any]) -> bool:

@@ -1,853 +1,3017 @@
-﻿{
-    "info":  {
-                 "name":  "SB Backend API",
-                 "description":  "Postman collection for the kids storytelling mobile backend REST API.",
-                 "schema":  "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
-             },
-    "variable":  [
-                     {
-                         "key":  "base_url",
-                         "value":  "http://localhost:8000"
-                     },
-                     {
-                         "key":  "api_prefix",
-                         "value":  "/api/v1"
-                     },
-                     {
-                         "key":  "access_token",
-                         "value":  ""
-                     },
-                     {
-                         "key":  "refresh_token",
-                         "value":  ""
-                     },
-                     {
-                         "key":  "child_id",
-                         "value":  ""
-                     },
-                     {
-                         "key":  "generic_story_id",
-                         "value":  ""
-                     },
-                     {
-                         "key":  "child_book_id",
-                         "value":  ""
-                     },
-                     {
-                         "key":  "email",
-                         "value":  "parent@example.com"
-                     },
-                     {
-                         "key":  "phone",
-                         "value":  "+15551234567"
-                     },
-                     {
-                         "key":  "password",
-                         "value":  "StrongPass@123"
-                     },
-                     {
-                         "key":  "otp",
-                         "value":  "123456"
-                     },
-                     {
-                         "key":  "google_id_token",
-                         "value":  ""
-                     }
-                 ],
-    "item":  [
-                 {
-                     "name":  "Auth",
-                     "item":  [
-                                  {
-                                      "name":  "Signup",
-                                      "request":  {
-                                                      "method":  "POST",
-                                                      "header":  [
-                                                                     {
-                                                                         "key":  "Content-Type",
-                                                                         "value":  "application/json"
-                                                                     }
-                                                                 ],
-                                                      "body":  {
-                                                                   "mode":  "raw",
-                                                                   "raw":  "{\n  \"email\": \"{{email}}\",\n  \"phone\": \"{{phone}}\",\n  \"password\": \"{{password}}\",\n  \"confirm_password\": \"{{password}}\"\n}"
-                                                               },
-                                                      "url":  {
-                                                                  "raw":  "{{base_url}}{{api_prefix}}/auth/signup",
-                                                                  "host":  [
-                                                                               "{{base_url}}{{api_prefix}}"
-                                                                           ],
-                                                                  "path":  [
-                                                                               "auth",
-                                                                               "signup"
-                                                                           ]
-                                                              }
-                                                  }
-                                  },
-                                  {
-                                      "name":  "Verify Email OTP",
-                                      "request":  {
-                                                      "method":  "POST",
-                                                      "header":  [
-                                                                     {
-                                                                         "key":  "Content-Type",
-                                                                         "value":  "application/json"
-                                                                     }
-                                                                 ],
-                                                      "body":  {
-                                                                   "mode":  "raw",
-                                                                   "raw":  "{\n  \"email\": \"{{email}}\",\n  \"otp\": \"{{otp}}\"\n}"
-                                                               },
-                                                      "url":  {
-                                                                  "raw":  "{{base_url}}{{api_prefix}}/auth/verify-email-otp",
-                                                                  "host":  [
-                                                                               "{{base_url}}{{api_prefix}}"
-                                                                           ],
-                                                                  "path":  [
-                                                                               "auth",
-                                                                               "verify-email-otp"
-                                                                           ]
-                                                              }
-                                                  }
-                                  },
-                                  {
-                                      "name":  "Login",
-                                      "event":  [
-                                                    {
-                                                        "listen":  "test",
-                                                        "script":  {
-                                                                       "type":  "text/javascript",
-                                                                       "exec":  [
-                                                                                    "const json = pm.response.json();",
-                                                                                    "if (json \u0026\u0026 json.data) {",
-                                                                                    "  pm.collectionVariables.set(\u0027access_token\u0027, json.data.access_token);",
-                                                                                    "  pm.collectionVariables.set(\u0027refresh_token\u0027, json.data.refresh_token);",
-                                                                                    "}"
-                                                                                ]
-                                                                   }
-                                                    }
-                                                ],
-                                      "request":  {
-                                                      "method":  "POST",
-                                                      "header":  [
-                                                                     {
-                                                                         "key":  "Content-Type",
-                                                                         "value":  "application/json"
-                                                                     }
-                                                                 ],
-                                                      "body":  {
-                                                                   "mode":  "raw",
-                                                                   "raw":  "{\n  \"identifier\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}"
-                                                               },
-                                                      "url":  {
-                                                                  "raw":  "{{base_url}}{{api_prefix}}/auth/login",
-                                                                  "host":  [
-                                                                               "{{base_url}}{{api_prefix}}"
-                                                                           ],
-                                                                  "path":  [
-                                                                               "auth",
-                                                                               "login"
-                                                                           ]
-                                                              }
-                                                  }
-                                  },
-                                  {
-                                      "name":  "Google Login",
-                                      "event":  [
-                                                    {
-                                                        "listen":  "test",
-                                                        "script":  {
-                                                                       "type":  "text/javascript",
-                                                                       "exec":  [
-                                                                                    "const json = pm.response.json();",
-                                                                                    "if (json \u0026\u0026 json.data) {",
-                                                                                    "  pm.collectionVariables.set(\u0027access_token\u0027, json.data.access_token);",
-                                                                                    "  pm.collectionVariables.set(\u0027refresh_token\u0027, json.data.refresh_token);",
-                                                                                    "}"
-                                                                                ]
-                                                                   }
-                                                    }
-                                                ],
-                                      "request":  {
-                                                      "method":  "POST",
-                                                      "header":  [
-                                                                     {
-                                                                         "key":  "Content-Type",
-                                                                         "value":  "application/json"
-                                                                     }
-                                                                 ],
-                                                      "body":  {
-                                                                   "mode":  "raw",
-                                                                   "raw":  "{\n  \"id_token\": \"{{google_id_token}}\"\n}"
-                                                               },
-                                                      "url":  {
-                                                                  "raw":  "{{base_url}}{{api_prefix}}/auth/google-login",
-                                                                  "host":  [
-                                                                               "{{base_url}}{{api_prefix}}"
-                                                                           ],
-                                                                  "path":  [
-                                                                               "auth",
-                                                                               "google-login"
-                                                                           ]
-                                                              }
-                                                  }
-                                  },
-                                  {
-                                      "name":  "Add Phone",
-                                      "request":  {
-                                                      "auth":  {
-                                                                   "type":  "bearer",
-                                                                   "bearer":  [
-                                                                                  {
-                                                                                      "key":  "token",
-                                                                                      "value":  "{{access_token}}",
-                                                                                      "type":  "string"
-                                                                                  }
-                                                                              ]
-                                                               },
-                                                      "method":  "POST",
-                                                      "header":  [
-                                                                     {
-                                                                         "key":  "Content-Type",
-                                                                         "value":  "application/json"
-                                                                     }
-                                                                 ],
-                                                      "body":  {
-                                                                   "mode":  "raw",
-                                                                   "raw":  "{\n  \"phone\": \"{{phone}}\"\n}"
-                                                               },
-                                                      "url":  {
-                                                                  "raw":  "{{base_url}}{{api_prefix}}/auth/add-phone",
-                                                                  "host":  [
-                                                                               "{{base_url}}{{api_prefix}}"
-                                                                           ],
-                                                                  "path":  [
-                                                                               "auth",
-                                                                               "add-phone"
-                                                                           ]
-                                                              }
-                                                  }
-                                  },
-                                  {
-                                      "name":  "Forgot Password",
-                                      "request":  {
-                                                      "method":  "POST",
-                                                      "header":  [
-                                                                     {
-                                                                         "key":  "Content-Type",
-                                                                         "value":  "application/json"
-                                                                     }
-                                                                 ],
-                                                      "body":  {
-                                                                   "mode":  "raw",
-                                                                   "raw":  "{\n  \"email\": \"{{email}}\"\n}"
-                                                               },
-                                                      "url":  {
-                                                                  "raw":  "{{base_url}}{{api_prefix}}/auth/forgot-password",
-                                                                  "host":  [
-                                                                               "{{base_url}}{{api_prefix}}"
-                                                                           ],
-                                                                  "path":  [
-                                                                               "auth",
-                                                                               "forgot-password"
-                                                                           ]
-                                                              }
-                                                  }
-                                  },
-                                  {
-                                      "name":  "Reset Password",
-                                      "request":  {
-                                                      "method":  "POST",
-                                                      "header":  [
-                                                                     {
-                                                                         "key":  "Content-Type",
-                                                                         "value":  "application/json"
-                                                                     }
-                                                                 ],
-                                                      "body":  {
-                                                                   "mode":  "raw",
-                                                                   "raw":  "{\n  \"email\": \"{{email}}\",\n  \"otp\": \"{{otp}}\",\n  \"new_password\": \"{{password}}\",\n  \"confirm_password\": \"{{password}}\"\n}"
-                                                               },
-                                                      "url":  {
-                                                                  "raw":  "{{base_url}}{{api_prefix}}/auth/reset-password",
-                                                                  "host":  [
-                                                                               "{{base_url}}{{api_prefix}}"
-                                                                           ],
-                                                                  "path":  [
-                                                                               "auth",
-                                                                               "reset-password"
-                                                                           ]
-                                                              }
-                                                  }
-                                  },
-                                  {
-                                      "name":  "Refresh Token",
-                                      "event":  [
-                                                    {
-                                                        "listen":  "test",
-                                                        "script":  {
-                                                                       "type":  "text/javascript",
-                                                                       "exec":  [
-                                                                                    "const json = pm.response.json();",
-                                                                                    "if (json \u0026\u0026 json.data) {",
-                                                                                    "  pm.collectionVariables.set(\u0027access_token\u0027, json.data.access_token);",
-                                                                                    "  pm.collectionVariables.set(\u0027refresh_token\u0027, json.data.refresh_token);",
-                                                                                    "}"
-                                                                                ]
-                                                                   }
-                                                    }
-                                                ],
-                                      "request":  {
-                                                      "method":  "POST",
-                                                      "header":  [
-                                                                     {
-                                                                         "key":  "Content-Type",
-                                                                         "value":  "application/json"
-                                                                     }
-                                                                 ],
-                                                      "body":  {
-                                                                   "mode":  "raw",
-                                                                   "raw":  "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}"
-                                                               },
-                                                      "url":  {
-                                                                  "raw":  "{{base_url}}{{api_prefix}}/auth/refresh-token",
-                                                                  "host":  [
-                                                                               "{{base_url}}{{api_prefix}}"
-                                                                           ],
-                                                                  "path":  [
-                                                                               "auth",
-                                                                               "refresh-token"
-                                                                           ]
-                                                              }
-                                                  }
-                                  },
-                                  {
-                                      "name":  "Logout",
-                                      "request":  {
-                                                      "method":  "POST",
-                                                      "header":  [
-                                                                     {
-                                                                         "key":  "Content-Type",
-                                                                         "value":  "application/json"
-                                                                     }
-                                                                 ],
-                                                      "body":  {
-                                                                   "mode":  "raw",
-                                                                   "raw":  "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}"
-                                                               },
-                                                      "url":  {
-                                                                  "raw":  "{{base_url}}{{api_prefix}}/auth/logout",
-                                                                  "host":  [
-                                                                               "{{base_url}}{{api_prefix}}"
-                                                                           ],
-                                                                  "path":  [
-                                                                               "auth",
-                                                                               "logout"
-                                                                           ]
-                                                              }
-                                                  }
-                                  }
-                              ]
-                 },
-                 {
-                     "name":  "Children",
-                     "item":  [
-                                  {
-                                      "name":  "Create Child Profile",
-                                      "event":  [
-                                                    {
-                                                        "listen":  "test",
-                                                        "script":  {
-                                                                       "type":  "text/javascript",
-                                                                       "exec":  [
-                                                                                    "const json = pm.response.json();",
-                                                                                    "if (json \u0026\u0026 json.data \u0026\u0026 json.data.id) {",
-                                                                                    "  pm.collectionVariables.set(\u0027child_id\u0027, json.data.id);",
-                                                                                    "}"
-                                                                                ]
-                                                                   }
-                                                    }
-                                                ],
-                                      "request":  {
-                                                      "auth":  {
-                                                                   "type":  "bearer",
-                                                                   "bearer":  [
-                                                                                  {
-                                                                                      "key":  "token",
-                                                                                      "value":  "{{access_token}}",
-                                                                                      "type":  "string"
-                                                                                  }
-                                                                              ]
-                                                               },
-                                                      "method":  "POST",
-                                                      "header":  [
-                                                                     {
-                                                                         "key":  "Content-Type",
-                                                                         "value":  "multipart/form-data"
-                                                                     }
-                                                                 ],
-                                                      "body":  {
-                                                                   "mode":  "formdata",
-                                                                   "formdata":  [
-                                                                                    {
-                                                                                        "key":  "first_name",
-                                                                                        "value":  "Aarav",
-                                                                                        "type":  "text"
-                                                                                    },
-                                                                                    {
-                                                                                        "key":  "last_name",
-                                                                                        "value":  "Sharma",
-                                                                                        "type":  "text"
-                                                                                    },
-                                                                                    {
-                                                                                        "key":  "dob",
-                                                                                        "value":  "2018-05-14",
-                                                                                        "type":  "text"
-                                                                                    },
-                                                                                    {
-                                                                                        "key":  "age",
-                                                                                        "value":  "6",
-                                                                                        "type":  "text"
-                                                                                    },
-                                                                                    {
-                                                                                        "key":  "gender",
-                                                                                        "value":  "male",
-                                                                                        "type":  "text"
-                                                                                    },
-                                                                                    {
-                                                                                        "key":  "photo",
-                                                                                        "type":  "file",
-                                                                                        "src":  ""
-                                                                                    }
-                                                                                ]
-                                                               },
-                                                      "url":  {
-                                                                  "raw":  "{{base_url}}{{api_prefix}}/children",
-                                                                  "host":  [
-                                                                               "{{base_url}}{{api_prefix}}"
-                                                                           ],
-                                                                  "path":  [
-                                                                               "children"
-                                                                           ]
-                                                              }
-                                                  }
-                                  },
-                                  {
-                                      "name":  "Get Child Profiles",
-                                      "request":  {
-                                                      "auth":  {
-                                                                   "type":  "bearer",
-                                                                   "bearer":  [
-                                                                                  {
-                                                                                      "key":  "token",
-                                                                                      "value":  "{{access_token}}",
-                                                                                      "type":  "string"
-                                                                                  }
-                                                                              ]
-                                                               },
-                                                      "method":  "GET",
-                                                      "header":  [
-
-                                                                 ],
-                                                      "url":  {
-                                                                  "raw":  "{{base_url}}{{api_prefix}}/children",
-                                                                  "host":  [
-                                                                               "{{base_url}}{{api_prefix}}"
-                                                                           ],
-                                                                  "path":  [
-                                                                               "children"
-                                                                           ]
-                                                              }
-                                                  }
-                                  },
-                                  {
-                                      "name":  "Update Child Profile",
-                                      "request":  {
-                                                      "auth":  {
-                                                                   "type":  "bearer",
-                                                                   "bearer":  [
-                                                                                  {
-                                                                                      "key":  "token",
-                                                                                      "value":  "{{access_token}}",
-                                                                                      "type":  "string"
-                                                                                  }
-                                                                              ]
-                                                               },
-                                                      "method":  "PUT",
-                                                      "header":  [
-                                                                     {
-                                                                         "key":  "Content-Type",
-                                                                         "value":  "application/json"
-                                                                     }
-                                                                 ],
-                                                      "body":  {
-                                                                   "mode":  "raw",
-                                                                   "raw":  "{\n  \"first_name\": \"Aarav\",\n  \"last_name\": \"Sharma\",\n  \"dob\": \"2018-05-14\",\n  \"age\": 7,\n  \"gender\": \"male\",\n  \"avatar_image_url\": \"https://example.com/avatar-updated.png\"\n}"
-                                                               },
-                                                      "url":  {
-                                                                  "raw":  "{{base_url}}{{api_prefix}}/children/{{child_id}}",
-                                                                  "host":  [
-                                                                               "{{base_url}}{{api_prefix}}"
-                                                                           ],
-                                                                  "path":  [
-                                                                               "children",
-                                                                               "{{child_id}}"
-                                                                           ]
-                                                              }
-                                                  }
-                                  },
-                                  {
-                                      "name":  "Select Active Child Profile",
-                                      "request":  {
-                                                      "auth":  {
-                                                                   "type":  "bearer",
-                                                                   "bearer":  [
-                                                                                  {
-                                                                                      "key":  "token",
-                                                                                      "value":  "{{access_token}}",
-                                                                                      "type":  "string"
-                                                                                  }
-                                                                              ]
-                                                               },
-                                                      "method":  "POST",
-                                                      "header":  [
-
-                                                                 ],
-                                                      "url":  {
-                                                                  "raw":  "{{base_url}}{{api_prefix}}/children/select/{{child_id}}",
-                                                                  "host":  [
-                                                                               "{{base_url}}{{api_prefix}}"
-                                                                           ],
-                                                                  "path":  [
-                                                                               "children",
-                                                                               "select",
-                                                                               "{{child_id}}"
-                                                                           ]
-                                                              }
-                                                  }
-                                  }
-                              ]
-                 },
-                 {
-                     "name":  "Generic Stories",
-                     "item":  [
-                                  {
-                                      "name":  "Create Generic Story",
-                                      "event":  [
-                                                    {
-                                                        "listen":  "test",
-                                                        "script":  {
-                                                                       "exec":  [
-                                                                                    "if (pm.response.code === 201) {",
-                                                                                    "  const json = pm.response.json();",
-                                                                                    "  pm.collectionVariables.set(\u0027generic_story_id\u0027, json.data.id);",
-                                                                                    "}"
-                                                                                ],
-                                                                       "type":  "text/javascript"
-                                                                   }
-                                                    }
-                                                ],
-                                      "request":  {
-                                                      "auth":  {
-                                                                   "type":  "bearer",
-                                                                   "bearer":  [
-                                                                                  {
-                                                                                      "key":  "token",
-                                                                                      "value":  "{{access_token}}",
-                                                                                      "type":  "string"
-                                                                                  }
-                                                                              ]
-                                                               },
-                                                      "method":  "POST",
-                                                      "header":  [
-                                                                     {
-                                                                         "key":  "Content-Type",
-                                                                         "value":  "application/json"
-                                                                     }
-                                                                 ],
-                                                      "body":  {
-                                                                   "mode":  "raw",
-                                                                   "raw":  "{\n  \"title\": \"Nova Helps the Moon Garden\",\n  \"summary\": \"A child travels through space and helps moon gardeners repair a glowing habitat.\",\n  \"age_group\": \"5-7\",\n  \"theme\": \"space journey\",\n  \"genre\": \"science fiction\",\n  \"moral\": \"Helping others makes every journey brighter\",\n  \"learning_goal\": \"helping others\",\n  \"reading_time_minutes\": 6,\n  \"character_type\": \"space explorer\",\n  \"total_pages\": 8,\n  \"cover_image\": \"https://example.com/covers/nova-moon-garden.png\",\n  \"status\": \"active\",\n  \"story_contents\": [\n    {\n      \"language\": \"en\",\n      \"story_json\": {\n        \"title\": \"Nova Helps the Moon Garden\",\n        \"pages\": [\n          {\n            \"page_number\": 1,\n            \"text\": \"Nova zipped toward the moon garden as silver leaves shimmered below.\"\n          }\n        ]\n      }\n    },\n    {\n      \"language\": \"hi\",\n      \"story_json\": {\n        \"title\": \"Nova and the Moon Garden - Hindi\",\n        \"pages\": [\n          {\n            \"page_number\": 1,\n            \"text\": \"Hindi story text goes here.\"\n          }\n        ]\n      }\n    }\n  ]\n}"
-                                                               },
-                                                      "url":  {
-                                                                  "raw":  "{{base_url}}{{api_prefix}}/generic-stories",
-                                                                  "host":  [
-                                                                               "{{base_url}}{{api_prefix}}"
-                                                                           ],
-                                                                  "path":  [
-                                                                               "generic-stories"
-                                                                           ]
-                                                              }
-                                                  }
-                                  },
-                                  {
-                                      "name":  "List Generic Stories",
-                                      "request":  {
-                                                      "auth":  {
-                                                                   "type":  "bearer",
-                                                                   "bearer":  [
-                                                                                  {
-                                                                                      "key":  "token",
-                                                                                      "value":  "{{access_token}}",
-                                                                                      "type":  "string"
-                                                                                  }
-                                                                              ]
-                                                               },
-                                                      "method":  "GET",
-                                                      "header":  [
-
-                                                                 ],
-                                                      "url":  {
-                                                                  "raw":  "{{base_url}}{{api_prefix}}/generic-stories?page=1\u0026page_size=20\u0026status=active\u0026language=en",
-                                                                  "host":  [
-                                                                               "{{base_url}}{{api_prefix}}"
-                                                                           ],
-                                                                  "path":  [
-                                                                               "generic-stories"
-                                                                           ],
-                                                                  "query":  [
-                                                                                {
-                                                                                    "key":  "page",
-                                                                                    "value":  "1"
-                                                                                },
-                                                                                {
-                                                                                    "key":  "page_size",
-                                                                                    "value":  "20"
-                                                                                },
-                                                                                {
-                                                                                    "key":  "status",
-                                                                                    "value":  "active"
-                                                                                },
-                                                                                {
-                                                                                    "key":  "language",
-                                                                                    "value":  "en"
-                                                                                }
-                                                                            ]
-                                                              }
-                                                  }
-                                  },
-                                  {
-                                      "name":  "Update Generic Story",
-                                      "request":  {
-                                                      "auth":  {
-                                                                   "type":  "bearer",
-                                                                   "bearer":  [
-                                                                                  {
-                                                                                      "key":  "token",
-                                                                                      "value":  "{{access_token}}",
-                                                                                      "type":  "string"
-                                                                                  }
-                                                                              ]
-                                                               },
-                                                      "method":  "PUT",
-                                                      "header":  [
-                                                                     {
-                                                                         "key":  "Content-Type",
-                                                                         "value":  "application/json"
-                                                                     }
-                                                                 ],
-                                                      "body":  {
-                                                                   "mode":  "raw",
-                                                                   "raw":  "{\n  \"summary\": \"Updated summary for the reusable science fiction story.\",\n  \"reading_time_minutes\": 7,\n  \"status\": \"active\",\n  \"story_contents\": [\n    {\n      \"language\": \"en\",\n      \"story_json\": {\n        \"title\": \"Nova Helps the Moon Garden\",\n        \"pages\": [\n          {\n            \"page_number\": 1,\n            \"text\": \"Updated English page text.\"\n          }\n        ]\n      }\n    }\n  ]\n}"
-                                                               },
-                                                      "url":  {
-                                                                  "raw":  "{{base_url}}{{api_prefix}}/generic-stories/{{generic_story_id}}",
-                                                                  "host":  [
-                                                                               "{{base_url}}{{api_prefix}}"
-                                                                           ],
-                                                                  "path":  [
-                                                                               "generic-stories",
-                                                                               "{{generic_story_id}}"
-                                                                           ]
-                                                              }
-                                                  }
-                                  },
-                                  {
-                                      "name":  "Delete Generic Story",
-                                      "request":  {
-                                                      "auth":  {
-                                                                   "type":  "bearer",
-                                                                   "bearer":  [
-                                                                                  {
-                                                                                      "key":  "token",
-                                                                                      "value":  "{{access_token}}",
-                                                                                      "type":  "string"
-                                                                                  }
-                                                                              ]
-                                                               },
-                                                      "method":  "DELETE",
-                                                      "header":  [
-
-                                                                 ],
-                                                      "url":  {
-                                                                  "raw":  "{{base_url}}{{api_prefix}}/generic-stories/{{generic_story_id}}",
-                                                                  "host":  [
-                                                                               "{{base_url}}{{api_prefix}}"
-                                                                           ],
-                                                                  "path":  [
-                                                                               "generic-stories",
-                                                                               "{{generic_story_id}}"
-                                                                           ]
-                                                              }
-                                                  }
-                                  }
-                              ]
-                 },
-                 {
-                     "name":  "Child Books",
-                     "item":  [
-                                  {
-                                      "name":  "Add Generic Story to Child",
-                                      "event":  [
-                                                    {
-                                                        "listen":  "test",
-                                                        "script":  {
-                                                                       "exec":  [
-                                                                                    "if (pm.response.code === 201) {",
-                                                                                    "  const json = pm.response.json();",
-                                                                                    "  pm.collectionVariables.set(\u0027child_book_id\u0027, json.data.id);",
-                                                                                    "}"
-                                                                                ],
-                                                                       "type":  "text/javascript"
-                                                                   }
-                                                    }
-                                                ],
-                                      "request":  {
-                                                      "auth":  {
-                                                                   "type":  "bearer",
-                                                                   "bearer":  [
-                                                                                  {
-                                                                                      "key":  "token",
-                                                                                      "value":  "{{access_token}}",
-                                                                                      "type":  "string"
-                                                                                  }
-                                                                              ]
-                                                               },
-                                                      "method":  "POST",
-                                                      "header":  [
-                                                                     {
-                                                                         "key":  "Content-Type",
-                                                                         "value":  "application/json"
-                                                                     }
-                                                                 ],
-                                                      "body":  {
-                                                                   "mode":  "raw",
-                                                                   "raw":  "{\n  \"generic_story_id\": \"{{generic_story_id}}\",\n  \"language\": \"en\"\n}"
-                                                               },
-                                                      "url":  {
-                                                                  "raw":  "{{base_url}}{{api_prefix}}/children/{{child_id}}/books/generic",
-                                                                  "host":  [
-                                                                               "{{base_url}}{{api_prefix}}"
-                                                                           ],
-                                                                  "path":  [
-                                                                               "children",
-                                                                               "{{child_id}}",
-                                                                               "books",
-                                                                               "generic"
-                                                                           ]
-                                                              }
-                                                  }
-                                  },
-                                  {
-                                      "name":  "List Child Books",
-                                      "request":  {
-                                                      "auth":  {
-                                                                   "type":  "bearer",
-                                                                   "bearer":  [
-                                                                                  {
-                                                                                      "key":  "token",
-                                                                                      "value":  "{{access_token}}",
-                                                                                      "type":  "string"
-                                                                                  }
-                                                                              ]
-                                                               },
-                                                      "method":  "GET",
-                                                      "header":  [
-
-                                                                 ],
-                                                      "url":  {
-                                                                  "raw":  "{{base_url}}{{api_prefix}}/children/{{child_id}}/books?page=1\u0026page_size=20",
-                                                                  "host":  [
-                                                                               "{{base_url}}{{api_prefix}}"
-                                                                           ],
-                                                                  "path":  [
-                                                                               "children",
-                                                                               "{{child_id}}",
-                                                                               "books"
-                                                                           ],
-                                                                  "query":  [
-                                                                                {
-                                                                                    "key":  "page",
-                                                                                    "value":  "1"
-                                                                                },
-                                                                                {
-                                                                                    "key":  "page_size",
-                                                                                    "value":  "20"
-                                                                                },
-                                                                                {
-                                                                                    "key":  "status",
-                                                                                    "value":  "not_started",
-                                                                                    "disabled":  true
-                                                                                }
-                                                                            ]
-                                                              }
-                                                  }
-                                  },
-                                  {
-                                      "name":  "Delete Child Book",
-                                      "request":  {
-                                                      "auth":  {
-                                                                   "type":  "bearer",
-                                                                   "bearer":  [
-                                                                                  {
-                                                                                      "key":  "token",
-                                                                                      "value":  "{{access_token}}",
-                                                                                      "type":  "string"
-                                                                                  }
-                                                                              ]
-                                                               },
-                                                      "method":  "DELETE",
-                                                      "header":  [
-
-                                                                 ],
-                                                      "url":  {
-                                                                  "raw":  "{{base_url}}{{api_prefix}}/children/{{child_id}}/books/{{child_book_id}}",
-                                                                  "host":  [
-                                                                               "{{base_url}}{{api_prefix}}"
-                                                                           ],
-                                                                  "path":  [
-                                                                               "children",
-                                                                               "{{child_id}}",
-                                                                               "books",
-                                                                               "{{child_book_id}}"
-                                                                           ]
-                                                              }
-                                                  }
-                                  }
-                              ]
-                 },
-                 {
-                     "name":  "Health",
-                     "item":  [
-                                  {
-                                      "name":  "Health Check",
-                                      "request":  {
-                                                      "method":  "GET",
-                                                      "header":  [
-
-                                                                 ],
-                                                      "url":  {
-                                                                  "raw":  "{{base_url}}/health",
-                                                                  "host":  [
-                                                                               "{{base_url}}"
-                                                                           ],
-                                                                  "path":  [
-                                                                               "health"
-                                                                           ]
-                                                              }
-                                                  }
-                                  }
-                              ]
-                 }
-             ]
+{
+  "info": {
+    "name": "Storybook Backend API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Generated from the FastAPI OpenAPI schema. Use {{base_url}} and {{access_token}} collection variables."
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "access_token",
+      "value": ""
+    },
+    {
+      "key": "audio_id",
+      "value": ""
+    },
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000"
+    },
+    {
+      "key": "batch_job_id",
+      "value": ""
+    },
+    {
+      "key": "child_audio_id",
+      "value": ""
+    },
+    {
+      "key": "child_book_id",
+      "value": ""
+    },
+    {
+      "key": "child_id",
+      "value": ""
+    },
+    {
+      "key": "generic_audio_id",
+      "value": ""
+    },
+    {
+      "key": "generic_story_id",
+      "value": ""
+    },
+    {
+      "key": "generic_story_workflow_id",
+      "value": ""
+    },
+    {
+      "key": "notification_id",
+      "value": ""
+    },
+    {
+      "key": "refresh_token",
+      "value": ""
+    },
+    {
+      "key": "story_id",
+      "value": ""
+    },
+    {
+      "key": "user_id",
+      "value": ""
+    },
+    {
+      "key": "workflow_id",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Add Phone",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/add-phone",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "add-phone"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": "Add Phone",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"+15555550123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Child Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/child-login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "child-login"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": "Child Login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"child_user_id\": \"{{child_user_id}}\",\n  \"password\": \"Password@123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Forgot Password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/forgot-password",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "forgot-password"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": "Forgot Password",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Google Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/google-login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "google-login"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": "Google Login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id_token\": \"string\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": "Login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identifier\": \"string\",\n  \"password\": \"Password@123\",\n  \"child_login\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "const data = json.data || json;",
+                  "if (data.access_token) pm.collectionVariables.set('access_token', data.access_token);",
+                  "if (data.refresh_token) pm.collectionVariables.set('refresh_token', data.refresh_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/logout",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "logout"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": "Logout",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh_token\": \"string\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Me",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/me",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "me"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": "Get Me"
+          },
+          "response": []
+        },
+        {
+          "name": "Refresh Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/refresh-token",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "refresh-token"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": "Refresh Token",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh_token\": \"string\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Reset Password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/reset-password",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "reset-password"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": "Reset Password",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"otp\": \"string\",\n  \"new_password\": \"Password@123\",\n  \"confirm_password\": \"Password@123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Signup",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/signup",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "signup"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": "Signup",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"first_name\": \"Sample Name\",\n  \"last_name\": \"Sample Name\",\n  \"email\": \"user@example.com\",\n  \"phone\": \"+15555550123\",\n  \"password\": \"Password@123\",\n  \"confirm_password\": \"Password@123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Validate Email",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/validate-email",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "validate-email"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": "Validate Email",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Validate Phone",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/validate-phone",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "validate-phone"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": "Validate Phone",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"+15555550123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Verify Email Otp",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/verify-email-otp",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "verify-email-otp"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": "Verify Email Otp",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"otp\": \"string\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Child Library",
+      "item": [
+        {
+          "name": "List Child Audios",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/child-library/audios",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "child-library",
+                "audios"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "page_size",
+                  "value": "20",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "language",
+                  "value": "en",
+                  "description": "",
+                  "disabled": true
+                }
+              ],
+              "variable": []
+            },
+            "description": "List Child Audios"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Child Audio",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/child-library/audios/{{child_audio_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "child-library",
+                "audios",
+                "{{child_audio_id}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "key": "child_audio_id",
+                  "value": "{{child_audio_id}}"
+                }
+              ]
+            },
+            "description": "Get Child Audio"
+          },
+          "response": []
+        },
+        {
+          "name": "List Child Custom Books",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/child-library/custom-stories",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "child-library",
+                "custom-stories"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "page_size",
+                  "value": "20",
+                  "description": "",
+                  "disabled": true
+                }
+              ],
+              "variable": []
+            },
+            "description": "List Child Custom Books"
+          },
+          "response": []
+        },
+        {
+          "name": "List Child Generic Books",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/child-library/generic-stories",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "child-library",
+                "generic-stories"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "page_size",
+                  "value": "20",
+                  "description": "",
+                  "disabled": true
+                }
+              ],
+              "variable": []
+            },
+            "description": "List Child Generic Books"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Children",
+      "item": [
+        {
+          "name": "Get Child Profiles",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/children",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "children"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": "Get Child Profiles"
+          },
+          "response": []
+        },
+        {
+          "name": "Create Child Profile",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/children",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "children"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": "Create Child Profile",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "first_name",
+                  "type": "text",
+                  "value": "Sample Name"
+                },
+                {
+                  "key": "last_name",
+                  "type": "text",
+                  "value": "Sample Name"
+                },
+                {
+                  "key": "dob",
+                  "type": "text",
+                  "value": "2026-06-04"
+                },
+                {
+                  "key": "age",
+                  "type": "text",
+                  "value": "1"
+                },
+                {
+                  "key": "gender",
+                  "type": "text",
+                  "value": "string"
+                },
+                {
+                  "key": "photo",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Select Active Child Profile",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/children/select/{{child_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "children",
+                "select",
+                "{{child_id}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "key": "child_id",
+                  "value": "{{child_id}}"
+                }
+              ]
+            },
+            "description": "Select Active Child Profile"
+          },
+          "response": []
+        },
+        {
+          "name": "Check Child Username Availability",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/children/username/availability?child_user_id={{child_user_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "children",
+                "username",
+                "availability"
+              ],
+              "query": [
+                {
+                  "key": "child_user_id",
+                  "value": "{{child_user_id}}",
+                  "description": "",
+                  "disabled": false
+                },
+                {
+                  "key": "child_id",
+                  "value": "{{child_id}}",
+                  "description": "",
+                  "disabled": true
+                }
+              ],
+              "variable": []
+            },
+            "description": "Check Child Username Availability"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Child Profile",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/children/{{child_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "children",
+                "{{child_id}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "key": "child_id",
+                  "value": "{{child_id}}"
+                }
+              ]
+            },
+            "description": "Delete Child Profile"
+          },
+          "response": []
+        },
+        {
+          "name": "Update Child Profile",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/children/{{child_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "children",
+                "{{child_id}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "key": "child_id",
+                  "value": "{{child_id}}"
+                }
+              ]
+            },
+            "description": "Update Child Profile",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "first_name",
+                  "type": "text",
+                  "value": "Sample Name"
+                },
+                {
+                  "key": "last_name",
+                  "type": "text",
+                  "value": "Sample Name"
+                },
+                {
+                  "key": "dob",
+                  "type": "text",
+                  "value": "2026-06-04"
+                },
+                {
+                  "key": "age",
+                  "type": "text",
+                  "value": "1"
+                },
+                {
+                  "key": "gender",
+                  "type": "text",
+                  "value": "string"
+                },
+                {
+                  "key": "photo",
+                  "type": "text",
+                  "value": ""
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List Child Activities",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/children/{{child_id}}/activities",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "children",
+                "{{child_id}}",
+                "activities"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "page_size",
+                  "value": "20",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "activity_type",
+                  "value": "string",
+                  "description": "",
+                  "disabled": true
+                }
+              ],
+              "variable": [
+                {
+                  "key": "child_id",
+                  "value": "{{child_id}}"
+                }
+              ]
+            },
+            "description": "List Child Activities"
+          },
+          "response": []
+        },
+        {
+          "name": "List Child Audios",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/children/{{child_id}}/audios",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "children",
+                "{{child_id}}",
+                "audios"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "page_size",
+                  "value": "20",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "language",
+                  "value": "en",
+                  "description": "",
+                  "disabled": true
+                }
+              ],
+              "variable": [
+                {
+                  "key": "child_id",
+                  "value": "{{child_id}}"
+                }
+              ]
+            },
+            "description": "List Child Audios"
+          },
+          "response": []
+        },
+        {
+          "name": "Add Generic Audio To Child",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/children/{{child_id}}/audios",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "children",
+                "{{child_id}}",
+                "audios"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "key": "child_id",
+                  "value": "{{child_id}}"
+                }
+              ]
+            },
+            "description": "Add Generic Audio To Child",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"audio_id\": \"{{audio_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Child Audio",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/children/{{child_id}}/audios/{{child_audio_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "children",
+                "{{child_id}}",
+                "audios",
+                "{{child_audio_id}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "key": "child_id",
+                  "value": "{{child_id}}"
+                },
+                {
+                  "key": "child_audio_id",
+                  "value": "{{child_audio_id}}"
+                }
+              ]
+            },
+            "description": "Delete Child Audio"
+          },
+          "response": []
+        },
+        {
+          "name": "List Child Books",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/children/{{child_id}}/books",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "children",
+                "{{child_id}}",
+                "books"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "page_size",
+                  "value": "20",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "not_started",
+                  "description": "",
+                  "disabled": true
+                }
+              ],
+              "variable": [
+                {
+                  "key": "child_id",
+                  "value": "{{child_id}}"
+                }
+              ]
+            },
+            "description": "List Child Books"
+          },
+          "response": []
+        },
+        {
+          "name": "Add Custom Story To Child",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/children/{{child_id}}/books/custom",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "children",
+                "{{child_id}}",
+                "books",
+                "custom"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "key": "child_id",
+                  "value": "{{child_id}}"
+                }
+              ]
+            },
+            "description": "Add Custom Story To Child",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"story_id\": \"{{story_id}}\",\n  \"language\": \"en\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Add Generic Story To Child",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/children/{{child_id}}/books/generic",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "children",
+                "{{child_id}}",
+                "books",
+                "generic"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "key": "child_id",
+                  "value": "{{child_id}}"
+                }
+              ]
+            },
+            "description": "Add Generic Story To Child",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"generic_story_id\": \"{{generic_story_id}}\",\n  \"language\": \"en\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Child Book",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/children/{{child_id}}/books/{{child_book_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "children",
+                "{{child_id}}",
+                "books",
+                "{{child_book_id}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "key": "child_id",
+                  "value": "{{child_id}}"
+                },
+                {
+                  "key": "child_book_id",
+                  "value": "{{child_book_id}}"
+                }
+              ]
+            },
+            "description": "Delete Child Book"
+          },
+          "response": []
+        },
+        {
+          "name": "Update Child Book Progress",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/children/{{child_id}}/books/{{child_book_id}}/progress",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "children",
+                "{{child_id}}",
+                "books",
+                "{{child_book_id}}",
+                "progress"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "key": "child_id",
+                  "value": "{{child_id}}"
+                },
+                {
+                  "key": "child_book_id",
+                  "value": "{{child_book_id}}"
+                }
+              ]
+            },
+            "description": "Update Child Book Progress",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"page_number\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Child Book Status",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/children/{{child_id}}/books/{{child_book_id}}/status",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "children",
+                "{{child_id}}",
+                "books",
+                "{{child_book_id}}",
+                "status"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "key": "child_id",
+                  "value": "{{child_id}}"
+                },
+                {
+                  "key": "child_book_id",
+                  "value": "{{child_book_id}}"
+                }
+              ]
+            },
+            "description": "Update Child Book Status",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"STARTED\",\n  \"page_number\": 1,\n  \"last_page_read\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Generate Character",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/children/{{child_id}}/generate-character",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "children",
+                "{{child_id}}",
+                "generate-character"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "key": "child_id",
+                  "value": "{{child_id}}"
+                }
+              ]
+            },
+            "description": "Generate AI character from child profile photo.\n\nGenerates a stylized storybook character from the child's profile photo\nand stores it alongside the original. Also generates a character description\nfor maintaining visual consistency across story scenes.\n\nArgs:\n    ai_provider: Optional AI provider override (\"openai\" or \"google\") - defaults to AI_PROVIDER\n    additional_context: Optional context like hobbies, personality traits, or styling preferences",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ai_provider\": \"string\",\n  \"additional_context\": \"string\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Child Account Status",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/children/{{child_id}}/lock",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "children",
+                "{{child_id}}",
+                "lock"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "key": "child_id",
+                  "value": "{{child_id}}"
+                }
+              ]
+            },
+            "description": "Update Child Account Status",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"active\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Child Password",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/children/{{child_id}}/password",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "children",
+                "{{child_id}}",
+                "password"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "key": "child_id",
+                  "value": "{{child_id}}"
+                }
+              ]
+            },
+            "description": "Update Child Password",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"child_password\": \"Password@123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Child Username",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/children/{{child_id}}/username",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "children",
+                "{{child_id}}",
+                "username"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "key": "child_id",
+                  "value": "{{child_id}}"
+                }
+              ]
+            },
+            "description": "Update Child Username",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"child_user_id\": \"{{child_user_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Custom Stories",
+      "item": [
+        {
+          "name": "List Custom Stories",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/custom-stories?child_id={{child_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "custom-stories"
+              ],
+              "query": [
+                {
+                  "key": "child_id",
+                  "value": "{{child_id}}",
+                  "description": "Child profile ID whose custom stories should be returned.",
+                  "disabled": false
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "page_size",
+                  "value": "20",
+                  "description": "",
+                  "disabled": true
+                }
+              ],
+              "variable": []
+            },
+            "description": "List Custom Stories"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Custom Story Content",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/custom-stories/{{story_id}}/content",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "custom-stories",
+                "{{story_id}}",
+                "content"
+              ],
+              "query": [
+                {
+                  "key": "language",
+                  "value": "en",
+                  "description": "",
+                  "disabled": true
+                }
+              ],
+              "variable": [
+                {
+                  "key": "story_id",
+                  "value": "{{story_id}}"
+                }
+              ]
+            },
+            "description": "Get Custom Story Content"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Generic Audios",
+      "item": [
+        {
+          "name": "List Generic Audios",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/generic-audios",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "generic-audios"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "page_size",
+                  "value": "20",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "active",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "language",
+                  "value": "en",
+                  "description": "",
+                  "disabled": true
+                }
+              ],
+              "variable": []
+            },
+            "description": "List Generic Audios"
+          },
+          "response": []
+        },
+        {
+          "name": "Create Generic Audio",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/generic-audios",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "generic-audios"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": "Create Generic Audio",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "name",
+                  "type": "text",
+                  "value": "Sample Name"
+                },
+                {
+                  "key": "language",
+                  "type": "text",
+                  "value": "en"
+                },
+                {
+                  "key": "description",
+                  "type": "text",
+                  "value": "string"
+                },
+                {
+                  "key": "status_value",
+                  "type": "text",
+                  "value": "active"
+                },
+                {
+                  "key": "audio_file",
+                  "type": "file",
+                  "src": []
+                },
+                {
+                  "key": "image_file",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Generic Audio",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/generic-audios/{{audio_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "generic-audios",
+                "{{audio_id}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "key": "audio_id",
+                  "value": "{{audio_id}}"
+                }
+              ]
+            },
+            "description": "Delete Generic Audio"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Generic Audio",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/generic-audios/{{audio_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "generic-audios",
+                "{{audio_id}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "key": "audio_id",
+                  "value": "{{audio_id}}"
+                }
+              ]
+            },
+            "description": "Get Generic Audio"
+          },
+          "response": []
+        },
+        {
+          "name": "Update Generic Audio",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/generic-audios/{{audio_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "generic-audios",
+                "{{audio_id}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "key": "audio_id",
+                  "value": "{{audio_id}}"
+                }
+              ]
+            },
+            "description": "Update Generic Audio",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Sample Name\",\n  \"language\": \"en\",\n  \"audio_url\": \"string\",\n  \"image_url\": \"string\",\n  \"description\": \"string\",\n  \"status\": \"active\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Generic Stories",
+      "item": [
+        {
+          "name": "List Generic Stories",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/generic-stories?age_group=4-6",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "generic-stories"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "page_size",
+                  "value": "20",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "age_group",
+                  "value": "4-6",
+                  "description": "",
+                  "disabled": false
+                },
+                {
+                  "key": "theme",
+                  "value": "string",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "language",
+                  "value": "en",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "active",
+                  "description": "",
+                  "disabled": true
+                }
+              ],
+              "variable": []
+            },
+            "description": "List Generic Stories"
+          },
+          "response": []
+        },
+        {
+          "name": "Create Generic Story",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/generic-stories",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "generic-stories"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": "Create Generic Story",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Sample Story\",\n  \"summary\": \"string\",\n  \"age_group\": \"4-6\",\n  \"theme\": \"string\",\n  \"genre\": \"string\",\n  \"moral\": \"string\",\n  \"learning_goal\": \"string\",\n  \"reading_time_minutes\": 1,\n  \"character_type\": \"string\",\n  \"total_pages\": 0,\n  \"cover_image\": \"string\",\n  \"status\": \"active\",\n  \"story_contents\": [\n    {\n      \"language\": \"en\",\n      \"story_json\": {}\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Reconcile Generic Story Batch Jobs",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/generic-stories/batch-jobs/reconcile",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "generic-stories",
+                "batch-jobs",
+                "reconcile"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "",
+                  "disabled": true
+                }
+              ],
+              "variable": []
+            },
+            "description": "Reconcile Generic Story Batch Jobs"
+          },
+          "response": []
+        },
+        {
+          "name": "List Generic Story Workflows",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/generic-stories/workflows",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "generic-stories",
+                "workflows"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "page_size",
+                  "value": "20",
+                  "description": "",
+                  "disabled": true
+                }
+              ],
+              "variable": []
+            },
+            "description": "List Generic Story Workflows"
+          },
+          "response": []
+        },
+        {
+          "name": "Create Generic Story Workflow",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/generic-stories/workflows",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "generic-stories",
+                "workflows"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": "Create Generic Story Workflow",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Sample Story\",\n  \"actual_story\": \"A short child-friendly story with a clear beginning, middle, and ending.\",\n  \"age_group\": \"4-6\",\n  \"language\": \"en\",\n  \"theme\": \"string\",\n  \"genre\": \"string\",\n  \"learning_goal\": \"string\",\n  \"status\": \"inactive\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Generic Story Workflow",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/generic-stories/workflows/{{workflow_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "generic-stories",
+                "workflows",
+                "{{workflow_id}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "key": "workflow_id",
+                  "value": "{{workflow_id}}"
+                }
+              ]
+            },
+            "description": "Get Generic Story Workflow"
+          },
+          "response": []
+        },
+        {
+          "name": "Execute Generic Story Workflow",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/generic-stories/workflows/{{workflow_id}}/execute",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "generic-stories",
+                "workflows",
+                "{{workflow_id}}",
+                "execute"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "key": "workflow_id",
+                  "value": "{{workflow_id}}"
+                }
+              ]
+            },
+            "description": "Execute Generic Story Workflow",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"step_name\": \"ALL\",\n  \"skip_image_generation\": false,\n  \"skip_narration_generation\": false,\n  \"publish_status\": \"active\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Generic Story Workflow Steps",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/generic-stories/workflows/{{workflow_id}}/steps",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "generic-stories",
+                "workflows",
+                "{{workflow_id}}",
+                "steps"
+              ],
+              "query": [
+                {
+                  "key": "step_name",
+                  "value": "Sample Name",
+                  "description": "",
+                  "disabled": true
+                }
+              ],
+              "variable": [
+                {
+                  "key": "workflow_id",
+                  "value": "{{workflow_id}}"
+                }
+              ]
+            },
+            "description": "Get Generic Story Workflow Steps"
+          },
+          "response": []
+        },
+        {
+          "name": "Upload Generic Story Workflow Audio",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/generic-stories/workflows/{{workflow_id}}/stories/{{generic_story_id}}/audio?language=en",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "generic-stories",
+                "workflows",
+                "{{workflow_id}}",
+                "stories",
+                "{{generic_story_id}}",
+                "audio"
+              ],
+              "query": [
+                {
+                  "key": "language",
+                  "value": "en",
+                  "description": "",
+                  "disabled": false
+                }
+              ],
+              "variable": [
+                {
+                  "key": "workflow_id",
+                  "value": "{{workflow_id}}"
+                },
+                {
+                  "key": "generic_story_id",
+                  "value": "{{generic_story_id}}"
+                }
+              ]
+            },
+            "description": "Upload Generic Story Workflow Audio"
+          },
+          "response": []
+        },
+        {
+          "name": "Upload Generic Story Workflow Images",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/generic-stories/workflows/{{workflow_id}}/stories/{{generic_story_id}}/images",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "generic-stories",
+                "workflows",
+                "{{workflow_id}}",
+                "stories",
+                "{{generic_story_id}}",
+                "images"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "key": "workflow_id",
+                  "value": "{{workflow_id}}"
+                },
+                {
+                  "key": "generic_story_id",
+                  "value": "{{generic_story_id}}"
+                }
+              ]
+            },
+            "description": "Upload Generic Story Workflow Images"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Generic Story",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/generic-stories/{{generic_story_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "generic-stories",
+                "{{generic_story_id}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "key": "generic_story_id",
+                  "value": "{{generic_story_id}}"
+                }
+              ]
+            },
+            "description": "Delete Generic Story"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Generic Story",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/generic-stories/{{generic_story_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "generic-stories",
+                "{{generic_story_id}}"
+              ],
+              "query": [
+                {
+                  "key": "language",
+                  "value": "en",
+                  "description": "",
+                  "disabled": true
+                }
+              ],
+              "variable": [
+                {
+                  "key": "generic_story_id",
+                  "value": "{{generic_story_id}}"
+                }
+              ]
+            },
+            "description": "Get Generic Story"
+          },
+          "response": []
+        },
+        {
+          "name": "Update Generic Story",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/generic-stories/{{generic_story_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "generic-stories",
+                "{{generic_story_id}}"
+              ],
+              "query": [
+                {
+                  "key": "language",
+                  "value": "en",
+                  "description": "",
+                  "disabled": true
+                }
+              ],
+              "variable": [
+                {
+                  "key": "generic_story_id",
+                  "value": "{{generic_story_id}}"
+                }
+              ]
+            },
+            "description": "Update Generic Story",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Sample Story\",\n  \"summary\": \"string\",\n  \"age_group\": \"4-6\",\n  \"theme\": \"string\",\n  \"genre\": \"string\",\n  \"moral\": \"string\",\n  \"learning_goal\": \"string\",\n  \"reading_time_minutes\": 1,\n  \"character_type\": \"string\",\n  \"total_pages\": 1,\n  \"cover_image\": \"string\",\n  \"status\": \"active\",\n  \"story_contents\": [\n    {\n      \"language\": \"en\",\n      \"story_json\": {}\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Cancel Generic Story Batch Job",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/generic-stories/{{generic_story_id}}/batch-jobs/{{batch_job_id}}/cancel",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "generic-stories",
+                "{{generic_story_id}}",
+                "batch-jobs",
+                "{{batch_job_id}}",
+                "cancel"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "key": "generic_story_id",
+                  "value": "{{generic_story_id}}"
+                },
+                {
+                  "key": "batch_job_id",
+                  "value": "{{batch_job_id}}"
+                }
+              ]
+            },
+            "description": "Cancel Generic Story Batch Job"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Generic Story Content",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/generic-stories/{{generic_story_id}}/content",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "generic-stories",
+                "{{generic_story_id}}",
+                "content"
+              ],
+              "query": [
+                {
+                  "key": "language",
+                  "value": "en",
+                  "description": "",
+                  "disabled": true
+                }
+              ],
+              "variable": [
+                {
+                  "key": "generic_story_id",
+                  "value": "{{generic_story_id}}"
+                }
+              ]
+            },
+            "description": "Get Generic Story Content"
+          },
+          "response": []
+        },
+        {
+          "name": "Submit Generic Story Image Batch",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/generic-stories/{{generic_story_id}}/images/batch",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "generic-stories",
+                "{{generic_story_id}}",
+                "images",
+                "batch"
+              ],
+              "query": [
+                {
+                  "key": "force",
+                  "value": "false",
+                  "description": "Regenerate all images even when existing image URLs are readable",
+                  "disabled": true
+                },
+                {
+                  "key": "pages",
+                  "value": "1",
+                  "description": "Optional page numbers to submit, for example ?force=true&pages=7",
+                  "disabled": true
+                }
+              ],
+              "variable": [
+                {
+                  "key": "generic_story_id",
+                  "value": "{{generic_story_id}}"
+                }
+              ]
+            },
+            "description": "Submit Generic Story Image Batch"
+          },
+          "response": []
+        },
+        {
+          "name": "Regenerate Generic Story Page Image",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/generic-stories/{{generic_story_id}}/images/regenerate?page_number=1",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "generic-stories",
+                "{{generic_story_id}}",
+                "images",
+                "regenerate"
+              ],
+              "query": [
+                {
+                  "key": "page_number",
+                  "value": "1",
+                  "description": "Story page number to regenerate",
+                  "disabled": false
+                }
+              ],
+              "variable": [
+                {
+                  "key": "generic_story_id",
+                  "value": "{{generic_story_id}}"
+                }
+              ]
+            },
+            "description": "Regenerate Generic Story Page Image"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "health"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": "Health Check"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Narration",
+      "item": [
+        {
+          "name": "Generate Story Narration",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/stories/{{story_id}}/generate-narration",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "stories",
+                "{{story_id}}",
+                "generate-narration"
+              ],
+              "query": [
+                {
+                  "key": "overwrite",
+                  "value": "false",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "generic_story",
+                  "value": "true",
+                  "description": "If true, narrate generic_story_contents.story_json. If false, narrate story_contents.story_json.",
+                  "disabled": true
+                },
+                {
+                  "key": "language",
+                  "value": "en",
+                  "description": "",
+                  "disabled": true
+                }
+              ],
+              "variable": [
+                {
+                  "key": "story_id",
+                  "value": "{{story_id}}"
+                }
+              ]
+            },
+            "description": "Generate narration audio for all pages of a story JSON payload.\n\nWith generic_story=true, reads generic_story_contents.story_json for the\nrequested story_id and language. With generic_story=false, reads\nstory_contents.story_json for the authenticated user's story row.\n\nArgs:\n    story_id: UUID of story to generate narration for\n    overwrite: If true, regenerate audio even if it already exists\n    generic_story: If true use generic_story_contents, otherwise use story_contents\n    language: Language code of the content row to narrate\n    current_user: Authenticated user (dependency)\n    session: Database session (dependency)\n\nReturns:\n    Updated story with duration and sentence-level word_timestamps in each page\n\nRaises:\n    404: Story not found or user doesn't own it\n    400: Story missing story_json or invalid content\n    500: TTS API error or file I/O error\n\nStatus Codes:\n    200: Narration generated successfully\n    404: Story not found\n    403: Unauthorized (user doesn't own story)\n    500: Server error (TTS API failure, file write error, etc.)\n\nExample Response:\n    {\n        \"success\": true,\n        \"message\": \"Narration generated successfully\",\n        \"data\": {\n            \"id\": \"550e8400-e29b-41d4-a716-446655440000\",\n            \"title\": \"The Enchanted Forest\",\n            \"pages\": [\n                {\n                    \"page_number\": 1,\n                    \"text\": \"Every night, a strange whisper echoed...\",\n                    \"duration\": 18.2,\n                    \"word_timestamps\": [\n                        {\"word\": \"Every night, a strange whisper echoed.\", \"start\": 0.12, \"end\": 3.8},\n                        ...\n                    ]\n                },\n                ...\n            ]\n        }\n    }"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Notifications",
+      "item": [
+        {
+          "name": "Send Notification",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/notifications/send",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "notifications",
+                "send"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": "Send Notification",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"audience\": \"all\",\n  \"title\": \"Sample Story\",\n  \"body\": \"string\",\n  \"event_type\": \"manual\",\n  \"data\": {},\n  \"user_id\": \"{{user_id}}\",\n  \"child_id\": \"{{child_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Unregister Push Token",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/notifications/tokens",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "notifications",
+                "tokens"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": "Unregister Push Token",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"expo_push_token\": \"string\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Register Push Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/notifications/tokens",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "notifications",
+                "tokens"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": "Register Push Token",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"expo_push_token\": \"string\",\n  \"device_id\": \"{{device_id}}\",\n  \"platform\": \"unknown\",\n  \"app_version\": \"string\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Stories",
+      "item": [
+        {
+          "name": "List Stories",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/stories",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "stories"
+              ],
+              "query": [
+                {
+                  "key": "child_id",
+                  "value": "{{child_id}}",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "page_size",
+                  "value": "20",
+                  "description": "",
+                  "disabled": true
+                }
+              ],
+              "variable": []
+            },
+            "description": "List stories for current user, optionally filtered by child.\n\nReturns stories in reverse chronological order (newest first)."
+          },
+          "response": []
+        },
+        {
+          "name": "Reconcile Story Batch Jobs",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/stories/batch-jobs/reconcile",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "stories",
+                "batch-jobs",
+                "reconcile"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "",
+                  "disabled": true
+                }
+              ],
+              "variable": []
+            },
+            "description": "Manually reconcile submitted/running Google Batch jobs."
+          },
+          "response": []
+        },
+        {
+          "name": "Generate Story",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/stories/generate",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "stories",
+                "generate"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "description": "Generate a new story (asynchronous with polling).\n\nReturns immediately with story_id and status=PENDING.\nClient polls GET /stories/{story_id} to check generation progress.\n\nWorkflow steps executed in background:\n1. Story Plan Generation\n2. Story Plan Validation (3 retries)\n3. Story Text Generation\n4. Image Plan Generation\n5. Image Plan Validation (optional)\n6. Image Generation\n7. Narration Generation",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"child_id\": \"{{child_id}}\",\n  \"mode\": \"INPUT_DRIVEN\",\n  \"category\": \"string\",\n  \"learning_goal\": \"string\",\n  \"context\": \"string\",\n  \"event_description\": \"string\",\n  \"skip_image_generation\": false,\n  \"skip_validation\": false,\n  \"processing_mode\": \"instant\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Story",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/stories/{{story_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "stories",
+                "{{story_id}}"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "key": "story_id",
+                  "value": "{{story_id}}"
+                }
+              ]
+            },
+            "description": "Retrieve a story with full content and current status.\n\nUse for polling during generation:\n- status=PENDING or IN_PROGRESS: Generation still running\n- status=COMPLETED: Story ready with pages and images\n- status=FAILED: Generation failed, see error_message"
+          },
+          "response": []
+        },
+        {
+          "name": "Cancel Story Batch Job",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/stories/{{story_id}}/batch-jobs/{{batch_job_id}}/cancel",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "stories",
+                "{{story_id}}",
+                "batch-jobs",
+                "{{batch_job_id}}",
+                "cancel"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "key": "story_id",
+                  "value": "{{story_id}}"
+                },
+                {
+                  "key": "batch_job_id",
+                  "value": "{{batch_job_id}}"
+                }
+              ]
+            },
+            "description": "Cancel a submitted Google Batch job for a delayed story workflow."
+          },
+          "response": []
+        },
+        {
+          "name": "Recover Story Generation",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/stories/{{story_id}}/recover",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "stories",
+                "{{story_id}}",
+                "recover"
+              ],
+              "query": [
+                {
+                  "key": "stale_after_minutes",
+                  "value": "15",
+                  "description": "",
+                  "disabled": true
+                }
+              ],
+              "variable": [
+                {
+                  "key": "story_id",
+                  "value": "{{story_id}}"
+                }
+              ]
+            },
+            "description": "Recover a stale in-progress story so it can be retried from checkpoint."
+          },
+          "response": []
+        },
+        {
+          "name": "Retry Story Generation",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/stories/{{story_id}}/retry",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "stories",
+                "{{story_id}}",
+                "retry"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "key": "story_id",
+                  "value": "{{story_id}}"
+                }
+              ]
+            },
+            "description": "Retry a failed story generation workflow from the last saved checkpoint."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Story Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/stories/{{story_id}}/status",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "stories",
+                "{{story_id}}",
+                "status"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "key": "story_id",
+                  "value": "{{story_id}}"
+                }
+              ]
+            },
+            "description": "Retrieve only the current generation status for a story."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Story Steps",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/stories/{{story_id}}/steps",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "stories",
+                "{{story_id}}",
+                "steps"
+              ],
+              "query": [],
+              "variable": [
+                {
+                  "key": "story_id",
+                  "value": "{{story_id}}"
+                }
+              ]
+            },
+            "description": "Retrieve audit trail for story generation workflow.\n\nShows each step (plan generation, validation, story generation, etc.)\nwith status, timestamps, and error messages for debugging."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
 }

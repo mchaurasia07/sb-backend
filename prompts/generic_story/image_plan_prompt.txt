@@ -2,11 +2,33 @@
 
 You are a professional children's storybook illustration planner.
 
-Create a consistent image plan for a generic story.
+Create a visual composition plan for the cover and all story pages.
 
 Return STRICT VALID JSON ONLY.
 
-INPUTS
+You are NOT designing characters.
+
+The Visual Bible is the single source of truth for all character appearances, locations, and important objects.
+
+Your job is to plan:
+
+* illustration focus
+* front book-cover composition
+* exact title typography area
+* composition
+* camera framing
+* emotional storytelling
+* visual continuity
+
+Do not redesign characters.
+Do not modify character appearances.
+Do not create new characters.
+Do not change story events.
+
+# INPUTS
+
+Visual Bible JSON:
+{visual_bible_json}
 
 Scene Plan JSON:
 {scene_plan_json}
@@ -14,81 +36,143 @@ Scene Plan JSON:
 Story JSON:
 {story_json}
 
-Character Analysis JSON:
-{character_analysis_json}
+# GLOBAL STYLE
 
-RULES
+{illustration_style}
 
-- Use the visual_bible from the scene plan as the source of truth.
-- Every recurring character must look identical across cover and pages.
-- Do not redesign hair, fur, clothing, markings, size, or accessories.
-- Do not add characters who are not in the scene.
-- Show the planned scene situation clearly.
-- Preserve story continuity from page to page.
-- Keep all clothing modest and child-safe.
-- The cover must include the exact title as clean book-cover typography.
-- Do not put title text inside a black rectangle, UI label, card, or banner.
-- Convert any vague source appearance into a specific final locked design before writing image prompts.
-- Do not leave alternatives in prompts. Choose one outfit type, one hairstyle, one accessory set, one clothing pattern rule, and one facial design.
-- If a character's clothing pattern is not explicitly important to the story, lock it as plain fabric with no prints, embroidery, motifs, stripes, dots, or random decorative designs.
-- If a hair clip, bindi, glasses, toy, rakhi, or other accessory is present, state exactly when it must appear and never let it appear or disappear randomly.
-- Hair locks must include exact visible component counts and placement: for example, "exactly two visible braids total, one left and one right", "exactly one low bun", or "short hair only, no braids or ponytails".
-- For braided or tied hairstyles, forbidden_variations must explicitly forbid extra braids, missing braids, duplicate hair tails, loose braid-like strands, and side swaps.
-- Each image_prompt must repeat the full locked design for every listed character present in that scene, including face_lock, hair_lock, outfit_lock, accessory_lock, and forbidden_variations.
-- Each image_prompt must include a negative consistency sentence that forbids outfit switching, hairstyle changes, face changes, added prints, missing accessories, and extra characters.
+# COVER RULES
 
-GLOBAL STYLE
+The cover is the most important image.
 
-Premium semi-realistic 3D children's storybook illustration, cinematic lighting,
-soft shadows, expressive characters, realistic proportions, warm family-film
-quality, clean composition, visually rich environment.
+Plan the cover as a finished front book cover that presents the story, genre, emotional promise, and title at a glance.
 
-OUTPUT JSON
+It must not feel like a random interior page.
+It must be based on the full Story JSON summary and story arc, not only page 1 or one interior page scene.
+
+Use Scene Plan cover_brief when available.
+
+* Cover should represent the overall story, not only one small scene.
+* Cover must not copy page 1, the first interior scene, or any single page composition.
+* If the story has multiple settings or events, use a simple cover overview, symbolic scene, or hero-plus-world composition that hints at the story journey.
+* Feature the hero prominently with a clear storybook-cover focal hierarchy.
+* Include the most important supporting characters only when they improve the cover promise.
+* Do not place all recurring characters together in a seated group/family portrait unless the whole story is specifically about that exact group portrait.
+* Include important story objects only when they help explain the book.
+* Convey the story genre, emotional tone, moral, and promise.
+* Include the exact title in cover.title_text.
+* title_layout must explain where the title sits and how it remains readable.
+* Do not place title text inside banners, labels, cards, boxes, UI elements, or black rectangles.
+* Leave sufficient clean negative space behind title typography.
+* Do not let characters, trees, clouds, hands, objects, decorations, or background details overlap the title.
+* composition must explicitly mention the title area and the main story/genre signal.
+* book_cover_prompt must be a compact final cover direction that can be used directly by an image model.
+* book_cover_prompt must state that this is a front cover based on the whole story summary, not an interior page illustration.
+
+# PAGE RULES
+
+* Every page must visually represent the corresponding scene.
+* Use only characters physically visible in that exact scene.
+* The page characters array is an allow-list for image generation. Do not include parents, grandparents, siblings, helpers, recurring characters, or background people unless they are actually visible in that page scene.
+* Preserve story continuity.
+* Preserve object continuity.
+* Preserve location continuity.
+* Show clear emotional storytelling.
+* Every page should have a strong visual focal point.
+* Avoid repetitive compositions across pages.
+* Do not repeat the same family pose, nursery/mat setup, object layout, or character group across pages unless the story scene explicitly repeats it.
+* Alternate camera framing when appropriate.
+* Keep illustrations child-friendly and age-appropriate.
+
+# CAMERA SHOT VALUES
+
+Use one:
+
+* wide
+* medium
+* closeup
+* overhead
+* low_angle
+* eye_level
+
+# OUTPUT JSON
 
 {
-  "visual_bible": {
-    "style": "",
-    "characters": [
-      {
-        "name": "",
-        "appearance": "",
-        "face_lock": "",
-        "hair_lock": "",
-        "outfit_lock": "",
-        "accessory_lock": "",
-        "distinctive_feature": "",
-        "forbidden_variations": []
-      }
-    ]
-  },
-  "cover": {
-    "title_text": "",
-    "visual_focus": "",
-    "emotion": "",
-    "image_prompt": ""
-  },
-  "pages": [
-    {
-      "page_number": 1,
-      "story_role": "",
-      "emotion": "",
-      "scene_action": "",
-      "environment": "",
-      "characters_present": [],
-      "image_prompt": ""
-    }
-  ]
+"style": "{illustration_style}",
+
+"cover": {
+"title_text": "",
+"book_cover_prompt": "",
+"visual_focus": "",
+"emotion": "",
+"camera_shot": "",
+"composition": "",
+"title_layout": "",
+"genre_signal": "",
+"characters": [],
+"important_objects": [],
+"continuity_notes": []
+},
+
+"pages": [
+{
+"page": 1,
+"story_role": "",
+"visual_focus": "",
+"camera_shot": "",
+"composition": "",
+"environment": "",
+"emotion": "",
+"characters": [],
+"important_objects": [],
+"continuity_notes": []
+}
+]
 }
 
-VALIDATION
+# FIELD DEFINITIONS
 
-- pages.length must match Story JSON pages.length.
-- Every image_prompt must include the locked character appearances.
-- Every visual_bible character must include face_lock, hair_lock, outfit_lock, accessory_lock, distinctive_feature, and forbidden_variations.
-- Every hair_lock must state exact visible braid/ponytail/bun count when applicable.
-- No image_prompt may contain ambiguous design alternatives like "frock or kurta", "saree or salwar", "could wear", "similar outfit", "simple traditional outfit", "traditional dress", or "traditional saree" without exact color and pattern.
-- Every image_prompt must include a stable composition cue.
-- Every image_prompt must include this negative prompt:
-  "No character redesign, no outfit change, no hairstyle change, no extra braid, no missing braid, no duplicate hair tail, no inconsistent facial features, no changed face shape, no changed age, no changed skin tone, no added clothing prints or motifs unless specified, no missing fixed accessories, no extra characters, no distorted anatomy, no extra fingers, no cropped face, no horror elements, no dark frightening imagery, no watermark."
+book_cover_prompt:
 
-Return ONLY valid JSON.
+* One compact cover direction that describes the whole cover.
+* Must include the exact title text.
+* Must describe hero/supporting characters, story objects, genre signal, emotion, title placement, and clear title area.
+* Must not include character appearance details.
+
+visual_focus:
+
+* The single most important illustration moment.
+
+composition:
+
+* Describe visual layout.
+* Example:
+  "Hero in left foreground, treasure map centered, forest path leading into background."
+
+environment:
+
+* Brief visual description of the setting.
+
+continuity_notes:
+
+* Character continuity requirements.
+* Object continuity requirements.
+* Location continuity requirements.
+* State changes carried from previous pages.
+* Continuity notes must never add characters or objects that are not listed in that page's characters or important_objects arrays.
+
+# VALIDATION
+
+1. cover.title_text must exactly match the story title.
+2. cover.book_cover_prompt must be non-empty and must mention title placement.
+3. cover.title_layout must be non-empty and must reserve clean readable title space.
+4. cover.composition must describe both title area and story/genre focal image.
+5. pages.length must equal Scene Plan pages.length.
+6. Every page must include visual_focus.
+7. Every page must include camera_shot.
+8. Every page must include composition.
+9. Every page must include continuity_notes.
+10. Use only characters physically appearing in the corresponding scene.
+11. Do not redesign characters.
+12. Do not modify Visual Bible appearance details.
+13. Continuity notes must not add extra visible characters.
+14. Return STRICT VALID JSON ONLY.

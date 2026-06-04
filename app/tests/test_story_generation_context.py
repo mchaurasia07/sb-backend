@@ -301,7 +301,7 @@ def test_normalize_story_output_adds_deterministic_page_narration():
         event_description=None,
         learning_goal=None,
         context=None,
-        age_group="5-7",
+        age_group="4-6",
     )
 
     normalized = _normalize_story_output(raw_story_json, plan, story)
@@ -334,7 +334,7 @@ def test_normalize_story_output_rejects_page_count_mismatch():
         event_description=None,
         learning_goal=None,
         context=None,
-        age_group="5-7",
+        age_group="4-6",
     )
 
     with pytest.raises(AppException, match="expected 2"):
@@ -342,10 +342,10 @@ def test_normalize_story_output_rejects_page_count_mismatch():
 
 
 def test_build_page_narration_maps_emotion_and_age_group():
-    assert build_page_narration("triumph", "8-12") == {
+    assert build_page_narration("triumph", "6-8") == {
         "tone": "celebratory",
         "pace": "medium",
-        "voice_style": "expressive cinematic storyteller",
+        "voice_style": "expressive adventure storyteller",
     }
     assert build_page_narration("unknown", "2-4") == {
         "tone": "curious",

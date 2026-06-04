@@ -5,6 +5,7 @@ import logging
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.age_groups import validate_age_group
 from app.core.database import AsyncSessionLocal, get_db_session
 from app.core.dependencies import get_current_user, get_auth_context, AuthContext
 from app.core.exceptions import AppException
@@ -18,12 +19,16 @@ from app.model.request.generic_story_workflow import (
 from app.model.response.common import ApiResponse, PaginatedResponse, success_response
 from app.model.response.generic_story import (
     GenericStoryAudioUploadResponse,
+    GenericStoryBatchJobCancelResponse,
     GenericStoryBatchImageSubmitResponse,
     GenericStoryImageUploadResponse,
     GenericStoryResponse,
 )
-from app.model.response.generic_story_workflow import GenericStoryWorkflowResponse
-from app.model.response.generic_story_workflow import GenericStoryWorkflowStepDetailResponse
+from app.model.response.generic_story_workflow import (
+    GenericStoryWorkflowListResponse,
+    GenericStoryWorkflowResponse,
+    GenericStoryWorkflowStepDetailResponse,
+)
 from app.model.response.story_catalog import StoryCatalogResponse
 from app.model.response.story_content import StoryContentResponse
 from app.service.generic_story_batch_service import GenericStoryBatchService
@@ -82,13 +87,13 @@ async def create_generic_story_workflow(
     return success_response(data, "Generic story workflow created successfully")
 
 
-@router.get("/workflows", response_model=ApiResponse[PaginatedResponse[GenericStoryWorkflowResponse]])
+@router.get("/workflows", response_model=ApiResponse[PaginatedResponse[GenericStoryWorkflowListResponse]])
 async def list_generic_story_workflows(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db_session),
-) -> ApiResponse[PaginatedResponse[GenericStoryWorkflowResponse]]:
+) -> ApiResponse[PaginatedResponse[GenericStoryWorkflowListResponse]]:
     data = await GenericStoryWorkflowService(session).list(
         current_user.id,
         page=page,
@@ -217,6 +222,7 @@ async def upload_generic_story_workflow_audio(
 async def submit_generic_story_image_batch(
     generic_story_id: UUID,
     force: bool = Query(False, description="Regenerate all images even when existing image URLs are readable"),
+    provider: str = Query("google", pattern="^(google|openai)$", description="Batch provider to use for image generation"),
     pages: list[int] | None = Query(
         default=None,
         description="Optional page numbers to submit, for example ?force=true&pages=7",
@@ -229,6 +235,7 @@ async def submit_generic_story_image_batch(
         generic_story_id=generic_story_id,
         force=force,
         page_numbers=set(pages or []) or None,
+        provider=provider,
     )
     return success_response(data, data.message)
 
@@ -264,6 +271,24 @@ async def reconcile_generic_story_batch_jobs(
     return success_response(data, "Generic story batch jobs reconciled successfully")
 
 
+@router.post(
+    "/{generic_story_id}/batch-jobs/{batch_job_id}/cancel",
+    response_model=ApiResponse[GenericStoryBatchJobCancelResponse],
+)
+async def cancel_generic_story_batch_job(
+    generic_story_id: UUID,
+    batch_job_id: UUID,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[GenericStoryBatchJobCancelResponse]:
+    data = await GenericStoryBatchService(session).cancel_batch_job(
+        user_id=current_user.id,
+        generic_story_id=generic_story_id,
+        batch_job_id=batch_job_id,
+    )
+    return success_response(GenericStoryBatchJobCancelResponse(**data), data["message"])
+
+
 @router.put("/{generic_story_id}", response_model=ApiResponse[GenericStoryResponse])
 async def update_generic_story(
     generic_story_id: UUID,
@@ -297,6 +322,7 @@ async def list_generic_stories(
     _: AuthContext = Depends(get_auth_context),
     session: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[PaginatedResponse[StoryCatalogResponse]]:
+    age_group = validate_age_group(age_group)
     data = await StoryCatalogService(session).list_generic_paginated(
         page=page,
         page_size=page_size,

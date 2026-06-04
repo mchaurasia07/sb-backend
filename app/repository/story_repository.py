@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.orm import selectinload
 
+from app.core.age_groups import validate_age_group
 from app.entity.story import Story, StoryContent, StoryGenerationMode, AgeGroup, StoryStatus
 
 
@@ -30,7 +31,7 @@ class StoryRepository:
             user_id=user_id,
             child_id=child_id,
             generation_mode=StoryGenerationMode(generation_mode),
-            age_group=AgeGroup(age_group),
+            age_group=AgeGroup(validate_age_group(age_group)),
             status=StoryStatus.PENDING,
             **kwargs,
         )

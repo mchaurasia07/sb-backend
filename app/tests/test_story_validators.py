@@ -2,7 +2,7 @@ from app.service.image_plan_validator import ImagePlanValidator
 from app.service.plan_validator import PlanValidator
 
 
-def _story_plan(page_count: int = 10) -> dict:
+def _story_plan(page_count: int = 8) -> dict:
     return {
         "title": "Mira and the Moon Map",
         "summary": "Mira learns to solve a puzzle step by step.",
@@ -103,7 +103,7 @@ def _image_plan(page_count: int = 2) -> dict:
 def test_plan_validator_accepts_new_story_planner_schema():
     result = PlanValidator().validate(
         _story_plan(),
-        age_group="5-7",
+        age_group="4-6",
         source_inputs={"category": "adventure", "learning_goal": "problem solving", "context": ""},
     )
 
@@ -133,7 +133,7 @@ def test_plan_validator_rejects_old_page_metadata_schema():
 
     result = PlanValidator().validate(
         plan,
-        age_group="5-7",
+        age_group="4-6",
         source_inputs={"category": "adventure", "learning_goal": "problem solving", "context": ""},
     )
 

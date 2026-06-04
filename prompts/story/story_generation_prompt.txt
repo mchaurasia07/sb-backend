@@ -204,18 +204,24 @@ other theme anchors, include those names where they belong in the story.
 Every page should include the planned domain_detail when present, woven into
 action, setting, dialogue, or sensory description.
 
+For Infant Toddler (0-2):
+
+* use one very simple concrete detail per page
+* keep facts minimal
+* prefer soothing sensory language and naming
+
 For Toddler (2-4):
 
 * use one simple concrete detail per page
 * keep facts very light
 * prefer sensory language and naming
 
-For Early Reader (5-7):
+For Early Reader (4-6):
 
 * use named places, objects, creatures, or facts clearly
 * explain one small idea at a time through action
 
-For Advanced (8-12):
+For Growing Reader (6-8):
 
 * use richer domain details and cause/effect
 * keep explanations story-driven, not textbook-like
@@ -227,6 +233,14 @@ feel specific, vivid, and real.
 
 ## AGE BAND RULES
 
+Infant Toddler (0-2)
+
+* 10-25 words per page
+* 1-3 very simple sentences
+* gentle repetition
+* soothing sensory language
+* comforting tone
+
 Toddler (2-4)
 
 * 25-45 words per page
@@ -236,19 +250,19 @@ Toddler (2-4)
 * playful sounds when appropriate
 * comforting tone
 
-Early Reader (5-7)
+Early Reader (4-6)
 
-* 50-80 words per page
-* 4-6 sentences
+* 35-65 words per page
+* 3-5 sentences
 * vivid but simple language
 * concrete actions
 * clear emotional expression
 * simple dialogue
 
-Advanced (8-12)
+Growing Reader (6-8)
 
-* 90-130 words per page
-* 6-9 sentences
+* 55-90 words per page
+* 4-7 sentences
 * richer vocabulary
 * emotional depth
 * occasional inner thoughts

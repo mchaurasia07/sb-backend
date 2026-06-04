@@ -24,6 +24,7 @@ class GenericStoryBatchJobRepository:
         expected_item_count: int,
         request_keys: list[str],
         provider_model: str | None,
+        provider: str = "google",
         request_payload: dict | None = None,
     ) -> GenericStoryBatchJob:
         job = GenericStoryBatchJob(
@@ -31,7 +32,7 @@ class GenericStoryBatchJobRepository:
             workflow_id=workflow_id,
             job_type=job_type,
             status=StoryBatchJobStatus.SUBMITTED,
-            provider="google",
+            provider=provider,
             provider_model=provider_model,
             attempt=attempt,
             expected_item_count=expected_item_count,
@@ -47,15 +48,29 @@ class GenericStoryBatchJobRepository:
         self,
         generic_story_id: UUID,
         job_type: StoryBatchJobType,
+        provider: str | None = None,
     ) -> GenericStoryBatchJob | None:
+        filters = [
+            GenericStoryBatchJob.generic_story_id == generic_story_id,
+            GenericStoryBatchJob.job_type == job_type,
+        ]
+        if provider:
+            filters.append(GenericStoryBatchJob.provider == provider)
+
         result = await self.session.execute(
             select(GenericStoryBatchJob)
-            .where(
-                GenericStoryBatchJob.generic_story_id == generic_story_id,
-                GenericStoryBatchJob.job_type == job_type,
-            )
+            .where(*filters)
             .order_by(GenericStoryBatchJob.created_at.desc())
             .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_for_story(self, generic_story_id: UUID, batch_job_id: UUID) -> GenericStoryBatchJob | None:
+        result = await self.session.execute(
+            select(GenericStoryBatchJob).where(
+                GenericStoryBatchJob.id == batch_job_id,
+                GenericStoryBatchJob.generic_story_id == generic_story_id,
+            )
         )
         return result.scalar_one_or_none()
 
