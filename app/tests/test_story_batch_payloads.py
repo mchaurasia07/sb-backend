@@ -75,13 +75,13 @@ def test_audio_batch_items_use_story_age_group_when_page_narration_missing():
         ]
     }
 
-    items = service._build_audio_items(story_json, age_group="2-4")
+    items = service._build_audio_items(story_json, age_group="0-3")
 
     assert len(items) == 1
     assert items[0].tone == "soothing"
     assert items[0].pace == "slow"
-    assert items[0].voice_style == "gentle bedtime storyteller"
-    assert story_json["pages"][0]["narration"]["voice_style"] == "gentle bedtime storyteller"
+    assert items[0].voice_style == "gentle lullaby bedtime storyteller"
+    assert story_json["pages"][0]["narration"]["voice_style"] == "gentle lullaby bedtime storyteller"
 
 
 def test_tts_prompt_marks_story_text_as_only_spoken_content():

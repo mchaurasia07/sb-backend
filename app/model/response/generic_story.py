@@ -54,6 +54,8 @@ class GenericStoryImageUploadResponse(BaseModel):
     generic_story_id: UUID
     cover_image_url: str
     page_image_urls: dict[int, str]
+    reduced_cover_image_url: str | None = None
+    reduced_page_image_urls: dict[int, str] = Field(default_factory=dict)
     updated_languages: list[str]
 
 

@@ -7,6 +7,7 @@ from typing import Any
 from google import genai
 from google.genai import types
 
+from app.core.age_groups import AGE_GROUP_0_3, AGE_GROUP_3_6, AGE_GROUP_6_9
 from app.core.config import settings
 from app.core.exceptions import AppException
 from app.service.ai.base import (
@@ -279,15 +280,13 @@ Format your response as a clear visual identity list."""
             logger.info("MOCK MODE: Returning mock LLM response instead of calling Google Gemini")
 
             # Extract age_group and page count from prompt for correct mock response
-            age_group = "4-6"  # Default
-            if "0-2" in prompt:
-                age_group = "0-2"
-            elif "2-4" in prompt:
-                age_group = "2-4"
-            elif "4-6" in prompt:
-                age_group = "4-6"
-            elif "6-8" in prompt:
-                age_group = "6-8"
+            age_group = AGE_GROUP_3_6  # Default
+            if "0-3" in prompt or "0-2" in prompt or "2-4" in prompt:
+                age_group = AGE_GROUP_0_3
+            elif "6-9" in prompt or "6-8" in prompt:
+                age_group = AGE_GROUP_6_9
+            elif "3-6" in prompt or "4-6" in prompt:
+                age_group = AGE_GROUP_3_6
 
             # Determine which mock response to return based on prompt content.
             # Check image planning first because that prompt includes "Story Plan JSON".

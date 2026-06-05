@@ -2,16 +2,21 @@ from typing import Literal
 from uuid import UUID
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Query, Request, Response, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.age_groups import validate_age_group
+from app.core.config import settings
 from app.core.database import AsyncSessionLocal, get_db_session
 from app.core.dependencies import get_current_user, get_auth_context, AuthContext
 from app.core.exceptions import AppException
 from app.entity.notification import NotificationAudience
 from app.entity.user import User
-from app.model.request.generic_story import GenericStoryCreateRequest, GenericStoryUpdateRequest
+from app.model.request.generic_story import (
+    GenericStoryCreateRequest,
+    GenericStoryStatusUpdateRequest,
+    GenericStoryUpdateRequest,
+)
 from app.model.request.generic_story_workflow import (
     GenericStoryWorkflowCreateRequest,
     GenericStoryWorkflowExecuteRequest,
@@ -34,11 +39,40 @@ from app.model.response.story_content import StoryContentResponse
 from app.service.generic_story_batch_service import GenericStoryBatchService
 from app.service.generic_story_service import GenericStoryService
 from app.service.generic_story_workflow_service import GenericStoryWorkflowService
+from app.service.image_optimizer import optimize_display_image
 from app.service.notification_service import NotificationService
 from app.service.story_catalog_service import StoryCatalogService
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+IMAGE_CONTENT_TYPES = {
+    "image/jpeg": ".jpg",
+    "image/jpg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+}
+
+
+def _upload_image_extension(upload: UploadFile) -> str:
+    if upload.content_type in IMAGE_CONTENT_TYPES:
+        return IMAGE_CONTENT_TYPES[upload.content_type]
+
+    filename = upload.filename or ""
+    for extension in {".jpg", ".jpeg", ".png", ".webp"}:
+        if filename.lower().endswith(extension):
+            return ".jpg" if extension == ".jpeg" else extension
+
+    raise AppException("Image must be a JPEG, PNG, or WEBP image", status.HTTP_400_BAD_REQUEST, "UNSUPPORTED_IMAGE_TYPE")
+
+
+def _content_type_for_extension(extension: str) -> str:
+    return {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".webp": "image/webp",
+    }.get(extension.lower(), "application/octet-stream")
 
 
 async def send_new_generic_story_notification_background(*, story_id: UUID, title: str) -> None:
@@ -143,6 +177,38 @@ async def execute_generic_story_workflow(
         else "Generic story workflow step executed successfully"
     )
     return success_response(data, message)
+
+
+@router.post(
+    "/images/reduce",
+    response_class=Response,
+)
+async def reduce_generic_story_image_for_preview(
+    image: UploadFile = File(...),
+    max_dimension: int = Query(1600, ge=320, le=4096),
+    _: User = Depends(get_current_user),
+) -> Response:
+    extension = _upload_image_extension(image)
+    content = await image.read()
+    if not content:
+        raise AppException("Image file is empty", status.HTTP_400_BAD_REQUEST, "EMPTY_IMAGE")
+    if len(content) > settings.IMAGE_MAX_UPLOAD_BYTES:
+        raise AppException(
+            "Image must be 5 MB or smaller",
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            "IMAGE_TOO_LARGE",
+        )
+
+    filename = image.filename or f"image{extension}"
+    if "." not in filename:
+        filename = f"{filename}{extension}"
+    reduced = optimize_display_image(content, filename, max_dimension=max_dimension)
+    media_type = image.content_type if image.content_type in IMAGE_CONTENT_TYPES else _content_type_for_extension(extension)
+    return Response(
+        content=reduced,
+        media_type=media_type,
+        headers={"Content-Disposition": f'inline; filename="reduced_{filename}"'},
+    )
 
 
 @router.post(
@@ -299,6 +365,18 @@ async def update_generic_story(
 ) -> ApiResponse[GenericStoryResponse]:
     data = await GenericStoryService(session).update(generic_story_id, payload, language=language)
     return success_response(data, "Generic story updated successfully")
+
+
+@router.patch("/{generic_story_id}/status", response_model=ApiResponse[GenericStoryResponse])
+async def update_generic_story_status(
+    generic_story_id: UUID,
+    payload: GenericStoryStatusUpdateRequest,
+    language: str = Query("en", min_length=2, max_length=16),
+    _: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[GenericStoryResponse]:
+    data = await GenericStoryService(session).update_status(generic_story_id, payload, language=language)
+    return success_response(data, "Generic story status updated successfully")
 
 
 @router.delete("/{generic_story_id}", response_model=ApiResponse[None])

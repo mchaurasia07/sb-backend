@@ -69,7 +69,7 @@ Get from "Get Child ID" request under Setup folder
 |---------|-------------|-------------|------|
 | Input-Driven, Skip Images | Fast test | ✓ | input_driven |
 | Input-Driven, Full Images | Complete story with 10 images | ✗ | input_driven |
-| Input-Driven, Different Age | Toddler (2-4) story | ✓ | input_driven |
+| Input-Driven, Different Age | Infant Toddler (0-3) story | ✓ | input_driven |
 
 ### Event-Driven Stories
 | Request | Description | Skip Images | Mode |

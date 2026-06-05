@@ -11,11 +11,12 @@ from PIL import Image, UnidentifiedImageError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.age_groups import (
-    AGE_GROUP_0_2,
-    AGE_GROUP_2_4,
-    AGE_GROUP_4_6,
-    AGE_GROUP_6_8,
+    AGE_GROUP_0_3,
+    AGE_GROUP_3_6,
+    AGE_GROUP_6_9,
     DEFAULT_AGE_GROUP,
+    age_group_label,
+    normalize_age_group,
     page_count_for_age_group,
 )
 from app.core.config import settings
@@ -220,16 +221,14 @@ class StoryService:
     MAX_RETRIES = 3
     PLAN_MAX_TOKENS = 14000
     STORY_MAX_TOKENS_BY_AGE = {
-        AGE_GROUP_0_2: 3000,
-        AGE_GROUP_2_4: 4000,
-        AGE_GROUP_4_6: 7000,
-        AGE_GROUP_6_8: 9000,
+        AGE_GROUP_0_3: 4000,
+        AGE_GROUP_3_6: 7000,
+        AGE_GROUP_6_9: 9000,
     }
     IMAGE_PLAN_MAX_TOKENS_BY_AGE = {
-        AGE_GROUP_0_2: 12000,
-        AGE_GROUP_2_4: 16000,
-        AGE_GROUP_4_6: 22000,
-        AGE_GROUP_6_8: 28000,
+        AGE_GROUP_0_3: 16000,
+        AGE_GROUP_3_6: 22000,
+        AGE_GROUP_6_9: 28000,
     }
 
     def __init__(self, session: AsyncSession):
@@ -303,12 +302,12 @@ class StoryService:
 
     @classmethod
     def _story_max_tokens(cls, age_group: str) -> int:
-        value = getattr(age_group, "value", str(age_group))
+        value = normalize_age_group(age_group)
         return cls.STORY_MAX_TOKENS_BY_AGE.get(value, cls.STORY_MAX_TOKENS_BY_AGE[DEFAULT_AGE_GROUP])
 
     @classmethod
     def _image_plan_max_tokens(cls, age_group: str) -> int:
-        value = getattr(age_group, "value", str(age_group))
+        value = normalize_age_group(age_group)
         return cls.IMAGE_PLAN_MAX_TOKENS_BY_AGE.get(value, cls.IMAGE_PLAN_MAX_TOKENS_BY_AGE[DEFAULT_AGE_GROUP])
 
     async def _set_current_step(self, story: Story, step_name: StoryStepName) -> None:
@@ -1579,7 +1578,7 @@ class StoryService:
         return render_prompt(
             template,
             {
-                "age_group": story.age_group.value,
+                "age_group": age_group_label(story.age_group),
                 "first_name": child.first_name or "Child",
                 "gender": child.gender or "neutral",
                 "theme": _safe_prompt_value(theme),
@@ -1823,13 +1822,11 @@ class StoryService:
         today = date.today()
         age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
 
-        if age < 2:
-            return AGE_GROUP_0_2
-        if age < 4:
-            return AGE_GROUP_2_4
+        if age < 3:
+            return AGE_GROUP_0_3
         if age < 6:
-            return AGE_GROUP_4_6
-        return AGE_GROUP_6_8
+            return AGE_GROUP_3_6
+        return AGE_GROUP_6_9
 
     @staticmethod
     def _get_page_count_for_age_group(age_group: str) -> int:
@@ -1840,12 +1837,11 @@ class StoryService:
     def _get_hobby_for_age_group(age_group: str) -> str:
         """Get age-appropriate hobby/interest suggestions."""
         hobbies = {
-            AGE_GROUP_0_2: "peekaboo, soft toys, music, stacking, sensory play",
-            AGE_GROUP_2_4: "playing with toys, exploring, drawing, singing",
-            AGE_GROUP_4_6: "picture books, drawing, building with blocks, pretend play, simple games",
-            AGE_GROUP_6_8: "reading, creating art, sports, music, science experiments, building games",
+            AGE_GROUP_0_3: "peekaboo, soft toys, music, stacking, sensory play, exploring, drawing, singing",
+            AGE_GROUP_3_6: "picture books, drawing, building with blocks, pretend play, simple games",
+            AGE_GROUP_6_9: "reading, creating art, sports, music, science experiments, building games",
         }
-        value = getattr(age_group, "value", age_group)
+        value = normalize_age_group(age_group)
         return hobbies.get(str(value), hobbies[DEFAULT_AGE_GROUP])
 
     @staticmethod

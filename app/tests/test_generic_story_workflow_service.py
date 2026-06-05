@@ -68,7 +68,7 @@ def test_workflow_response_serializes_generic_story_id_like_db_value():
         error_message=None,
         generic_story_id=generic_story_id,
         actual_story="A story with enough text.",
-        age_group="4-6",
+        age_group="3-6",
         language="en",
         requested_pages=10,
         title="Story",
@@ -120,17 +120,17 @@ def test_scene_plan_prompt_does_not_accept_requested_pages_override():
     prompt = Path("prompts/generic_story/scene_plan_prompt.txt").read_text(encoding="utf-8")
 
     assert "requested_pages" not in prompt
-    assert "0-2 = 6-8 pages" in prompt
-    assert "2-4 = 6-9 pages" in prompt
-    assert "4-6 = 8-10 pages" in prompt
-    assert "6-8 = 10-11 pages" in prompt
+    assert "0-3 = 6-8 pages" in prompt
+    assert "3-6 = 8-10 pages" in prompt
+    assert "6-9 = 10-11 pages" in prompt
 
 
 def test_generic_scene_plan_page_count_ranges_match_prompt():
-    assert GenericStoryWorkflowService._scene_plan_page_count_range("0-2") == (6, 8)
-    assert GenericStoryWorkflowService._scene_plan_page_count_range("2-4") == (6, 9)
+    assert GenericStoryWorkflowService._scene_plan_page_count_range("0-3") == (6, 8)
+    assert GenericStoryWorkflowService._scene_plan_page_count_range("3-6") == (8, 10)
+    assert GenericStoryWorkflowService._scene_plan_page_count_range("6-9") == (10, 11)
+    assert GenericStoryWorkflowService._scene_plan_page_count_range("2-4") == (6, 8)
     assert GenericStoryWorkflowService._scene_plan_page_count_range("4-6") == (8, 10)
-    assert GenericStoryWorkflowService._scene_plan_page_count_range("6-8") == (10, 11)
 
 
 def test_story_generation_prompt_requires_natural_hindi_marathi_localization():
@@ -178,7 +178,7 @@ def test_workflow_log_event_uses_consistent_ids_and_fields(caplog):
 def test_normalize_story_json_matches_existing_story_contract():
     service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
     workflow = SimpleNamespace(
-        age_group="4-6",
+        age_group="3-6",
         scene_plan_json={
             "title": "The Moon Bell",
             "summary": "A child helps restore the moon bell.",
@@ -212,7 +212,7 @@ def test_normalize_story_json_matches_existing_story_contract():
 def test_normalize_story_json_keeps_multilingual_page_text_variants():
     service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
     workflow = SimpleNamespace(
-        age_group="4-6",
+        age_group="3-6",
         language="hi",
         scene_plan_json={
             "title": "The Moon Bell",
@@ -258,7 +258,7 @@ def test_normalize_story_json_keeps_multilingual_page_text_variants():
 
 def test_normalize_story_json_rejects_scene_page_count_mismatch():
     service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
-    workflow = SimpleNamespace(age_group="4-6", scene_plan_json={"pages": [{"page_number": 1}, {"page_number": 2}]})
+    workflow = SimpleNamespace(age_group="3-6", scene_plan_json={"pages": [{"page_number": 1}, {"page_number": 2}]})
 
     with pytest.raises(AppException, match="expected 2"):
         service._normalize_story_json(
@@ -322,7 +322,7 @@ def test_render_image_prompt_uses_page_scoped_visual_context():
         story_title="The Moon Bell",
         visual_bible={
             "style": "Premium storybook style.",
-            "age_group": "4-6",
+            "age_group": "3-6",
             "characters": [
                 {
                     "name": "Mira",
@@ -375,7 +375,7 @@ def test_render_image_prompt_uses_page_scoped_visual_context():
     assert "Required objects only: moon bell" in prompt
     assert prompt.index("SCENE TO DRAW:") < prompt.index("CHARACTER AND CONTINUITY MODEL SHEET:")
     assert "ILLUSTRATION STYLE:\nPremium storybook style." in prompt
-    assert "AGE GROUP:\n4-6" in prompt
+    assert "AGE GROUP:\nEarly Reader (3-6 years)" in prompt
     assert "ASPECT RATIO:\n1:1" in prompt
     assert "Rohan anchor" not in prompt
     assert "red kite" not in prompt
@@ -433,6 +433,66 @@ def test_render_cover_prompt_prioritizes_exact_title_text():
     assert "Do not use a banner, label, card, sticker, plaque, black rectangle" in prompt
 
 
+def test_render_cover_prompt_locks_visual_bible_identity_and_cover_continuity():
+    service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
+    prompt = service._render_image_prompt(
+        page_type="cover",
+        story_title="The Moon Bell",
+        visual_bible={
+            "characters": [
+                {
+                    "name": "Mira",
+                    "role": "hero",
+                    "anchor": "Mira anchor.",
+                    "appearance": {
+                        "face_shape": "round face",
+                        "hair": {"color": "black", "length": "short", "style": "bob"},
+                        "outfit": {"type": "dress", "primary_color": "yellow", "pattern": "plain"},
+                        "accessories": ["red bracelet always present"],
+                    },
+                    "locks": {
+                        "face_lock": "round face",
+                        "hair_lock": "short black bob",
+                        "outfit_lock": "plain yellow dress",
+                        "accessory_lock": "red bracelet always present",
+                    },
+                    "forbidden_variations": ["blue dress", "long hair"],
+                },
+                {
+                    "name": "Rohan",
+                    "anchor": "Rohan anchor.",
+                    "appearance": "green kurta",
+                },
+            ],
+            "locations": [],
+            "important_objects": [],
+        },
+        page_image_plan={
+            "book_cover_prompt": "Front cover based on the whole story promise with exact Visual Bible appearance.",
+            "visual_focus": "Mira stands beneath the glowing moon bell.",
+            "composition": "Mira below a clean title area with the moon bell as the story signal.",
+            "title_layout": "Large readable title at the top.",
+            "characters": ["Mira"],
+            "continuity_notes": [
+                "Mira keeps round face, short black bob, plain yellow dress, red bracelet, and no blue dress."
+            ],
+        },
+    )
+
+    assert "same face, hair, outfit, accessories, body scale, and forbidden variations" in prompt
+    assert "not a redesigned marketing version or alternate costume" in prompt
+    assert (
+        "Continuity requirements: Mira keeps round face, short black bob, plain yellow dress, red bracelet, "
+        "and no blue dress."
+    ) in prompt
+    assert "face=round face" in prompt
+    assert "hair=short black bob" in prompt
+    assert "outfit=plain yellow dress" in prompt
+    assert "accessory=red bracelet always present" in prompt
+    assert "forbid=blue dress, long hair" in prompt
+    assert "Rohan anchor" not in prompt
+
+
 def test_render_page_prompt_forbids_written_text():
     service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
     prompt = service._render_image_prompt(
@@ -452,7 +512,19 @@ def test_generic_batch_cover_prompt_uses_current_image_prompt_contract():
         page_type="cover",
         story_title="Grandma's Rakhi Story",
         visual_bible={
-            "characters": [{"name": "Rohan", "appearance": "small boy in blue kurta"}],
+            "characters": [
+                {
+                    "name": "Rohan",
+                    "appearance": "small boy in blue kurta",
+                    "locks": {
+                        "face_lock": "round face",
+                        "hair_lock": "short black hair",
+                        "outfit_lock": "blue kurta",
+                        "accessory_lock": "no random accessories",
+                    },
+                    "forbidden_variations": ["red kurta"],
+                }
+            ],
             "locations": [],
             "important_objects": [],
         },
@@ -460,6 +532,7 @@ def test_generic_batch_cover_prompt_uses_current_image_prompt_contract():
             "characters": ["Rohan"],
             "visual_focus": "Rohan smiles with his family.",
             "composition": "Rohan below a clean title area.",
+            "continuity_notes": ["Rohan keeps blue kurta and short black hair."],
         },
     )
 
@@ -469,6 +542,9 @@ def test_generic_batch_cover_prompt_uses_current_image_prompt_contract():
     assert 'Render this exact visible title text: "Grandma\'s Rakhi Story"' in prompt
     assert '"title_text":"Grandma\'s Rakhi Story"' in prompt
     assert "small boy in blue kurta" in prompt
+    assert "same face, hair, outfit, accessories, body scale, and forbidden variations" in prompt
+    assert "Continuity requirements: Rohan keeps blue kurta and short black hair." in prompt
+    assert "forbid=red kurta" in prompt
 
 
 def test_generic_batch_builds_openai_image_batch_request():
@@ -664,6 +740,79 @@ def test_validate_image_cover_plan_requires_title_layout_context():
         service._validate_and_normalize_image_cover_plan(image_plan, workflow)
 
 
+def test_validate_image_cover_plan_normalizes_cover_character_names_from_visual_bible():
+    service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
+    workflow = SimpleNamespace(
+        story_json={"title": "The Moon Bell"},
+        title=None,
+        scene_plan_json={},
+        visual_bible_json={"characters": [{"name": "Mira"}]},
+    )
+    image_plan = {
+        "cover": {
+            "title_text": "The Moon Bell",
+            "visual_focus": "Mira listens beneath the moon.",
+            "camera_shot": "wide",
+            "composition": "Mira below a clean title area with a bedtime genre signal.",
+            "characters": ["mira"],
+            "continuity_notes": ["Mira keeps her exact Visual Bible face, hair, outfit, and accessories."],
+        },
+        "pages": [],
+    }
+
+    service._validate_and_normalize_image_cover_plan(image_plan, workflow)
+
+    assert image_plan["cover"]["characters"] == ["Mira"]
+
+
+def test_validate_image_cover_plan_rejects_unknown_cover_character():
+    service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
+    workflow = SimpleNamespace(
+        story_json={"title": "The Moon Bell"},
+        title=None,
+        scene_plan_json={},
+        visual_bible_json={"characters": [{"name": "Mira"}]},
+    )
+    image_plan = {
+        "cover": {
+            "title_text": "The Moon Bell",
+            "visual_focus": "Mira listens beneath the moon.",
+            "camera_shot": "wide",
+            "composition": "Mira below a clean title area with a bedtime genre signal.",
+            "characters": ["Rohan"],
+            "continuity_notes": ["Rohan keeps his exact Visual Bible face, hair, outfit, and accessories."],
+        },
+        "pages": [],
+    }
+
+    with pytest.raises(AppException, match="Visual Bible character names"):
+        service._validate_and_normalize_image_cover_plan(image_plan, workflow)
+
+
+def test_validate_image_cover_plan_requires_cover_continuity_when_characters_are_visible():
+    service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
+    workflow = SimpleNamespace(
+        story_json={"title": "The Moon Bell"},
+        title=None,
+        scene_plan_json={},
+        visual_bible_json={"characters": [{"name": "Mira"}]},
+    )
+    image_plan = {
+        "cover": {
+            "title_text": "The Moon Bell",
+            "visual_focus": "Mira listens beneath the moon.",
+            "camera_shot": "wide",
+            "composition": "Mira below a clean title area with a bedtime genre signal.",
+            "characters": ["Mira"],
+            "continuity_notes": [],
+        },
+        "pages": [],
+    }
+
+    with pytest.raises(AppException, match="continuity notes"):
+        service._validate_and_normalize_image_cover_plan(image_plan, workflow)
+
+
 def test_story_json_for_image_plan_prompt_removes_generated_artifacts():
     service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
 
@@ -722,7 +871,7 @@ def test_generate_dummy_narration_saves_wav_data_urls_and_rendered_tts_prompt(mo
     monkeypatch.setattr("app.service.generic_story_workflow_service.GoogleTTSProvider", _FakeTTSProvider)
     service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
     workflow = SimpleNamespace(
-        age_group="4-6",
+        age_group="3-6",
         language="en",
         story_json={
             "pages": [
@@ -756,7 +905,7 @@ def test_generate_dummy_narration_saves_audio_for_each_language_variant(monkeypa
     monkeypatch.setattr("app.service.generic_story_workflow_service.GoogleTTSProvider", _FakeTTSProvider)
     service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
     workflow = SimpleNamespace(
-        age_group="4-6",
+        age_group="3-6",
         language="en",
         story_json={
             "title": "The Moon Bell",
@@ -897,7 +1046,7 @@ async def test_generate_google_narration_calls_narration_service_once_per_langua
     workflow_id = uuid4()
     workflow = SimpleNamespace(
         id=workflow_id,
-        age_group="4-6",
+        age_group="3-6",
         language="en",
         story_json={
             "title": "The Moon Bell",
@@ -1170,11 +1319,16 @@ class _FakeUpload:
 class _FakeImageStorage:
     def __init__(self):
         self.saved = []
+        self.reduced_saved = []
         self.bytes_by_url = {}
 
     async def save_story_image(self, story_id, image_bytes, filename, public_base_url):
         self.saved.append((story_id, image_bytes, filename, public_base_url))
         return f"https://cdn.example.test/photo/stories/{story_id}/{filename}"
+
+    async def save_story_reduced_image(self, story_id, image_bytes, filename, public_base_url):
+        self.reduced_saved.append((story_id, image_bytes, filename, public_base_url))
+        return f"https://cdn.example.test/photo/stories/{story_id}/reduced/{filename}"
 
     async def get_image_bytes(self, image_url):
         return self.bytes_by_url.get(image_url, b"image")
@@ -1407,7 +1561,7 @@ async def test_create_workflow_persists_requested_title(monkeypatch):
         GenericStoryWorkflowCreateRequest(
             title="Journey to Mars",
             actual_story="Mira built a small rocket, visited Mars, and learned that curiosity grows when we ask careful questions.",
-            age_group="4-6",
+            age_group="3-6",
             theme="space adventure",
             genre="adventure",
             learning_goal="curiosity",
@@ -1441,7 +1595,7 @@ async def test_create_workflow_rejects_duplicate_generic_story_title():
                     "Mira built a small rocket, visited Mars, and learned that curiosity grows "
                     "when we ask careful questions."
                 ),
-                age_group="4-6",
+                age_group="3-6",
             ),
         )
 
@@ -1463,7 +1617,7 @@ async def test_create_workflow_rejects_unsupported_illustration_type():
                     "Mira built a small rocket, visited Mars, and learned that curiosity grows "
                     "when we ask careful questions."
                 ),
-                age_group="4-6",
+                age_group="3-6",
                 illustration_type="claymation",
             ),
         )
@@ -1485,7 +1639,7 @@ async def test_create_workflow_requires_title_for_unique_generic_story_validatio
                     "Mira built a small rocket, visited Mars, and learned that curiosity grows "
                     "when we ask careful questions."
                 ),
-                age_group="4-6",
+                age_group="3-6",
             ),
         )
 
@@ -1539,6 +1693,10 @@ async def test_upload_published_story_images_updates_all_content_languages(monke
         "app.service.generic_story_workflow_service.get_image_storage_service",
         lambda: image_storage,
     )
+    monkeypatch.setattr(
+        "app.service.generic_story_workflow_service.optimize_display_image",
+        lambda image_bytes, filename: b"reduced-" + image_bytes,
+    )
     service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
     service.session = SimpleNamespace()
     service.workflows = _FakeWorkflows()
@@ -1569,9 +1727,13 @@ async def test_upload_published_story_images_updates_all_content_languages(monke
 
     assert [item[2] for item in image_storage.saved] == ["cover.png", "page_1.png", "page_2.png"]
     assert [item[0] for item in image_storage.saved] == [generic_story_id, generic_story_id, generic_story_id]
+    assert [item[2] for item in image_storage.reduced_saved] == ["cover.png", "page_1.png", "page_2.png"]
+    assert [item[1] for item in image_storage.reduced_saved] == [b"reduced-cover", b"reduced-page-1", b"reduced-page-2"]
     assert response.updated_languages == ["en", "hi"]
     assert response.cover_image_url.endswith("/cover.png")
     assert response.page_image_urls[1].endswith("/page_1.png")
+    assert response.reduced_cover_image_url.endswith("/reduced/cover.png")
+    assert response.reduced_page_image_urls[1].endswith("/reduced/page_1.png")
     assert response.page_image_urls[2].endswith("/page_2.png")
     assert workflow.cover_image == response.cover_image_url
     assert workflow.story_json["cover_image_url"] == response.cover_image_url
@@ -1714,7 +1876,7 @@ async def test_publish_generic_story_creates_catalog_item_and_content(monkeypatc
     workflow = SimpleNamespace(
         id=uuid4(),
         generic_story_id=None,
-        age_group="4-6",
+        age_group="3-6",
         language="en",
         title="The Moon Bell",
         summary="A child helps restore the moon bell.",
@@ -1779,7 +1941,7 @@ async def test_publish_generic_story_rejects_existing_title(monkeypatch):
     workflow = SimpleNamespace(
         id=uuid4(),
         generic_story_id=None,
-        age_group="4-6",
+        age_group="3-6",
         language="en",
         title="The Moon Bell",
         summary="A child helps restore the moon bell.",
@@ -1829,7 +1991,7 @@ async def test_publish_generic_story_expands_multilingual_variants_to_content_ro
     workflow = SimpleNamespace(
         id=uuid4(),
         generic_story_id=None,
-        age_group="4-6",
+        age_group="3-6",
         language="en",
         title="The Moon Bell",
         summary="A child helps restore the moon bell.",

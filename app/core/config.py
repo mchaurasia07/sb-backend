@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     MEDIA_URL_PREFIX: str
     IMAGE_MAX_UPLOAD_BYTES: int
     IMAGE_STORAGE_PROVIDER: str = "r2"
+    IMAGE_OPTIMIZATION_ENABLED: bool = True
+    IMAGE_MAX_DISPLAY_DIMENSION: int = 1600
+    IMAGE_JPEG_QUALITY: int = 88
+    IMAGE_WEBP_QUALITY: int = 88
+    IMAGE_PNG_COMPRESS_LEVEL: int = 9
 
     # Cloudflare R2 image storage.
     CLOUDFLARE_R2_ACCOUNT_ID: str = ""
@@ -68,6 +73,7 @@ class Settings(BaseSettings):
     AUDIO_ROOT: str = Field(description="Absolute or relative path for audio storage")
     AUDIO_URL_PREFIX: str
     AUDIO_STORAGE_PROVIDER: str = "local"
+    AUDIO_LIBRARY_STORAGE_PROVIDER: str = "r2"
     CLOUDFLARE_R2_AUDIO_KEY_PREFIX: str = "audio"
 
     # AI Provider Selection

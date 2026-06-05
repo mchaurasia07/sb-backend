@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable
 
-from app.core.age_groups import PAGE_COUNT_BY_AGE_GROUP
+from app.core.age_groups import PAGE_COUNT_BY_AGE_GROUP, page_count_for_age_group
 
 
 @dataclass(frozen=True)
@@ -57,7 +57,7 @@ class PlanValidator:
             errors.append("Missing or invalid `pages` (must be a non-empty array).")
             return PlanValidationResult(ok=False, errors=errors)
 
-        expected_count = self._AGE_GROUP_PAGE_COUNTS.get(self._enum_value(age_group))
+        expected_count = page_count_for_age_group(self._enum_value(age_group))
         if expected_count is not None and len(pages) != expected_count:
             errors.append(f"`pages.length` must be {expected_count} for age_group={age_group}.")
 

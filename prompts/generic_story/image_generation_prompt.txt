@@ -31,26 +31,23 @@ IMAGE PLAN:
 CHARACTER AND CONTINUITY MODEL SHEET:
 {visual_context}
 
-# PRIORITY
+# CONTRACT
 
-1. If PAGE TYPE is "cover", create a finished front book cover from the whole-story cover direction, title layout, genre signal, and story promise. It must not look like page 1 or any single interior story page.
-2. If PAGE TYPE is an interior story page, draw the exact scene in SCENE TO DRAW and IMAGE PLAN. The page moment, action, environment, character list, objects, emotion, camera shot, and composition are hard requirements.
-3. Use the model sheet only to keep identities and continuity consistent. Do not let continuity notes replace or generalize the page scene.
-4. Follow TITLE AND TEXT INSTRUCTION exactly. For covers, readable exact title typography is required.
+If PAGE TYPE is "cover", create a finished front book cover from the whole-story direction, title layout, genre signal, and story promise. It must not look like page 1 or any interior page. Visible cover characters must match the Visual Bible model sheet exactly.
 
-# RULES
+If PAGE TYPE is an interior story page, draw the exact SCENE TO DRAW and IMAGE PLAN moment: action, environment, character list, objects, emotion, camera shot, and composition are hard requirements.
 
-Use only characters listed in the image plan. Do not add extra characters, recurring family members, toys, props, locations, or background story elements unless the image plan explicitly lists them.
+Use only characters and objects listed in the image plan. Do not add extra characters, family members, toys, props, locations, text, signs, labels, logos, or background story elements unless explicitly listed.
 
-Each page must look like its own story moment. Do not reuse a generic family pose, nursery setup, mat scene, toy arrangement, or previous-page composition unless the image plan explicitly asks for that exact repeat.
+Keep identities and continuity from the model sheet. Do not redesign characters or change outfit, hairstyle, face shape, age, skin tone, body scale, accessories, fixed objects, or forbidden variations. For covers, use the same story characters, not marketing redesigns, alternate costumes, older/younger versions, or lookalikes.
 
-Do not redesign characters, change outfit, hairstyle, face shape, age, skin tone, body scale, accessories, or fixed objects.
+Each interior page must look like its own story moment. Do not reuse generic poses, nursery/mat setups, object layouts, or previous-page compositions unless requested.
 
-COMPOSITION:
-One clear focal point, child-friendly, clean layout, expressive faces, no clutter.
+Follow TITLE AND TEXT INSTRUCTION exactly. The only allowed text is the exact cover title when PAGE TYPE is "cover".
 
-NEGATIVE RULES:
-No scary elements, no violence, no distorted hands, no extra fingers, no text unless requested, no watermark, no random outfit changes. The only allowed text is the exact cover title when PAGE TYPE is "cover".
+Composition: one clear focal point, child-friendly clean layout, expressive faces, no clutter.
+
+Negative rules: no scary elements, violence, distorted hands, extra fingers, watermark, random outfit changes, or unwanted text.
 
 # OUTPUT
 

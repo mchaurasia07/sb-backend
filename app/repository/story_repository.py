@@ -5,8 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.orm import selectinload
 
-from app.core.age_groups import validate_age_group
-from app.entity.story import Story, StoryContent, StoryGenerationMode, AgeGroup, StoryStatus
+from app.core.age_groups import AgeGroup, validate_age_group
+from app.entity.story import Story, StoryContent, StoryGenerationMode, StoryStatus
 
 
 class StoryRepository:

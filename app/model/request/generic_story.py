@@ -56,6 +56,10 @@ class GenericStoryUpdateRequest(BaseModel):
         return validate_age_group(value)
 
 
+class GenericStoryStatusUpdateRequest(BaseModel):
+    status: Literal["active", "inactive"]
+
+
 class AddGenericStoryToChildRequest(BaseModel):
     generic_story_id: UUID
     language: GenericStoryLanguage = GenericStoryLanguage.EN

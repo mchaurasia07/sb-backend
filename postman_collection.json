@@ -1872,7 +1872,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{base_url}}/api/v1/generic-stories?age_group=4-6",
+              "raw": "{{base_url}}/api/v1/generic-stories?age_group=3-6",
               "host": [
                 "{{base_url}}"
               ],
@@ -1896,7 +1896,7 @@
                 },
                 {
                   "key": "age_group",
-                  "value": "4-6",
+                  "value": "3-6",
                   "description": "",
                   "disabled": false
                 },
@@ -1951,7 +1951,7 @@
             "description": "Create Generic Story",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Sample Story\",\n  \"summary\": \"string\",\n  \"age_group\": \"4-6\",\n  \"theme\": \"string\",\n  \"genre\": \"string\",\n  \"moral\": \"string\",\n  \"learning_goal\": \"string\",\n  \"reading_time_minutes\": 1,\n  \"character_type\": \"string\",\n  \"total_pages\": 0,\n  \"cover_image\": \"string\",\n  \"status\": \"active\",\n  \"story_contents\": [\n    {\n      \"language\": \"en\",\n      \"story_json\": {}\n    }\n  ]\n}",
+              "raw": "{\n  \"title\": \"Sample Story\",\n  \"summary\": \"string\",\n  \"age_group\": \"3-6\",\n  \"theme\": \"string\",\n  \"genre\": \"string\",\n  \"moral\": \"string\",\n  \"learning_goal\": \"string\",\n  \"reading_time_minutes\": 1,\n  \"character_type\": \"string\",\n  \"total_pages\": 0,\n  \"cover_image\": \"string\",\n  \"status\": \"active\",\n  \"story_contents\": [\n    {\n      \"language\": \"en\",\n      \"story_json\": {}\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2055,7 +2055,7 @@
             "description": "Create Generic Story Workflow",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Sample Story\",\n  \"actual_story\": \"A short child-friendly story with a clear beginning, middle, and ending.\",\n  \"age_group\": \"4-6\",\n  \"language\": \"en\",\n  \"theme\": \"string\",\n  \"genre\": \"string\",\n  \"learning_goal\": \"string\",\n  \"status\": \"inactive\"\n}",
+              "raw": "{\n  \"title\": \"Sample Story\",\n  \"actual_story\": \"A short child-friendly story with a clear beginning, middle, and ending.\",\n  \"age_group\": \"3-6\",\n  \"language\": \"en\",\n  \"theme\": \"string\",\n  \"genre\": \"string\",\n  \"learning_goal\": \"string\",\n  \"status\": \"inactive\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2356,7 +2356,7 @@
             "description": "Update Generic Story",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Sample Story\",\n  \"summary\": \"string\",\n  \"age_group\": \"4-6\",\n  \"theme\": \"string\",\n  \"genre\": \"string\",\n  \"moral\": \"string\",\n  \"learning_goal\": \"string\",\n  \"reading_time_minutes\": 1,\n  \"character_type\": \"string\",\n  \"total_pages\": 1,\n  \"cover_image\": \"string\",\n  \"status\": \"active\",\n  \"story_contents\": [\n    {\n      \"language\": \"en\",\n      \"story_json\": {}\n    }\n  ]\n}",
+              "raw": "{\n  \"title\": \"Sample Story\",\n  \"summary\": \"string\",\n  \"age_group\": \"3-6\",\n  \"theme\": \"string\",\n  \"genre\": \"string\",\n  \"moral\": \"string\",\n  \"learning_goal\": \"string\",\n  \"reading_time_minutes\": 1,\n  \"character_type\": \"string\",\n  \"total_pages\": 1,\n  \"cover_image\": \"string\",\n  \"status\": \"active\",\n  \"story_contents\": [\n    {\n      \"language\": \"en\",\n      \"story_json\": {}\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"

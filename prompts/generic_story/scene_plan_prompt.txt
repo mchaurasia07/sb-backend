@@ -36,8 +36,8 @@ Character Analysis JSON:
 
 AGE ADAPTATION
 
-Infant Toddler (0-2 years)
-- 6-8 pages
+Infant Toddler (0-3 years)
+- 7-9 pages
 - 10-20 words per page
 - one simple action per page
 - highly repetitive language
@@ -46,8 +46,8 @@ Infant Toddler (0-2 years)
 - very gentle emotions
 - 1-2 short sentences per page
 
-Toddler (2-4 years)
-- 6-9 pages
+Early Reader (3-6 years)
+- 8-11 pages
 - 15-30 words per page
 - simple concrete scenes
 - clear beginning, middle, and ending
@@ -56,8 +56,8 @@ Toddler (2-4 years)
 - sensory details and visual actions
 - 2-4 short sentences per page
 
-Early Reader (4-6 years)
-- 8-10 pages
+Growing Reader (6-9 years)
+- 10-13 pages
 - 25-50 words per page
 - simple adventure or discovery
 - one clear problem and solution
@@ -68,17 +68,6 @@ Early Reader (4-6 years)
 - concrete vocabulary
 - clear lesson or takeaway
 
-Growing Reader (6-8 years)
-- 10-11 pages
-- 40-80 words per page
-- stronger adventure or mystery elements
-- multiple story beats
-- visible choices and consequences
-- more character interactions
-- simple humor and suspense
-- richer descriptions
-- age-appropriate dialogue
-- moderate emotional development
 
 # OUTPUT JSON
 
@@ -134,7 +123,7 @@ Growing Reader (6-8 years)
 
 1. title must exactly match Requested Title when provided.
 2. pages length must stay within the allowed page range for the Age Group.
-   Use this mapping only: 0-2 = 6-8 pages, 2-4 = 6-9 pages, 4-6 = 8-10 pages, 6-8 = 10-11 pages.
+   Use this mapping only: 0-3 = 6-8 pages, 3-6 = 8-10 pages, 6-9 = 10-11 pages.
    Do not return fewer or more pages than the selected age group's range.
 3. Every page must move the story forward.
 4. Preserve original cause and effect.

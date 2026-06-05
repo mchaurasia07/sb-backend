@@ -115,28 +115,21 @@ Before adapting by age, build a professional picture-book spine:
 - climax choice where the child uses the learning goal
 - ending that shows what changed emotionally
 
-Infant Toddler (0-2)
+Infant Toddler (0-3 years)
 
 - very simple situations
 - familiar objects
 - soothing sensory discoveries
 - tiny, safe conflicts
 
-Toddler (2-4)
-
-- simple situations
-- playful discoveries
-- sensory experiences
-- gentle conflict
-
-Early Reader (4-6)
+Early Reader (3-6 years)
 
 - adventure
 - curiosity
 - exploration
 - simple problem solving
 
-Growing Reader (6-8)
+Growing Reader (6-9 years)
 
 - emotional growth
 - layered challenges
@@ -193,13 +186,11 @@ The anchors should be:
 - useful for story writing and illustration
 - not a lecture or fact list
 
-For Infant Toddler (0-2), use 1-3 very simple anchors.
+For Infant Toddler (0-3 years), use 1-3 very simple anchors.
 
-For Toddler (2-4), use 2-4 simple anchors.
+For Early Reader (3-6 years), use 3-5 concrete anchors.
 
-For Early Reader (4-6), use 3-5 concrete anchors.
-
-For Growing Reader (6-8), use 4-6 richer anchors.
+For Growing Reader (6-9 years), use 4-6 richer anchors.
 
 Every page should include one useful domain_detail when possible. The
 domain_detail should name a concrete place, object, creature, fact, sensory
@@ -343,7 +334,7 @@ NARRATIVE STRUCTURE
 
 Use the requested Page Count exactly.
 
-For 4-page infant toddler stories:
+For 6-page infant toddler stories:
 
 Page 1
 
@@ -353,37 +344,45 @@ Page 2
 
 Small discovery.
 
-Page 3
+Pages 3-4
 
 Tiny challenge and comforting choice.
 
-Page 4
-
-Resolution and warm emotional payoff.
-
-For 6-page toddler stories:
-
-Page 1
-
-Introduce hero, setting, and goal.
-
-Page 2
-
-Discovery.
-
-Pages 3-4
-
-Gentle challenge and imperfect attempt.
-
 Page 5
 
-Climax choice.
+Comforting climax choice.
 
 Page 6
 
+Resolution and warm emotional payoff.
+
+For 8-page early reader stories:
+
+Page 1
+
+Introduce hero, setting, goal, and first hook.
+
+Pages 2-3
+
+Discovery and first complication.
+
+Pages 4-5
+
+Attempts, mistakes, growth, and escalation.
+
+Page 6
+
+Stronger attempt using the learning goal.
+
+Page 7
+
+Climax choice.
+
+Page 8
+
 Resolution and emotional payoff.
 
-For 8-page and 10-page stories:
+For 10-page growing reader stories:
 
 Page 1
 

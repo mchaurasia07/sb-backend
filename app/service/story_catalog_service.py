@@ -2,6 +2,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.age_groups import validate_age_group
 from app.model.response.common import PaginatedResponse
 from app.model.response.story_catalog import StoryCatalogResponse
 from app.repository.generic_story_repository import GenericStoryRepository
@@ -62,7 +63,7 @@ class StoryCatalogService:
         theme: str | None = None,
         language: str | None = None,
     ) -> PaginatedResponse[StoryCatalogResponse]:
-        normalized_age_group = age_group.strip().lower()
+        normalized_age_group = validate_age_group(age_group)
         normalized_theme = theme.strip().lower() if theme and theme.strip() else None
         normalized_language = language.strip().lower() if language and language.strip() else None
         stories, total = await self.generic_stories.list_paginated(

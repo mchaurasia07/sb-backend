@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.core.age_groups import AGE_GROUP_0_2, AGE_GROUP_2_4, AGE_GROUP_4_6, AGE_GROUP_6_8, DEFAULT_AGE_GROUP
+from app.core.age_groups import AGE_GROUP_0_3, AGE_GROUP_3_6, AGE_GROUP_6_9, DEFAULT_AGE_GROUP, normalize_age_group
 
 
 DEFAULT_PAGE_EMOTION = "wonder"
@@ -38,10 +38,9 @@ PACE_BY_EMOTION = {
 }
 
 VOICE_STYLE_BY_AGE_GROUP = {
-    AGE_GROUP_0_2: "gentle lullaby storyteller",
-    AGE_GROUP_2_4: "gentle bedtime storyteller",
-    AGE_GROUP_4_6: "warm animated storyteller",
-    AGE_GROUP_6_8: "expressive adventure storyteller",
+    AGE_GROUP_0_3: "gentle lullaby bedtime storyteller",
+    AGE_GROUP_3_6: "warm animated storyteller",
+    AGE_GROUP_6_9: "expressive adventure storyteller",
 }
 
 
@@ -55,7 +54,7 @@ def normalize_page_emotion(emotion: Any) -> str:
 
 def voice_style_for_age_group(age_group: Any) -> str:
     """Return the fixed narration voice style for a story age group."""
-    value = getattr(age_group, "value", age_group)
+    value = normalize_age_group(age_group)
     return VOICE_STYLE_BY_AGE_GROUP.get(str(value), VOICE_STYLE_BY_AGE_GROUP[DEFAULT_AGE_GROUP])
 
 

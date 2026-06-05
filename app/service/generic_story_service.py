@@ -4,7 +4,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppException, NotFoundException
 from app.entity.generic_story import GenericStory
-from app.model.request.generic_story import GenericStoryCreateRequest, GenericStoryUpdateRequest
+from app.model.request.generic_story import (
+    GenericStoryCreateRequest,
+    GenericStoryStatusUpdateRequest,
+    GenericStoryUpdateRequest,
+)
 from app.model.response.common import PaginatedResponse
 from app.model.response.generic_story import (
     GenericStoryListResponse,
@@ -94,6 +98,26 @@ class GenericStoryService:
                 generic_story,
                 self._normalize_contents(story_contents),
             )
+        else:
+            await self.generic_stories.flush()
+
+        generic_story = await self.generic_stories.get_by_id(generic_story.id)
+        if generic_story is None:
+            raise NotFoundException("Generic story not found", "GENERIC_STORY_NOT_FOUND")
+        return self._to_response(generic_story, language=language)
+
+    async def update_status(
+        self,
+        generic_story_id: UUID,
+        payload: GenericStoryStatusUpdateRequest,
+        language: str = DEFAULT_GENERIC_STORY_LANGUAGE,
+    ) -> GenericStoryResponse:
+        generic_story = await self.generic_stories.get_by_id(generic_story_id)
+        if generic_story is None:
+            raise NotFoundException("Generic story not found", "GENERIC_STORY_NOT_FOUND")
+
+        generic_story.status = payload.status
+        await self.generic_stories.flush()
 
         generic_story = await self.generic_stories.get_by_id(generic_story.id)
         if generic_story is None:

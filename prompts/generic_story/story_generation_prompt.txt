@@ -134,19 +134,15 @@ If Requested Title is provided:
 
 # PAGE LENGTH
 
-Infant Toddler (0-2):
+Infant Toddler (0-3 years):
 
 * 10-25 words per page
 
-Toddler (2-4):
-
-* 20-40 words per page
-
-Early Reader (4-6):
+Early Reader (3-6 years):
 
 * 35-65 words per page
 
-Growing Reader (6-8):
+Growing Reader (6-9 years):
 
 * 50-90 words per page
 

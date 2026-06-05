@@ -4,10 +4,10 @@ import json
 from typing import Any
 
 from app.core.age_groups import (
-    AGE_GROUP_0_2,
-    AGE_GROUP_2_4,
-    AGE_GROUP_6_8,
+    AGE_GROUP_0_3,
+    AGE_GROUP_6_9,
     DEFAULT_AGE_GROUP,
+    normalize_age_group,
     page_count_for_age_group,
 )
 
@@ -15,12 +15,11 @@ from app.core.age_groups import (
 def get_mock_story_plan(child_name: str = "Emma", age_group: str = DEFAULT_AGE_GROUP) -> dict[str, Any]:
     """Return valid mock story plan JSON that passes validation."""
     # Determine page count and age band based on age_group
+    age_group = normalize_age_group(age_group)
     page_count = page_count_for_age_group(age_group)
-    if age_group == AGE_GROUP_0_2:
+    if age_group == AGE_GROUP_0_3:
         age_band = "Infant Toddler"
-    elif age_group == AGE_GROUP_2_4:
-        age_band = "Toddler"
-    elif age_group == AGE_GROUP_6_8:
+    elif age_group == AGE_GROUP_6_9:
         age_band = "Growing Reader"
     else:
         age_band = "Early Reader"

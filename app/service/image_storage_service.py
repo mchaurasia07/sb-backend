@@ -125,6 +125,33 @@ class ImageStorageService:
         public_path = f"{settings.MEDIA_URL_PREFIX}/stories/{story_id}/{filename}"
         return f"{public_base_url}{public_path}"
 
+    async def save_story_reduced_image(
+        self,
+        story_id: UUID,
+        image_bytes: bytes,
+        filename: str,
+        public_base_url: str,
+    ) -> str:
+        clean_filename = Path(filename).name
+        if clean_filename != filename:
+            raise AppException("Image filename must not contain a path", code="INVALID_IMAGE_FILENAME")
+
+        directory = settings.media_root_path / "stories" / str(story_id) / "reduced"
+        directory.mkdir(parents=True, exist_ok=True)
+
+        file_path = directory / clean_filename
+        try:
+            await asyncio.to_thread(file_path.write_bytes, image_bytes)
+        except IOError as e:
+            raise AppException(
+                f"Failed to save reduced story image: {str(e)}",
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                "STORAGE_ERROR",
+            )
+
+        public_path = f"{settings.MEDIA_URL_PREFIX}/stories/{story_id}/reduced/{clean_filename}"
+        return f"{public_base_url}{public_path}"
+
     async def delete_child_profile_directory(self, parent_id: UUID, child_id: UUID) -> None:
         await self._delete_directory(settings.media_root_path / str(parent_id) / str(child_id))
 

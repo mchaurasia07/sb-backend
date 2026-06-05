@@ -57,6 +57,9 @@ class GenericStoryRepository:
         await self.session.flush()
         return content
 
+    async def flush(self) -> None:
+        await self.session.flush()
+
     async def get_available_languages_by_story_ids(
         self,
         generic_story_ids: list[UUID],

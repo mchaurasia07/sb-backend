@@ -13,7 +13,7 @@ import wave
 from fastapi import UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.age_groups import page_count_range_for_age_group, validate_age_group
+from app.core.age_groups import age_group_label, page_count_range_for_age_group, validate_age_group
 from app.core.config import settings
 from app.core.exceptions import AppException, NotFoundException
 from app.core.illustration_styles import illustration_style_block, normalize_illustration_type
@@ -36,6 +36,7 @@ from app.model.response.generic_story_workflow import (
 from app.repository.generic_story_repository import GenericStoryRepository
 from app.repository.generic_story_workflow_repository import GenericStoryWorkflowRepository
 from app.service.ai.google_provider import GoogleProvider
+from app.service.image_optimizer import optimize_display_image
 from app.service.image_storage_provider import get_image_storage_service
 from app.service.story_audio_storage_provider import get_story_audio_storage_service
 from app.service.story_narration_service import StoryNarrationService
@@ -412,7 +413,7 @@ class GenericStoryWorkflowService:
             )
 
         image_storage = get_image_storage_service()
-        cover_image_url = await self._save_uploaded_story_image(
+        cover_image_url, reduced_cover_image_url = await self._save_uploaded_story_image(
             image_storage,
             story_id=generic_story_id,
             upload=cover_upload,
@@ -420,14 +421,17 @@ class GenericStoryWorkflowService:
             public_base_url=public_base_url,
         )
         page_image_urls: dict[int, str] = {}
+        reduced_page_image_urls: dict[int, str] = {}
         for page_number in page_numbers:
-            page_image_urls[page_number] = await self._save_uploaded_story_image(
+            page_image_url, reduced_page_image_url = await self._save_uploaded_story_image(
                 image_storage,
                 story_id=generic_story_id,
                 upload=page_uploads[page_number],
                 filename_stem=f"page_{page_number}",
                 public_base_url=public_base_url,
             )
+            page_image_urls[page_number] = page_image_url
+            reduced_page_image_urls[page_number] = reduced_page_image_url
 
         self._apply_story_image_urls(story_json, cover_image_url=cover_image_url, page_image_urls=page_image_urls)
         workflow.cover_image = cover_image_url
@@ -453,6 +457,8 @@ class GenericStoryWorkflowService:
             generic_story_id=generic_story_id,
             cover_image_url=cover_image_url,
             page_image_urls=page_image_urls,
+            reduced_cover_image_url=reduced_cover_image_url,
+            reduced_page_image_urls=reduced_page_image_urls,
             updated_languages=sorted(updated_languages),
         )
 
@@ -639,7 +645,7 @@ class GenericStoryWorkflowService:
         prompt = load_and_render_prompt(
             "prompts/generic_story/scene_plan_prompt.txt",
             {
-                "age_group": workflow.age_group,
+                "age_group": age_group_label(workflow.age_group),
                 "title": workflow.title or "",
                 "actual_story": workflow.actual_story,
                 "character_analysis_json": _compact_json(workflow.character_analysis_json),
@@ -684,7 +690,7 @@ class GenericStoryWorkflowService:
             "prompts/generic_story/story_generation_prompt.txt",
             {
                 "actual_story": workflow.actual_story,
-                "age_group": workflow.age_group,
+                "age_group": age_group_label(workflow.age_group),
                 "title": workflow.title or "",
                 "requested_language": self._default_story_language(workflow.language),
                 "character_analysis_json": _compact_json(workflow.character_analysis_json),
@@ -1197,6 +1203,14 @@ class GenericStoryWorkflowService:
             lines.append(
                 "This is a finished front book cover based on the whole story, not an interior page illustration."
             )
+            lines.append(
+                "The cover may be symbolic or overview-style, but every visible character must be the same story "
+                "character from the Visual Bible, not a redesigned marketing version or alternate costume."
+            )
+            lines.append(
+                "For every cover character, match the Visual Bible exactly: same face, hair, outfit, accessories, "
+                "body scale, and forbidden variations."
+            )
             cover_direction = cls._image_scene_value(page_image_plan.get("book_cover_prompt"))
             if cover_direction:
                 lines.append(f"Overall cover direction: {cover_direction}")
@@ -1231,6 +1245,10 @@ class GenericStoryWorkflowService:
         objects = cls._image_scene_value(page_image_plan.get("important_objects"))
         if objects:
             lines.append(f"Required objects only: {objects}")
+
+        continuity = cls._image_scene_value(page_image_plan.get("continuity_notes"))
+        if continuity:
+            lines.append(f"Continuity requirements: {continuity}")
 
         if lines:
             return "\n".join(lines)
@@ -1278,6 +1296,16 @@ class GenericStoryWorkflowService:
                 code="GENERIC_IMAGE_PLAN_COVER_TITLE_LAYOUT_MISSING",
             )
 
+        cover_characters = cover.get("characters") if isinstance(cover.get("characters"), list) else []
+        if cover_characters:
+            cover["characters"] = self._normalize_cover_character_names(cover_characters, workflow)
+            continuity_notes = cover.get("continuity_notes")
+            if not isinstance(continuity_notes, list) or not any(str(note or "").strip() for note in continuity_notes):
+                raise AppException(
+                    "Image plan cover must include continuity notes for visible cover characters.",
+                    code="GENERIC_IMAGE_PLAN_COVER_CONTINUITY_MISSING",
+                )
+
     @staticmethod
     def _image_plan_story_title(workflow: GenericStoryWorkflow) -> str:
         story_json = getattr(workflow, "story_json", None)
@@ -1289,6 +1317,44 @@ class GenericStoryWorkflowService:
         if isinstance(scene_plan_json, dict) and str(scene_plan_json.get("title") or "").strip():
             return str(scene_plan_json["title"]).strip()
         return "Untitled Story"
+
+    @classmethod
+    def _normalize_cover_character_names(
+        cls,
+        cover_characters: list[Any],
+        workflow: GenericStoryWorkflow,
+    ) -> list[str]:
+        visual_bible = cls._workflow_visual_bible(workflow)
+        visual_characters = visual_bible.get("characters") if isinstance(visual_bible, dict) else []
+        canonical_by_ref: dict[str, str] = {}
+        if isinstance(visual_characters, list):
+            for character in visual_characters:
+                if not isinstance(character, dict):
+                    continue
+                name = str(character.get("name") or "").strip()
+                if name:
+                    canonical_by_ref[cls._normalize_visual_ref(name)] = name
+
+        normalized_names: list[str] = []
+        unknown_names: list[str] = []
+        for raw_name in cover_characters:
+            name = str(raw_name or "").strip()
+            if not name:
+                continue
+            normalized_ref = cls._normalize_visual_ref(name)
+            canonical_name = canonical_by_ref.get(normalized_ref)
+            if canonical_by_ref and canonical_name is None:
+                unknown_names.append(name)
+                continue
+            normalized_names.append(canonical_name or name)
+
+        if unknown_names:
+            raise AppException(
+                "Image plan cover characters must match Visual Bible character names.",
+                code="GENERIC_IMAGE_PLAN_COVER_CHARACTER_UNKNOWN",
+                details={"unknown_characters": unknown_names},
+            )
+        return normalized_names
 
     @staticmethod
     def _workflow_illustration_type(workflow: GenericStoryWorkflow) -> str:
@@ -1309,7 +1375,7 @@ class GenericStoryWorkflowService:
     @staticmethod
     def _image_prompt_age_group(visual_bible: dict[str, Any]) -> str:
         age_group = str((visual_bible or {}).get("age_group") or "").strip()
-        return age_group or "children"
+        return age_group_label(age_group) if age_group else "children"
 
     @staticmethod
     def _image_prompt_aspect_ratio(page_type: str) -> str:
@@ -1865,7 +1931,7 @@ class GenericStoryWorkflowService:
         upload: UploadFile,
         filename_stem: str,
         public_base_url: str,
-    ) -> str:
+    ) -> tuple[str, str]:
         extension = GenericStoryWorkflowService._upload_image_extension(upload)
         content = await upload.read()
         if not content:
@@ -1876,12 +1942,21 @@ class GenericStoryWorkflowService:
                 status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                 "IMAGE_TOO_LARGE",
             )
-        return await image_storage.save_story_image(
+        filename = f"{filename_stem}{extension}"
+        image_url = await image_storage.save_story_image(
             story_id,
             content,
-            f"{filename_stem}{extension}",
+            filename,
             public_base_url,
         )
+        reduced_content = optimize_display_image(content, filename)
+        reduced_image_url = await image_storage.save_story_reduced_image(
+            story_id,
+            reduced_content,
+            filename,
+            public_base_url,
+        )
+        return image_url, reduced_image_url
 
     @staticmethod
     def _upload_image_extension(upload: UploadFile) -> str:
