@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     ACCOUNT_LOCK_MINUTES: int
 
     GOOGLE_CLIENT_ID: str
+    GOOGLE_ALLOWED_CLIENT_IDS: str = ""
     BACKEND_CORS_ORIGINS: str
     RATE_LIMIT_DEFAULT: str
 
@@ -122,7 +123,7 @@ class Settings(BaseSettings):
     STORY_BATCH_RECONCILE_RUN_MINUTE: int = 1
     STORY_BATCH_RECONCILE_LIMIT: int = 50
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8-sig", extra="ignore")
 
     @classmethod
     def settings_customise_sources(
@@ -150,6 +151,16 @@ class Settings(BaseSettings):
     @cached_property
     def cors_origins(self) -> list[str | AnyUrl]:
         return [origin.strip() for origin in self.BACKEND_CORS_ORIGINS.split(",") if origin.strip()]
+
+    @cached_property
+    def google_allowed_client_ids(self) -> set[str]:
+        client_ids = {self.GOOGLE_CLIENT_ID.strip()} if self.GOOGLE_CLIENT_ID.strip() else set()
+        client_ids.update(
+            client_id.strip()
+            for client_id in self.GOOGLE_ALLOWED_CLIENT_IDS.split(",")
+            if client_id.strip()
+        )
+        return client_ids
 
     @cached_property
     def media_root_path(self) -> Path:

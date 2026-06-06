@@ -130,6 +130,7 @@ class AuthService:
         email = google_payload["email"]
         if not google_sub or not email:
             raise AuthException("Invalid Google profile", status.HTTP_401_UNAUTHORIZED, "INVALID_GOOGLE_PROFILE")
+        first_time_login = False
         user = await self.users.get_by_google_sub(google_sub)
         if user is None:
             user = await self.users.get_by_email(email)
@@ -141,14 +142,25 @@ class AuthService:
                     first_name=first_name,
                     last_name=last_name,
                 )
+                first_time_login = True
             else:
                 user.google_sub = google_sub
                 user.is_email_verified = True
                 await self.session.flush()
         auth = await self._build_auth_response(user)
         phone_required = user.phone is None
-        redirect_to = "create_child_profile" if not auth.child_profile_exists else "dashboard"
-        return GoogleLoginResponse(**auth.model_dump(), phone_required=phone_required, redirect_to=redirect_to)
+        if phone_required:
+            redirect_to = "add_phone"
+        elif not auth.child_profile_exists:
+            redirect_to = "create_child_profile"
+        else:
+            redirect_to = "dashboard"
+        return GoogleLoginResponse(
+            **auth.model_dump(),
+            phone_required=phone_required,
+            first_time_login=first_time_login,
+            redirect_to=redirect_to,
+        )
 
     async def add_phone(self, current_user: User, payload: AddPhoneRequest) -> UserResponse:
         existing = await self.users.get_by_phone(payload.phone)

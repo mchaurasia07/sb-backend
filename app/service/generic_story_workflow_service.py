@@ -94,6 +94,54 @@ def _repair_json(text: str) -> str:
         text = text.removeprefix("```json").removeprefix("```").strip()
     if text.endswith("```"):
         text = text[:-3].strip()
+    text = _trim_to_json_object(text)
+    if not text:
+        return text
+
+    stack: list[str] = []
+    in_string = False
+    escaped = False
+    for char in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+
+        if char == '"':
+            in_string = True
+        elif char in "{[":
+            stack.append("}" if char == "{" else "]")
+        elif char in "}]":
+            if stack and stack[-1] == char:
+                stack.pop()
+
+    repaired = text.rstrip()
+    if in_string:
+        if escaped:
+            repaired = repaired[:-1]
+        repaired += '"'
+    while stack:
+        repaired += stack.pop()
+    return repaired
+
+
+def _trim_to_json_object(text: str) -> str:
+    start = text.find("{")
+    if start == -1:
+        return text
+    text = text[start:]
+    last_brace = text.rfind("}")
+    last_bracket = text.rfind("]")
+    last_json_char = max(last_brace, last_bracket)
+    if last_json_char == -1:
+        return text
+    trailing = text[last_json_char + 1 :].strip()
+    if trailing:
+        return text[: last_json_char + 1]
     return text
 
 
@@ -1154,8 +1202,20 @@ class GenericStoryWorkflowService:
         )
         try:
             parsed = json.loads(result.text)
-        except json.JSONDecodeError:
-            parsed = json.loads(_repair_json(result.text))
+        except json.JSONDecodeError as exc:
+            repaired = _repair_json(result.text)
+            try:
+                parsed = json.loads(repaired)
+            except json.JSONDecodeError as repair_exc:
+                raise AppException(
+                    "Google returned invalid JSON that could not be repaired.",
+                    code="GENERIC_WORKFLOW_INVALID_JSON",
+                    details={
+                        "parse_error": str(exc),
+                        "repair_error": str(repair_exc),
+                        "response_preview": result.text[:1000],
+                    },
+                ) from repair_exc
         if not isinstance(parsed, dict):
             raise AppException("Google returned JSON that is not an object.", code="GENERIC_WORKFLOW_INVALID_JSON")
         return parsed

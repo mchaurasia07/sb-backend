@@ -44,6 +44,7 @@ class ChildLoginResponse(BaseModel):
 
 class GoogleLoginResponse(AuthTokenResponse):
     phone_required: bool
+    first_time_login: bool
     redirect_to: str
 
 

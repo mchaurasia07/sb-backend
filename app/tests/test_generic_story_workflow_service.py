@@ -1,5 +1,6 @@
 import base64
 from datetime import UTC, datetime
+import json
 import logging
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,6 +19,7 @@ from app.service.generic_story_batch_service import GenericStoryBatchService
 from app.service.generic_story_workflow_service import (
     STORY_LANGUAGE_VARIANTS_KEY,
     GenericStoryWorkflowService,
+    _repair_json,
 )
 
 
@@ -123,6 +125,27 @@ def test_scene_plan_prompt_does_not_accept_requested_pages_override():
     assert "0-3 = 6-8 pages" in prompt
     assert "3-6 = 8-10 pages" in prompt
     assert "6-9 = 10-11 pages" in prompt
+
+
+def test_repair_json_closes_unterminated_string_and_containers():
+    raw = '{"cover":{"title_text":"Moon Story","book_cover_prompt":"A child follows the moon'
+
+    repaired = _repair_json(raw)
+
+    assert json.loads(repaired) == {
+        "cover": {
+            "title_text": "Moon Story",
+            "book_cover_prompt": "A child follows the moon",
+        }
+    }
+
+
+def test_repair_json_strips_fence_and_trailing_text():
+    raw = '```json\n{"pages":[{"page":1,"visual_focus":"Moon"}]}\n```\nextra text'
+
+    repaired = _repair_json(raw)
+
+    assert json.loads(repaired) == {"pages": [{"page": 1, "visual_focus": "Moon"}]}
 
 
 def test_generic_scene_plan_page_count_ranges_match_prompt():
