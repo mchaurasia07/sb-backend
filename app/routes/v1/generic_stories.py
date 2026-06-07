@@ -2,7 +2,7 @@ from typing import Literal
 from uuid import UUID
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Query, Request, Response, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, Query, Request, Response, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.age_groups import validate_age_group
@@ -14,12 +14,14 @@ from app.entity.notification import NotificationAudience
 from app.entity.user import User
 from app.model.request.generic_story import (
     GenericStoryCreateRequest,
+    GenericStoryPageTextUpdateRequest,
     GenericStoryStatusUpdateRequest,
     GenericStoryUpdateRequest,
 )
 from app.model.request.generic_story_workflow import (
     GenericStoryWorkflowCreateRequest,
     GenericStoryWorkflowExecuteRequest,
+    GenericStoryWorkflowRetryRequest,
 )
 from app.model.response.common import ApiResponse, PaginatedResponse, success_response
 from app.model.response.generic_story import (
@@ -146,6 +148,16 @@ async def get_generic_story_workflow(
     return success_response(data, "Generic story workflow retrieved successfully")
 
 
+@router.delete("/workflows/{workflow_id}", response_model=ApiResponse[None])
+async def delete_generic_story_workflow(
+    workflow_id: UUID,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[None]:
+    await GenericStoryWorkflowService(session).delete(current_user.id, workflow_id)
+    return success_response(None, "Generic story workflow deleted successfully")
+
+
 @router.get("/workflows/{workflow_id}/steps", response_model=ApiResponse[list[GenericStoryWorkflowStepDetailResponse]])
 async def get_generic_story_workflow_steps(
     workflow_id: UUID,
@@ -175,6 +187,28 @@ async def execute_generic_story_workflow(
         "Generic story workflow completed successfully"
         if data.status == "COMPLETED"
         else "Generic story workflow step executed successfully"
+    )
+    return success_response(data, message)
+
+
+@router.post("/workflows/{workflow_id}/retry", response_model=ApiResponse[GenericStoryWorkflowResponse])
+async def retry_generic_story_workflow(
+    workflow_id: UUID,
+    request: Request,
+    payload: GenericStoryWorkflowRetryRequest = Body(default_factory=GenericStoryWorkflowRetryRequest),
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[GenericStoryWorkflowResponse]:
+    data = await GenericStoryWorkflowService(session).retry(
+        current_user.id,
+        workflow_id,
+        payload,
+        public_base_url=str(request.base_url).rstrip("/"),
+    )
+    message = (
+        "Generic story workflow completed successfully"
+        if data.status == "COMPLETED"
+        else "Generic story workflow retry executed successfully"
     )
     return success_response(data, message)
 
@@ -425,6 +459,18 @@ async def get_generic_story_content(
 ) -> ApiResponse[StoryContentResponse]:
     data = await GenericStoryService(session).get_content(generic_story_id, language=language)
     return success_response(data, "Generic story content retrieved successfully")
+
+
+@router.patch("/{generic_story_id}/content/page-text", response_model=ApiResponse[GenericStoryResponse])
+async def update_generic_story_page_text(
+    generic_story_id: UUID,
+    payload: GenericStoryPageTextUpdateRequest,
+    language: str = Query("en", min_length=2, max_length=16),
+    _: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[GenericStoryResponse]:
+    data = await GenericStoryService(session).update_page_text(generic_story_id, payload, language=language)
+    return success_response(data, "Generic story retrieved successfully")
 
 
 @router.get("/{generic_story_id}", response_model=ApiResponse[GenericStoryResponse])

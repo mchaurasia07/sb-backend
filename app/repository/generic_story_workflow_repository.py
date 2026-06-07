@@ -131,3 +131,7 @@ class GenericStoryWorkflowRepository:
                 flag_modified(workflow, field)
         await self.session.flush()
         return workflow
+
+    async def delete(self, workflow: GenericStoryWorkflow) -> None:
+        await self.session.delete(workflow)
+        await self.session.flush()

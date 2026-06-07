@@ -15,6 +15,12 @@ Scene Plan JSON:
 Story JSON:
 {story_json}
 
+Story JSON Page Count:
+{story_page_count}
+
+Story JSON Page Numbers:
+{story_page_numbers}
+
 Global style:
 {illustration_style}
 
@@ -39,6 +45,11 @@ Cover:
 * book_cover_prompt must be compact, include exact title text/title placement, state front cover based on the whole story, and may reference exact Visual Bible appearance/locked outfit without inventing appearance details.
 
 Pages:
+* Create exactly one image-plan page for every Story JSON page, in the same order.
+* Each image-plan page.page must equal the corresponding Story JSON page.page_number.
+* Output pages.length must equal Story JSON Page Count exactly.
+* Output page values must equal Story JSON Page Numbers exactly, in the same order.
+* Story JSON is the source of truth for page count. Do not use age-band ranges, Scene Plan page count, or adaptation_strategy.selected_page_count if they differ from Story JSON pages.
 * Each page must show the corresponding scene only.
 * characters is an allow-list for visible characters in that page. Do not include parents, grandparents, siblings, helpers, recurring characters, or background people unless physically visible in that scene.
 * Preserve character, object, and location continuity.
@@ -102,8 +113,9 @@ continuity_notes: character/object/location continuity only; must not add charac
 4. Cover composition includes title area and story/genre focal image.
 5. cover.characters use exact Visual Bible names only.
 6. If cover.characters is not empty, cover.continuity_notes include face, hair, outfit, accessory, and forbidden-variation requirements for each cover character.
-7. pages.length equals Scene Plan pages.length.
-8. Every page has visual_focus, camera_shot, composition, and continuity_notes.
-9. Use only characters physically visible in each scene.
-10. Do not redesign characters or modify Visual Bible appearance details.
-11. Return STRICT VALID JSON ONLY.
+7. pages.length equals Story JSON Page Count exactly.
+8. page values equal Story JSON Page Numbers exactly, in the same order.
+9. Every page has visual_focus, camera_shot, composition, and continuity_notes.
+10. Use only characters physically visible in each scene.
+11. Do not redesign characters or modify Visual Bible appearance details.
+12. Return STRICT VALID JSON ONLY.

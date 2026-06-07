@@ -68,6 +68,12 @@ Character Analysis JSON:
 Scene Plan JSON:
 {scene_plan_json}
 
+Scene Plan Page Count:
+{scene_plan_page_count}
+
+Scene Plan Page Numbers:
+{scene_plan_page_numbers}
+
 Visual Bible JSON:
 {visual_bible_json}
 
@@ -79,46 +85,6 @@ Visual Bible JSON:
 
 If any conflict exists, follow the Scene Plan.
 
-# WRITING RULES
-
-* Preserve the original story meaning.
-
-* Preserve the planned story structure.
-
-* Preserve the planned moral.
-
-* Preserve the planned conflict.
-
-* Preserve character identities and relationships.
-
-* Preserve cause and effect.
-
-* Do not introduce new major events.
-
-* Do not introduce new main characters.
-
-* Do not change the ending.
-
-* Use the exact page count from the Scene Plan.
-
-* Follow each page's planned:
-
-  * story_role
-  * emotion
-  * scene_summary
-  * main_action
-
-* Each page should feel like a real story moment, not a summary.
-
-* Each page should continue naturally from the previous page.
-
-* Avoid repeating information unnecessarily.
-
-* Write with natural read-aloud rhythm.
-
-* Use short, clear sentences.
-
-* Keep language child-friendly.
 
 # TITLE RULES
 
@@ -132,7 +98,95 @@ If Requested Title is provided:
 
 {age_group}
 
+# AGE-SPECIFIC LANGUAGE
+
+Age 0-3
+
+* very short sentences
+* repetition encouraged
+* simple familiar words
+* sensory sounds encouraged
+* playful language allowed
+* avoid formal or pure textbook wording
+
+Examples:
+
+Hindi:
+मम्मा, पापा, अरे, वाह, टप-टप, छप-छप
+
+Marathi:
+आई, बाबा, अरे, वा, टप-टप, छप-छप
+
+Age 3-6
+
+* simple conversational language
+* clear actions
+* simple emotions
+* easy read-aloud flow
+* familiar common English words are allowed when children naturally use them
+
+Age 6-9
+
+* richer vocabulary allowed
+* natural dialogue encouraged
+* emotional depth allowed
+* avoid textbook language
+* keep sentences clear and story-like, not essay-like
+
+# WRITING RULES
+
+* Preserve the original story meaning.
+* Preserve the planned story structure.
+* Preserve the planned moral.
+* Preserve the planned conflict.
+* Preserve character identities and relationships.
+* Preserve cause and effect.
+* Do not introduce new major events.
+* Do not introduce new main characters.
+* Do not change the ending.
+* Use the exact Scene Plan Page Count above.
+* Output pages.length must equal Scene Plan Page Count exactly.
+* Output page_number values must follow Scene Plan Page Numbers exactly, in the same order.
+
+* Follow each page's planned:
+  * story_role
+  * emotion
+  * scene_summary
+  * main_action
+  * continuity
+
+* Do not repeat scene_summary, main_action, source_connection, page_turn_hook, or continuity text directly in the story. Use them only as writing guidance.
+
+* Show the story happening rather than summarizing it.
+
+* Characters should:
+  * act
+  * react
+  * notice things
+  * feel emotions
+  * speak when natural
+
+* Each page should feel like a real story moment.
+
+* Each page should continue naturally from the previous page.
+
+* Preserve each page's continuity.characters, continuity.objects, and continuity.location_state from the Scene Plan.
+
+* If one page starts an action, object use, location state, or emotional state, the next page must continue it naturally unless the Scene Plan changes it.
+
+* Each page should end in a way that naturally leads into the next page.
+
+* Avoid repeating information unnecessarily.
+
+* Write with natural read-aloud rhythm.
+
+* Use short, clear sentences.
+
+* Keep language child-friendly.
+
 # PAGE LENGTH
+
+Use the Scene Plan adaptation_strategy.selected_word_range when present. Otherwise use:
 
 Infant Toddler (0-3 years):
 
@@ -148,82 +202,166 @@ Growing Reader (6-9 years):
 
 # LANGUAGE LOCALIZATION RULES
 
-Do not write Hindi or Marathi as word-for-word translations of English.
+The goal is NOT literal translation.
 
-Write each language as its own natural children's story version from the Scene Plan.
+Create three natural children's story versions that tell the same story.
 
-English, Hindi, and Marathi must be semantically aligned, but they do not need identical sentence order, identical word count, or English sentence structure.
+English, Hindi, and Marathi must preserve:
 
-Hindi and Marathi must:
+* meaning
+* story progression
+* character actions
+* emotions
+* moral
+* lesson
+* ending
 
-* preserve meaning
-* preserve emotion
-* preserve tone
-* preserve reading level
-* preserve story progression
-* sound natural when read aloud by a native speaker
-* use native sentence rhythm and grammar
-* use child-friendly vocabulary for the age group
-* keep the warmth, wonder, humor, comfort, and emotional feel of the scene
+The languages should feel like they were originally written for children in that language.
 
-Hindi must:
+Do NOT translate sentence-by-sentence.
 
-* be written in natural Devanagari Hindi
-* avoid awkward literal English calques
-* avoid English word order copied into Hindi
-* use simple, complete Hindi sentences suitable for read-aloud narration
-* use natural Hindi family relationship words when the source uses relationship labels, for example मां/मम्मा, पापा, दादी, दादा
+Do NOT copy English sentence structure into Hindi or Marathi.
 
-Marathi must:
+Each language should sound natural when read aloud by a parent.
 
-* be written in natural Devanagari Marathi
-* avoid Hindi-like or English-like literal phrasing
-* use simple, complete Marathi sentences suitable for read-aloud narration
-* use natural Marathi family relationship words when the source uses relationship labels, for example आई, बाबा, आजी, आजोबा
-* preserve Marathi grammar, case endings, and natural spoken flow
+---
 
-# LOCALIZATION QUALITY BAR
+ENGLISH
 
-Before returning JSON, silently check every Hindi and Marathi title, summary, page, and moral:
+* simple modern English
+* natural read-aloud rhythm
+* short clear sentences
+* age-appropriate vocabulary
 
-* Does it sound like a native-language children's book line?
-* Would a parent naturally read this aloud to a child?
-* Is the sentence complete and grammatically natural?
-* Did you avoid English source-language order?
-* Did you avoid formal or literal translation words when a simpler natural word is better?
+Avoid:
 
-Bad Hindi style examples to avoid:
+* complex literary prose
+* advanced vocabulary
+* overly descriptive narration
 
-* "अपनी तत्काल दुनिया की पड़ताल करता है"
-* "खुशी से लात मार रहा था"
-* "गर्म आवाज़ों"
+---
 
-Better Hindi style:
+HINDI
 
-* "अपने छोटे से प्यारे संसार को देखता है"
-* "खुशी से पैर हिलाने लगा"
-* "प्यार भरी आवाज़ें"
+Write in modern spoken children's Hindi.
+Do not write shuddh, Sanskrit-heavy, or textbook-style Hindi.
 
-Bad Marathi style examples to avoid:
+Use:
 
-* "आपल्या जवळच्या जगाचा शोध घेते"
-* "मोठ्या हास्यांवर बाळ हसले"
-* "अद्भुत जगाची स्वप्ने पाहत"
+* simple everyday Hindi
+* conversational wording
+* natural parent-child language
+* warm storytelling language
+* common English words when they sound natural to Indian children
 
-Better Marathi style:
+Prefer words such as:
 
-* "आपल्या छोट्याशा जगात रमू लागले"
-* "सगळ्यांचे प्रेमळ हसू पाहून बाळही हसले"
-* "गोड स्वप्नांत बाळ हरवले"
+मम्मा
+पापा
+दादी
+दादा
+नानी
+नाना
+दोस्त
+खेलना
+देखो
+चलो
+अरे
+वाह
+जल्दी
+खुश
+हँस पड़ा
+डर गया
+ढूँढना
 
-Do not:
+Avoid overly formal or Sanskrit-heavy words such as:
 
-* shorten significantly
-* add details
-* remove details
-* change proper character names
+तत्काल
+अन्वेषण
+अवलोकन
+परिलक्षित
+प्रफुल्लित
+विचरण
+परिकल्पना
+अभिभावक
 
-You may localize relationship labels into natural Hindi/Marathi when they are family-role labels rather than unique proper names.
+Prefer simpler words whenever possible.
+
+Common English words are allowed when they make the line easier for children, for example:
+
+school, bag, game, bus, train, toy, team, park, picnic, idea, sorry, thank you
+
+Keep Hindi grammar and sentence flow natural even when using these words. Do not overuse English or create random Hinglish.
+
+Example:
+
+खुश instead of प्रसन्न
+
+ढूँढना instead of खोज करना
+
+---
+
+MARATHI
+
+Write in modern spoken children's Marathi.
+Do not write shuddh, Sanskrit-heavy, or textbook-style Marathi.
+
+Use:
+
+* simple everyday Marathi
+* conversational wording
+* natural spoken flow
+* warm storytelling language
+* common English words when they sound natural to Indian children
+
+Prefer words such as:
+
+आई
+बाबा
+आजी
+आजोबा
+मित्र
+बघ
+चला
+पटकन
+खेळू लागला
+हसू लागला
+आनंद झाला
+घाबरला
+शोधत होता
+
+Avoid overly formal words such as:
+
+निरीक्षण
+अन्वेषण
+परावर्तित
+परिकल्पना
+तत्काळ
+प्रफुल्लित
+
+Prefer simpler words whenever possible.
+
+Common English words are allowed when they make the line easier for children, for example:
+
+school, bag, game, bus, train, toy, team, park, picnic, idea, sorry, thank you
+
+Keep Marathi grammar and sentence flow natural even when using these words. Do not overuse English or create random Manglish.
+
+Example:
+
+आनंद झाला instead of प्रफुल्लित झाला
+
+शोधत होता instead of अन्वेषण करत होता
+
+---
+
+Do not copy English sentence order into Hindi or Marathi.
+
+Write naturally for native child readers.
+
+Before returning JSON, silently check: Would a 3-9 year old understand this when read aloud?
+
+
 
 # NARRATION METADATA
 
@@ -283,8 +421,9 @@ voice_style should remain mostly consistent throughout the story unless a major 
 
 # VALIDATION
 
-1. pages.length must equal Scene Plan pages.length.
-2. Every page must include:
+1. pages.length must equal Scene Plan Page Count exactly.
+2. page_number values must equal Scene Plan Page Numbers exactly, in the same order.
+3. Every page must include:
 
    * emotion
    * tone
@@ -293,6 +432,6 @@ voice_style should remain mostly consistent throughout the story unless a major 
    * text.en
    * text.hi
    * text.mr
-3. Every text field must be non-empty.
-4. All languages must remain semantically aligned.
-5. Return STRICT VALID JSON ONLY.
+4. Every text field must be non-empty.
+5. All languages must remain semantically aligned.
+6. Return STRICT VALID JSON ONLY.

@@ -91,6 +91,20 @@ class GenericStoryBatchJobRepository:
         )
         return list(result.scalars().all())
 
+    async def list_active_for_workflow(self, workflow_id: UUID) -> list[GenericStoryBatchJob]:
+        result = await self.session.execute(
+            select(GenericStoryBatchJob).where(
+                GenericStoryBatchJob.workflow_id == workflow_id,
+                GenericStoryBatchJob.status.in_(
+                    [
+                        StoryBatchJobStatus.SUBMITTED,
+                        StoryBatchJobStatus.RUNNING,
+                    ]
+                ),
+            )
+        )
+        return list(result.scalars().all())
+
     async def update(self, job: GenericStoryBatchJob) -> GenericStoryBatchJob:
         for field_name in ("request_keys", "missing_keys", "request_payload", "response_payload"):
             if getattr(job, field_name, None) is not None:

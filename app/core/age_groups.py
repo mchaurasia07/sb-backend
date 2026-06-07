@@ -52,15 +52,15 @@ SUPPORTED_AGE_GROUPS = (
 )
 
 PAGE_COUNT_BY_AGE_GROUP = {
-    AGE_GROUP_0_3: 6,
+    AGE_GROUP_0_3: 8,
     AGE_GROUP_3_6: 8,
     AGE_GROUP_6_9: 10,
 }
 
 PAGE_COUNT_RANGE_BY_AGE_GROUP = {
-    AGE_GROUP_0_3: (6, 8),
+    AGE_GROUP_0_3: (8, 9),
     AGE_GROUP_3_6: (8, 10),
-    AGE_GROUP_6_9: (10, 11),
+    AGE_GROUP_6_9: (10, 12),
 }
 
 

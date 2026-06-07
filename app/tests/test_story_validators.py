@@ -111,7 +111,7 @@ def test_plan_validator_accepts_new_story_planner_schema():
 
 
 def test_plan_validator_accepts_descriptive_roles_and_null_signature_item():
-    plan = _story_plan(page_count=6)
+    plan = _story_plan(page_count=8)
     plan["visual_bible"]["hero"]["signature_item"] = None
     for index, page in enumerate(plan["pages"], start=1):
         page["story_role"] = "First Day Moment" if index == 1 else "Kindness Build"

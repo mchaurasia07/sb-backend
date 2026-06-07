@@ -42,3 +42,9 @@ class GenericStoryWorkflowExecuteRequest(BaseModel):
     skip_image_generation: bool = False
     skip_narration_generation: bool = False
     publish_status: Literal["active", "inactive"] | None = None
+
+
+class GenericStoryWorkflowRetryRequest(BaseModel):
+    skip_image_generation: bool = False
+    skip_narration_generation: bool = False
+    publish_status: Literal["active", "inactive"] | None = None

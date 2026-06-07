@@ -1,3 +1,4 @@
+from copy import deepcopy
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -6,6 +7,7 @@ from app.core.exceptions import AppException, NotFoundException
 from app.entity.generic_story import GenericStory
 from app.model.request.generic_story import (
     GenericStoryCreateRequest,
+    GenericStoryPageTextUpdateRequest,
     GenericStoryStatusUpdateRequest,
     GenericStoryUpdateRequest,
 )
@@ -124,6 +126,51 @@ class GenericStoryService:
             raise NotFoundException("Generic story not found", "GENERIC_STORY_NOT_FOUND")
         return self._to_response(generic_story, language=language)
 
+    async def update_page_text(
+        self,
+        generic_story_id: UUID,
+        payload: GenericStoryPageTextUpdateRequest,
+        language: str = DEFAULT_GENERIC_STORY_LANGUAGE,
+    ) -> GenericStoryResponse:
+        normalized_language = language.strip().lower()
+        content = await self.generic_stories.get_content_by_story_and_language(
+            generic_story_id=generic_story_id,
+            language=normalized_language,
+        )
+        if content is None:
+            raise NotFoundException("Generic story content not found", "GENERIC_STORY_CONTENT_NOT_FOUND")
+
+        story_json = deepcopy(content.story_json)
+        pages = story_json.get("pages") if isinstance(story_json, dict) else None
+        if not isinstance(pages, list):
+            raise AppException(
+                "Generic story content has no pages array",
+                code="GENERIC_STORY_CONTENT_PAGES_MISSING",
+            )
+
+        pages_by_number = {
+            page_number: page
+            for page in pages
+            if isinstance(page, dict) and (page_number := self._story_page_number(page)) is not None
+        }
+        for item in payload.pages:
+            page = pages_by_number.get(item.page_number)
+            if page is None:
+                raise AppException(
+                    f"Generic story page {item.page_number} not found",
+                    code="GENERIC_STORY_PAGE_NOT_FOUND",
+                    details={"page_number": item.page_number, "language": normalized_language},
+                )
+            page["text"] = item.text
+
+        content.story_json = story_json
+        await self.generic_stories.update_content(content)
+
+        generic_story = await self.generic_stories.get_by_id(generic_story_id)
+        if generic_story is None:
+            raise NotFoundException("Generic story not found", "GENERIC_STORY_NOT_FOUND")
+        return self._to_response(generic_story, language=normalized_language)
+
     async def delete(self, generic_story_id: UUID) -> None:
         generic_story = await self.generic_stories.get_by_id(generic_story_id)
         if generic_story is None:
@@ -170,6 +217,17 @@ class GenericStoryService:
                 }
             )
         return normalized
+
+    @staticmethod
+    def _story_page_number(page: dict) -> int | None:
+        raw_page_number = page.get("page_number", page.get("page"))
+        if isinstance(raw_page_number, bool):
+            return None
+        if isinstance(raw_page_number, int):
+            return raw_page_number
+        if isinstance(raw_page_number, str) and raw_page_number.strip().isdigit():
+            return int(raw_page_number.strip())
+        return None
 
     @staticmethod
     def _to_response(

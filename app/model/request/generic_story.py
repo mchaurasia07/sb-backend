@@ -1,7 +1,7 @@
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.core.age_groups import validate_age_group
 from app.entity.generic_story import GenericStoryLanguage
@@ -58,6 +58,26 @@ class GenericStoryUpdateRequest(BaseModel):
 
 class GenericStoryStatusUpdateRequest(BaseModel):
     status: Literal["active", "inactive"]
+
+
+class GenericStoryPageTextUpdateItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    page_number: int = Field(ge=1)
+    text: str
+
+
+class GenericStoryPageTextUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    pages: list[GenericStoryPageTextUpdateItem] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_unique_pages(self):
+        page_numbers = [item.page_number for item in self.pages]
+        if len(page_numbers) != len(set(page_numbers)):
+            raise ValueError("Page updates must not contain duplicate page numbers")
+        return self
 
 
 class AddGenericStoryToChildRequest(BaseModel):

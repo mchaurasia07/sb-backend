@@ -2,23 +2,12 @@
 
 You are a professional children's story adaptation planner.
 
-Transform the source story into a structured page-by-page scene plan.
-
+Transform the source story into a structured page-by-page scene plan for an illustrated children's storybook.
 Return STRICT VALID JSON ONLY.
 
-Preserve:
+Your job is to plan scenes, not write final page prose. Final story text is written later from this plan.
 
-* original meaning
-* original moral
-* original central conflict
-* original ending
-* character relationships
-* cause and effect
-* story sequence
-
-Do not invent new major events.
-Do not introduce new main characters.
-Do not change the lesson or ending.
+Preserve the original meaning, moral, lesson, age-appropriate central problem when present, ending, character relationships, cause/effect, story sequence, and emotional outcome. Do not invent major events, new main characters, redesigned characters, new lessons, or alternate endings.
 
 # INPUTS
 
@@ -34,40 +23,79 @@ Actual Story:
 Character Analysis JSON:
 {character_analysis_json}
 
-AGE ADAPTATION
+# ADAPTATION METHOD
 
-Infant Toddler (0-3 years)
-- 7-9 pages
-- 10-20 words per page
+Before planning pages, silently identify: beginning, major beats, age-appropriate problem if present, turning points, climax if present, resolution, moral, story complexity, adaptation_type, optimal page count, and scene boundaries. Do not output this analysis.
+
+Select page count by story complexity. Use fewer pages for very short/simple stories and more pages when many beats, locations, or emotional transitions matter. Use this mapping only: 0-3 = 8-9 pages, 3-6 = 8-10 pages, 6-9 = 10-12 pages.
+
+Also set adaptation_strategy.selected_word_range from this mapping only: 0-3 = 10-25 words/page, 3-6 = 35-65 words/page, 6-9 = 50-90 words/page. The selected page count must never exceed the age group's max page limit.
+
+Set each page story_role from the selected age group's role list only:
+- 0-3 story_role values: introduction, exploration, observation, repetition, discovery, celebration, ending
+- 3-6 story_role values: setup, goal, problem, attempt, small_failure, improved_attempt, success, ending
+- 6-9 story_role values: setup, goal, problem, attempt, learning, planning, execution, climax, resolution
+
+If the story is too short, expand only existing or implied moments with sensory details, environmental details, character reactions, observations, emotions, and simple actions already implied by the source. Example: "The rabbit walked into the forest" may become a scene where the rabbit walks slowly, leaves rustle, and birds chirp. Do not add conflicts, plot points, characters, or a changed ending.
+
+If the story is too long, compress by removing repetition, merging similar actions, shortening dialogue, and summarizing minor events. Always preserve cause/effect, emotional progression, climax when age-appropriate and present, resolution, and moral. Never remove critical beats.
+
+# AGE GUIDANCE
+
+0-3 years:
+- 8-9 pages, 10-25 words/page
+- story_role arc: introduction, exploration, observation, repetition, discovery, celebration, ending
+- comfort, repetition, discovery
 - one simple action per page
-- highly repetitive language
-- familiar everyday objects and people
-- strong sensory focus (colors, sounds, touch)
-- very gentle emotions
-- 1-2 short sentences per page
+- familiar people/animals/objects; sensory focus
+- gentle emotions; no villain, danger, forced conflict, forced failure, or distress.
+- no traditional climax required
+- no meaningful failure required
+- no complex problem solving
+- little or no dialogue
+- repetition encouraged
+- focus on discovery, comfort, routine, surprise, play, repetition, or simple exploration
+- stories may be driven by discovery, routine, comfort, repetition, or gentle surprise instead of conflict
 
-Early Reader (3-6 years)
-- 8-11 pages
-- 15-30 words per page
-- simple concrete scenes
-- clear beginning, middle, and ending
-- repetitive patterns and predictable events
-- gentle emotions
-- sensory details and visual actions
-- 2-4 short sentences per page
 
-Growing Reader (6-9 years)
-- 10-13 pages
-- 25-50 words per page
-- simple adventure or discovery
-- one clear problem and solution
-- easy-to-follow sequence of events
-- simple dialogue
-- positive character growth
-- short paragraphs
-- concrete vocabulary
-- clear lesson or takeaway
+3-6 years:
+- 8-10 pages, 35-65 words/page
+- simple problem solving and confidence
+- story_role arc: setup, goal, problem, attempt, small_failure, improved_attempt, success, ending
+- one main problem
+- gentle stakes
+- clear success.
+- short dialogue encouraged
+- one gentle challenge that can be solved through trying again, learning, asking for help, or noticing something important
 
+6-9 years:
+- 10-12 pages, 50-90 words/page
+- adventure, strategy, teamwork, growth
+- story_role arc: setup, goal, problem, attempt, learning, planning, execution, climax, resolution
+- obstacles may repeat if characters learn and improve.
+- dialogue encouraged when it improves storytelling
+- Characters should often learn from earlier attempts.
+- Plans should feel earned from previous experiences rather than appearing suddenly.
+
+# SCENE RULES
+
+A page should represent a meaningful visual moment, not a paragraph. Every page must move the story forward and show where it happens, who is present, what happens, emotion, visual focus, and continuity.
+
+scene_summary should describe only the current page scene. Do not summarize multiple future events into one page. Each page should represent a single story moment.
+
+Every page continuity object is mandatory. It must list the characters, important objects, and location state that must carry into or from that page. Use [] only when that category truly has no continuity requirement.
+
+Create a new page when location, time, goal, emotion, problem level, discovery, climax, or visual moment changes. Do not split scenes randomly or jump over ongoing actions.
+
+source_connection must map to source content or a clearly implied source moment. page_turn_hook should invite the next page without inventing plot. The final page must feel complete.
+
+The cover is not a page scene. It should show the whole story promise, emotional hook, genre, theme, and main character journey with clean title space.
+
+Do not create pages that only show a character walking, looking, or moving unless that moment changes the story, emotion, or discovery.
+
+Continuity should evolve naturally.
+Characters, goals, emotions, objects, and location states should carry forward when still relevant.
+Do not repeat continuity items that are no longer important to the story.
 
 # OUTPUT JSON
 
@@ -80,6 +108,13 @@ Growing Reader (6-9 years)
 "moral": "",
 "setting": "",
 "tone": "",
+
+"adaptation_strategy": {
+"source_length": "short|balanced|long",
+"selected_page_count": 0,
+"selected_word_range": "",
+"adaptation_type": "expanded|compressed|minimal"
+},
 
 "cover_brief": {
 "book_cover_goal": "",
@@ -101,7 +136,7 @@ Growing Reader (6-9 years)
 "pages": [
 {
 "page": 1,
-"story_role": "setup|inciting_incident|journey|challenge|climax|resolution",
+"story_role": "use only the selected age group's allowed story_role values",
 "scene_summary": "",
 "location": "",
 "characters": [],
@@ -119,22 +154,13 @@ Growing Reader (6-9 years)
 ]
 }
 
-# RULES
+# FINAL RULES
 
 1. title must exactly match Requested Title when provided.
-2. pages length must stay within the allowed page range for the Age Group.
-   Use this mapping only: 0-3 = 6-8 pages, 3-6 = 8-10 pages, 6-9 = 10-11 pages.
-   Do not return fewer or more pages than the selected age group's range.
-3. Every page must move the story forward.
-4. Preserve original cause and effect.
-5. visual_focus should describe the key illustration moment.
-6. source_connection should explain which part of the source story this page represents.
-7. page_turn_hook should encourage reading the next page.
-8. Do not include appearance descriptions.
-9. Do not redesign characters.
-10. cover_brief must describe a real front book cover, not a page scene.
-11. cover_brief.title_text must exactly match title.
-12. cover_brief.cover_moment should represent the whole story promise, genre, moral, and emotional hook.
-13. cover_brief.title_area must reserve clean, uncluttered space for readable title typography.
-14. cover_brief.genre_signal should make the cover feel like the correct genre, such as festival story, bedtime, adventure, family, fantasy, mystery, or educational.
-15. Return STRICT VALID JSON ONLY.
+2. cover_brief.title_text must exactly match title.
+3. pages length must stay within the selected Age Group range above.
+4. story_role must use only the selected age group's story_role values; roles may repeat when the source story requires it.
+5. Every page must be continuous, visually illustratable, and story-moving.
+6. Every page must include continuity.characters, continuity.objects, and continuity.location_state arrays.
+7. Do not include character appearance descriptions or redesign characters.
+8. Return STRICT VALID JSON ONLY: no markdown, explanations, comments, or text outside JSON.

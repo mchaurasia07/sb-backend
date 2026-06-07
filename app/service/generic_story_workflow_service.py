@@ -22,9 +22,11 @@ from app.entity.generic_story_workflow import (
     GenericStoryWorkflowStatus,
     GenericStoryWorkflowStep,
 )
+from app.entity.story_batch_job import StoryBatchJobStatus
 from app.model.request.generic_story_workflow import (
     GenericStoryWorkflowCreateRequest,
     GenericStoryWorkflowExecuteRequest,
+    GenericStoryWorkflowRetryRequest,
 )
 from app.model.response.common import PaginatedResponse
 from app.model.response.generic_story import GenericStoryAudioUploadResponse, GenericStoryImageUploadResponse
@@ -35,6 +37,8 @@ from app.model.response.generic_story_workflow import (
 )
 from app.repository.generic_story_repository import GenericStoryRepository
 from app.repository.generic_story_workflow_repository import GenericStoryWorkflowRepository
+from app.repository.child_book_repository import ChildBookRepository
+from app.repository.generic_story_batch_job_repository import GenericStoryBatchJobRepository
 from app.service.ai.google_provider import GoogleProvider
 from app.service.image_optimizer import optimize_display_image
 from app.service.image_storage_provider import get_image_storage_service
@@ -184,6 +188,8 @@ class GenericStoryWorkflowService:
         self.session = session
         self.workflows = GenericStoryWorkflowRepository(session)
         self.generic_stories = GenericStoryRepository(session)
+        self.child_books = ChildBookRepository(session)
+        self.batch_jobs = GenericStoryBatchJobRepository(session)
         self.ai_provider = GoogleProvider(
             api_key=settings.GOOGLE_API_KEY,
             image_model=settings.GOOGLE_IMAGE_MODEL,
@@ -251,6 +257,94 @@ class GenericStoryWorkflowService:
         workflow = await self._get_owned(user_id, workflow_id)
         return GenericStoryWorkflowResponse.model_validate(workflow)
 
+    async def delete(self, user_id: UUID, workflow_id: UUID) -> None:
+        workflow = await self._get_owned(user_id, workflow_id)
+        generic_story_id = workflow.generic_story_id
+
+        await self._cancel_active_batch_jobs_before_delete(workflow)
+
+        image_storage = get_image_storage_service()
+        audio_storage = get_story_audio_storage_service()
+        await image_storage.delete_story_directory(workflow.id)
+        await audio_storage.delete_story_directory(workflow.id)
+
+        generic_story = None
+        if generic_story_id is not None:
+            await image_storage.delete_story_directory(generic_story_id)
+            await audio_storage.delete_story_directory(generic_story_id)
+            await self.child_books.delete_by_story(story_id=generic_story_id, story_type="generic")
+            generic_story = await self.generic_stories.get_by_id(generic_story_id)
+
+        if generic_story is not None:
+            await self.generic_stories.delete(generic_story)
+        await self.workflows.delete(workflow)
+        await self.session.commit()
+
+    async def _cancel_active_batch_jobs_before_delete(self, workflow: GenericStoryWorkflow) -> None:
+        jobs = await self.batch_jobs.list_active_for_workflow(workflow.id)
+        for job in jobs:
+            provider = self._batch_provider_name(getattr(job, "provider", "google"))
+            try:
+                if job.provider_job_name:
+                    if provider == "openai":
+                        provider_job = await self._openai_client().batches.cancel(job.provider_job_name)
+                        provider_state = self._openai_job_state_name(provider_job)
+                    else:
+                        provider_job = await self._cancel_google_batch_job(job.provider_job_name)
+                        provider_state = self._google_job_state_name(provider_job)
+                    job.provider_state = provider_state or "CANCEL_REQUESTED"
+                else:
+                    job.provider_state = "CANCELLED_BEFORE_PROVIDER_SUBMISSION"
+            except Exception as exc:
+                raise AppException(
+                    f"Failed to cancel active {provider} batch job before deleting workflow: {exc}",
+                    status.HTTP_502_BAD_GATEWAY,
+                    "GENERIC_STORY_WORKFLOW_DELETE_BATCH_CANCEL_FAILED",
+                ) from exc
+
+            job.status = StoryBatchJobStatus.CANCELLED
+            job.error_message = "Workflow deleted; active batch job cancelled"
+            if getattr(job, "request_keys", None):
+                job.missing_keys = job.request_keys
+            await self.batch_jobs.update(job)
+
+    async def _cancel_google_batch_job(self, provider_job_name: str) -> Any:
+        google_client = getattr(self, "google_client", None)
+        if google_client is None:
+            google_client = self.ai_provider.client
+        await google_client.aio.batches.cancel(name=provider_job_name)
+        return await google_client.aio.batches.get(name=provider_job_name)
+
+    def _openai_client(self) -> Any:
+        client = getattr(self, "openai_client", None)
+        if client is not None:
+            return client
+        from openai import AsyncOpenAI
+
+        client = AsyncOpenAI(
+            api_key=settings.OPENAI_API_KEY,
+            organization=settings.OPENAI_ORG_ID or None,
+            project=settings.OPENAI_PROJECT_ID or None,
+        )
+        self.openai_client = client
+        return client
+
+    @staticmethod
+    def _batch_provider_name(provider: Any) -> str:
+        normalized = str(provider or "google").strip().lower()
+        return normalized or "google"
+
+    @staticmethod
+    def _google_job_state_name(job: Any) -> str:
+        state = getattr(job, "state", None)
+        return getattr(state, "name", None) or str(state or "")
+
+    @staticmethod
+    def _openai_job_state_name(job: Any) -> str:
+        if isinstance(job, dict):
+            return str(job.get("status") or "").lower()
+        return str(getattr(job, "status", None) or "").lower()
+
     async def list(
         self,
         user_id: UUID,
@@ -315,6 +409,57 @@ class GenericStoryWorkflowService:
     ) -> GenericStoryWorkflowResponse:
         workflow = await self._get_owned(user_id, workflow_id)
         steps = self.ORDERED_STEPS if payload.step_name == "ALL" else [GenericStoryWorkflowStep(payload.step_name)]
+        return await self._execute_steps(
+            workflow,
+            steps,
+            payload=payload,
+            public_base_url=public_base_url,
+            event_name="workflow_started",
+            requested_step=payload.step_name,
+        )
+
+    async def retry(
+        self,
+        user_id: UUID,
+        workflow_id: UUID,
+        payload: GenericStoryWorkflowRetryRequest,
+        *,
+        public_base_url: str,
+    ) -> GenericStoryWorkflowResponse:
+        workflow = await self._get_owned(user_id, workflow_id)
+        if workflow.status != GenericStoryWorkflowStatus.FAILED.value:
+            raise AppException(
+                "Only failed generic story workflows can be retried",
+                code="GENERIC_STORY_WORKFLOW_RETRY_STATUS_INVALID",
+            )
+
+        retry_step = self._retry_start_step(workflow)
+        steps = self.ORDERED_STEPS[self.ORDERED_STEPS.index(retry_step) :]
+        execute_payload = GenericStoryWorkflowExecuteRequest(
+            step_name="ALL",
+            skip_image_generation=payload.skip_image_generation,
+            skip_narration_generation=payload.skip_narration_generation,
+            publish_status=payload.publish_status,
+        )
+        return await self._execute_steps(
+            workflow,
+            steps,
+            payload=execute_payload,
+            public_base_url=public_base_url,
+            event_name="workflow_retry_started",
+            requested_step=retry_step.value,
+        )
+
+    async def _execute_steps(
+        self,
+        workflow: GenericStoryWorkflow,
+        steps: list[GenericStoryWorkflowStep],
+        *,
+        payload: GenericStoryWorkflowExecuteRequest,
+        public_base_url: str,
+        event_name: str,
+        requested_step: str,
+    ) -> GenericStoryWorkflowResponse:
         workflow_started_at = perf_counter()
 
         try:
@@ -323,9 +468,9 @@ class GenericStoryWorkflowService:
             await self.workflows.update(workflow)
             await self.session.commit()
             self._log_workflow_event(
-                "workflow_started",
+                event_name,
                 workflow,
-                requested_step=payload.step_name,
+                requested_step=requested_step,
                 step_count=len(steps),
                 skip_image_generation=payload.skip_image_generation,
                 skip_narration_generation=payload.skip_narration_generation,
@@ -408,10 +553,30 @@ class GenericStoryWorkflowService:
                 duration_ms=self._duration_ms(workflow_started_at),
             )
             logger.exception("Generic story workflow failed: workflow_id=%s step=%s", workflow.id, workflow.current_step)
-            workflow.current_step = None
             await self.workflows.update(workflow)
             await self.session.commit()
             raise
+
+    def _retry_start_step(self, workflow: GenericStoryWorkflow) -> GenericStoryWorkflowStep:
+        if workflow.current_step:
+            try:
+                current_step = GenericStoryWorkflowStep(workflow.current_step)
+            except ValueError as exc:
+                raise AppException(
+                    f"Cannot retry generic story workflow from invalid current_step: {workflow.current_step}",
+                    code="GENERIC_STORY_WORKFLOW_RETRY_STEP_INVALID",
+                ) from exc
+            if current_step in self.ORDERED_STEPS:
+                return current_step
+
+        for step in self.ORDERED_STEPS:
+            if not self._step_is_complete(workflow, step):
+                return step
+
+        raise AppException(
+            "Failed generic story workflow has no incomplete step to retry",
+            code="GENERIC_STORY_WORKFLOW_RETRY_STEP_MISSING",
+        )
 
     async def upload_published_story_images(
         self,
@@ -699,7 +864,10 @@ class GenericStoryWorkflowService:
                 "character_analysis_json": _compact_json(workflow.character_analysis_json),
             },
         )
-        plan = await self._generate_json(prompt, max_tokens=12000)
+        plan = self._normalize_scene_plan_metadata(
+            await self._generate_json(prompt, max_tokens=12000),
+            age_group=workflow.age_group,
+        )
         min_pages, max_pages = self._scene_plan_page_count_range(workflow.age_group)
         pages = plan.get("pages")
         page_count = len(pages) if isinstance(pages, list) else 0
@@ -734,6 +902,13 @@ class GenericStoryWorkflowService:
     async def _generate_story_json(self, workflow: GenericStoryWorkflow) -> dict[str, Any]:
         if settings.STORY_MOCK_LLM_RESPONSES:
             return self._normalize_story_json(self._mock_story_json(workflow), workflow)
+        scene_pages = (workflow.scene_plan_json or {}).get("pages")
+        if not isinstance(scene_pages, list):
+            scene_pages = []
+        scene_page_numbers = [
+            self._scene_page_number(page, index) if isinstance(page, dict) else index
+            for index, page in enumerate(scene_pages, start=1)
+        ]
         prompt = load_and_render_prompt(
             "prompts/generic_story/story_generation_prompt.txt",
             {
@@ -743,6 +918,8 @@ class GenericStoryWorkflowService:
                 "requested_language": self._default_story_language(workflow.language),
                 "character_analysis_json": _compact_json(workflow.character_analysis_json),
                 "scene_plan_json": _compact_json(workflow.scene_plan_json),
+                "scene_plan_page_count": len(scene_pages),
+                "scene_plan_page_numbers": scene_page_numbers,
                 "visual_bible_json": _compact_json(self._workflow_visual_bible(workflow)),
             },
         )
@@ -752,21 +929,24 @@ class GenericStoryWorkflowService:
     async def _generate_image_plan(self, workflow: GenericStoryWorkflow) -> dict[str, Any]:
         if settings.STORY_MOCK_LLM_RESPONSES:
             return self._mock_image_plan(workflow)
+        story_json_for_prompt = self._story_json_for_image_plan_prompt(workflow.story_json or {})
+        story_pages = story_json_for_prompt.get("pages") if isinstance(story_json_for_prompt.get("pages"), list) else []
+        story_page_numbers = self._story_page_numbers(story_pages)
         prompt = load_and_render_prompt(
             "prompts/generic_story/image_plan_prompt.txt",
             {
                 "scene_plan_json": _compact_json(workflow.scene_plan_json),
                 "visual_bible_json": _compact_json(self._workflow_visual_bible(workflow)),
-                "story_json": _compact_json(self._story_json_for_image_plan_prompt(workflow.story_json or {})),
+                "story_json": _compact_json(story_json_for_prompt),
+                "story_page_count": len(story_pages),
+                "story_page_numbers": story_page_numbers,
                 "illustration_style": self._workflow_illustration_style(workflow),
             },
         )
         image_plan = await self._generate_json(prompt, max_tokens=16000)
         image_plan["style"] = self._workflow_illustration_style(workflow)
-        pages = image_plan.get("pages")
         story_pages = (workflow.story_json or {}).get("pages") or []
-        if not isinstance(pages, list) or len(pages) != len(story_pages):
-            raise AppException("Image plan page count must match story JSON pages.", code="GENERIC_IMAGE_PLAN_PAGE_COUNT_MISMATCH")
+        self._normalize_image_plan_pages(image_plan, story_pages)
         self._validate_and_normalize_image_cover_plan(image_plan, workflow)
         return image_plan
 
@@ -1655,6 +1835,74 @@ class GenericStoryWorkflowService:
             return None
         return page_number if page_number > 0 else None
 
+    @classmethod
+    def _normalize_image_plan_pages(cls, image_plan: dict[str, Any], story_pages: list[Any]) -> None:
+        pages = image_plan.get("pages")
+        if not isinstance(pages, list):
+            cls._raise_image_plan_page_count_mismatch(story_pages, pages, reason="image_plan.pages is not a list")
+
+        expected_page_numbers = cls._story_page_numbers(story_pages)
+        if len(expected_page_numbers) != len(story_pages) or len(pages) != len(expected_page_numbers):
+            cls._raise_image_plan_page_count_mismatch(story_pages, pages, reason="page count mismatch")
+
+        image_pages_by_number: dict[int, dict[str, Any]] = {}
+        unnumbered_pages: list[dict[str, Any]] = []
+        for page in pages:
+            if not isinstance(page, dict):
+                cls._raise_image_plan_page_count_mismatch(story_pages, pages, reason="image_plan.pages contains a non-object item")
+            page_number = cls._image_plan_page_number(page)
+            if page_number is None:
+                unnumbered_pages.append(page)
+                continue
+            if page_number in image_pages_by_number:
+                cls._raise_image_plan_page_count_mismatch(
+                    story_pages,
+                    pages,
+                    reason=f"duplicate image plan page number {page_number}",
+                )
+            image_pages_by_number[page_number] = page
+
+        normalized_pages: list[dict[str, Any]] = []
+        for index, expected_page_number in enumerate(expected_page_numbers):
+            page = image_pages_by_number.get(expected_page_number)
+            if page is None:
+                page = unnumbered_pages.pop(0) if unnumbered_pages else None
+            if page is None:
+                cls._raise_image_plan_page_count_mismatch(
+                    story_pages,
+                    pages,
+                    reason=f"missing image plan for story page {expected_page_number}",
+                )
+            page["page"] = expected_page_number
+            page["page_number"] = expected_page_number
+            normalized_pages.append(page)
+
+        if unnumbered_pages:
+            cls._raise_image_plan_page_count_mismatch(story_pages, pages, reason="extra unnumbered image plan pages")
+        image_plan["pages"] = normalized_pages
+
+    @classmethod
+    def _raise_image_plan_page_count_mismatch(cls, story_pages: list[Any], image_pages: Any, *, reason: str) -> None:
+        expected_page_numbers = cls._story_page_numbers(story_pages)
+        received_page_numbers: list[int | None] = []
+        if isinstance(image_pages, list):
+            for page in image_pages:
+                received_page_numbers.append(cls._image_plan_page_number(page) if isinstance(page, dict) else None)
+        received_page_count = len(image_pages) if isinstance(image_pages, list) else None
+        expected_page_count = len(expected_page_numbers)
+        raise AppException(
+            f"Image plan returned {received_page_count} pages; expected {expected_page_count} story JSON pages.",
+            code="GENERIC_IMAGE_PLAN_PAGE_COUNT_MISMATCH",
+            details={
+                "reason": reason,
+                "expected_page_count": expected_page_count,
+                "received_page_count": received_page_count,
+                "expected_page_numbers": expected_page_numbers,
+                "received_page_numbers": received_page_numbers,
+                "story_json_page_count": len(story_pages),
+            },
+        )
+
     @staticmethod
     def _image_plan_summary(page_plan: dict[str, Any]) -> str:
         if isinstance(page_plan.get("image_prompt"), str) and page_plan["image_prompt"].strip():
@@ -2492,8 +2740,20 @@ class GenericStoryWorkflowService:
         if workflow.current_step == step.value and workflow.status == GenericStoryWorkflowStatus.IN_PROGRESS.value:
             return "IN_PROGRESS"
         if workflow.status == GenericStoryWorkflowStatus.FAILED.value:
-            completed_before_failure = self._step_is_complete(workflow, step)
-            return "COMPLETED" if completed_before_failure else "FAILED"
+            if workflow.current_step:
+                try:
+                    failed_step = GenericStoryWorkflowStep(workflow.current_step)
+                except ValueError:
+                    failed_step = None
+                if failed_step in self.ORDERED_STEPS and step in self.ORDERED_STEPS:
+                    failed_index = self.ORDERED_STEPS.index(failed_step)
+                    step_index = self.ORDERED_STEPS.index(step)
+                    if step_index < failed_index:
+                        return "COMPLETED" if self._step_is_complete(workflow, step) else "PENDING"
+                    if step_index == failed_index:
+                        return "FAILED"
+                    return "PENDING"
+            return "COMPLETED" if self._step_is_complete(workflow, step) else "FAILED"
         return "COMPLETED" if self._step_is_complete(workflow, step) else "PENDING"
 
     def _step_is_complete(self, workflow: GenericStoryWorkflow, step: GenericStoryWorkflowStep) -> bool:
@@ -2688,6 +2948,63 @@ class GenericStoryWorkflowService:
     @staticmethod
     def _scene_plan_page_count_range(age_group: str) -> tuple[int, int]:
         return page_count_range_for_age_group(age_group)
+
+    @classmethod
+    def _normalize_scene_plan_metadata(cls, plan: dict[str, Any], *, age_group: str) -> dict[str, Any]:
+        if not isinstance(plan, dict):
+            return plan
+
+        pages = plan.get("pages")
+        if isinstance(pages, list):
+            strategy = plan.get("adaptation_strategy")
+            if not isinstance(strategy, dict):
+                strategy = {}
+                plan["adaptation_strategy"] = strategy
+            strategy["selected_page_count"] = len(pages)
+            strategy["selected_word_range"] = cls._scene_plan_word_range(age_group)
+
+            for page in pages:
+                if isinstance(page, dict):
+                    cls._normalize_scene_page_continuity(page)
+
+        return plan
+
+    @classmethod
+    def _normalize_scene_page_continuity(cls, page: dict[str, Any]) -> None:
+        continuity = page.get("continuity")
+        if not isinstance(continuity, dict):
+            continuity = {}
+            page["continuity"] = continuity
+
+        characters = cls._string_list(continuity.get("characters"))
+        if characters is None:
+            page_characters = cls._string_list(page.get("characters")) or []
+            characters = [f"Keep characters consistent: {', '.join(page_characters)}."] if page_characters else []
+        continuity["characters"] = characters
+
+        objects = cls._string_list(continuity.get("objects"))
+        continuity["objects"] = objects if objects is not None else []
+
+        location_state = cls._string_list(continuity.get("location_state"))
+        if location_state is None:
+            location = str(page.get("location") or "").strip()
+            location_state = [f"Continue location state: {location}."] if location else []
+        continuity["location_state"] = location_state
+
+    @staticmethod
+    def _scene_plan_word_range(age_group: str) -> str:
+        normalized = validate_age_group(age_group)
+        if normalized == "0-3":
+            return "10-25 words/page"
+        if normalized == "6-9":
+            return "50-90 words/page"
+        return "35-65 words/page"
+
+    @staticmethod
+    def _string_list(value: Any) -> list[str] | None:
+        if not isinstance(value, list):
+            return None
+        return [str(item).strip() for item in value if str(item or "").strip()]
 
     @staticmethod
     def _story_has_images(story_json: dict[str, Any]) -> bool:

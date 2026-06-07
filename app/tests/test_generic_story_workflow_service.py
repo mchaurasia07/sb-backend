@@ -122,9 +122,45 @@ def test_scene_plan_prompt_does_not_accept_requested_pages_override():
     prompt = Path("prompts/generic_story/scene_plan_prompt.txt").read_text(encoding="utf-8")
 
     assert "requested_pages" not in prompt
-    assert "0-3 = 6-8 pages" in prompt
+    assert "0-3 = 8-9 pages" in prompt
     assert "3-6 = 8-10 pages" in prompt
-    assert "6-9 = 10-11 pages" in prompt
+    assert "6-9 = 10-12 pages" in prompt
+    assert "0-3 = 6-8 pages" not in prompt
+    assert "6-9 = 10-11 pages" not in prompt
+    assert "Your job is to plan scenes, not write final page prose" in prompt
+    assert "adaptation_type, optimal page count" in prompt
+    assert "If the story is too short" in prompt
+    assert "If the story is too long" in prompt
+    assert "0-3 = 10-25 words/page" in prompt
+    assert "3-6 = 35-65 words/page" in prompt
+    assert "6-9 = 50-90 words/page" in prompt
+    assert (
+        "0-3 story_role values: introduction, exploration, observation, repetition, discovery, celebration, ending"
+        in prompt
+    )
+    assert (
+        "3-6 story_role values: setup, goal, problem, attempt, small_failure, improved_attempt, success, ending"
+        in prompt
+    )
+    assert (
+        "6-9 story_role values: setup, goal, problem, attempt, learning, planning, execution, climax, resolution"
+        in prompt
+    )
+    assert "no villain, danger, forced conflict, forced failure, or distress" in prompt
+    assert "no traditional climax required" in prompt
+    assert "no meaningful failure required" in prompt
+    assert "no complex problem solving" in prompt
+    assert "driven by discovery, routine, comfort, repetition, or gentle surprise instead of conflict" in prompt
+    assert "scene_summary should describe only the current page scene" in prompt
+    assert "Do not summarize multiple future events into one page" in prompt
+    assert "Each page should represent a single story moment" in prompt
+    assert "sensory details" in prompt
+    assert "merging similar actions" in prompt
+    assert "Every page continuity object is mandatory" in prompt
+    assert "Characters, goals, emotions, objects, and location states should carry forward" in prompt
+    assert "Do not repeat continuity items that are no longer important to the story" in prompt
+    assert "continuity.characters, continuity.objects, and continuity.location_state" in prompt
+    assert '"story_role": "use only the selected age group' in prompt
 
 
 def test_repair_json_closes_unterminated_string_and_containers():
@@ -149,22 +185,173 @@ def test_repair_json_strips_fence_and_trailing_text():
 
 
 def test_generic_scene_plan_page_count_ranges_match_prompt():
-    assert GenericStoryWorkflowService._scene_plan_page_count_range("0-3") == (6, 8)
+    assert GenericStoryWorkflowService._scene_plan_page_count_range("0-3") == (8, 9)
     assert GenericStoryWorkflowService._scene_plan_page_count_range("3-6") == (8, 10)
-    assert GenericStoryWorkflowService._scene_plan_page_count_range("6-9") == (10, 11)
-    assert GenericStoryWorkflowService._scene_plan_page_count_range("2-4") == (6, 8)
+    assert GenericStoryWorkflowService._scene_plan_page_count_range("6-9") == (10, 12)
+    assert GenericStoryWorkflowService._scene_plan_page_count_range("2-4") == (8, 9)
     assert GenericStoryWorkflowService._scene_plan_page_count_range("4-6") == (8, 10)
+    assert GenericStoryWorkflowService._scene_plan_word_range("0-3") == "10-25 words/page"
+    assert GenericStoryWorkflowService._scene_plan_word_range("3-6") == "35-65 words/page"
+    assert GenericStoryWorkflowService._scene_plan_word_range("6-9") == "50-90 words/page"
+
+
+def test_normalize_scene_plan_metadata_sets_word_range_and_page_continuity():
+    plan = {
+        "pages": [
+            {
+                "page": 1,
+                "location": "garden",
+                "characters": ["Mira", "Luma"],
+            },
+            {
+                "page": 2,
+                "location": "moon gate",
+                "characters": ["Mira"],
+                "continuity": {
+                    "characters": ["Mira keeps holding the silver key."],
+                    "objects": "bad-shape",
+                },
+            },
+        ],
+    }
+
+    normalized = GenericStoryWorkflowService._normalize_scene_plan_metadata(plan, age_group="3-6")
+
+    assert normalized["adaptation_strategy"]["selected_page_count"] == 2
+    assert normalized["adaptation_strategy"]["selected_word_range"] == "35-65 words/page"
+    assert normalized["pages"][0]["continuity"] == {
+        "characters": ["Keep characters consistent: Mira, Luma."],
+        "objects": [],
+        "location_state": ["Continue location state: garden."],
+    }
+    assert normalized["pages"][1]["continuity"] == {
+        "characters": ["Mira keeps holding the silver key."],
+        "objects": [],
+        "location_state": ["Continue location state: moon gate."],
+    }
 
 
 def test_story_generation_prompt_requires_natural_hindi_marathi_localization():
     prompt = Path("prompts/generic_story/story_generation_prompt.txt").read_text(encoding="utf-8")
 
-    assert "Do not write Hindi or Marathi as word-for-word translations of English." in prompt
-    assert "semantic" in prompt.lower()
-    assert "natural Devanagari Hindi" in prompt
-    assert "natural Devanagari Marathi" in prompt
-    assert "अपनी तत्काल दुनिया की पड़ताल करता है" in prompt
-    assert "आपल्या जवळच्या जगाचा शोध घेते" in prompt
+    assert "Scene Plan Page Count:" in prompt
+    assert "Scene Plan Page Numbers:" in prompt
+    assert "Output pages.length must equal Scene Plan Page Count exactly." in prompt
+    assert "Output page_number values must follow Scene Plan Page Numbers exactly" in prompt
+    assert "Use the Scene Plan adaptation_strategy.selected_word_range when present." in prompt
+    assert "Preserve each page's continuity.characters, continuity.objects, and continuity.location_state" in prompt
+    assert (
+        "Do not repeat scene_summary, main_action, source_connection, page_turn_hook, or continuity text directly"
+        in prompt
+    )
+    assert "Write in modern spoken children's Hindi." in prompt
+    assert "Write in modern spoken children's Marathi." in prompt
+    assert "Do not write shuddh, Sanskrit-heavy, or textbook-style Hindi." in prompt
+    assert "Do not write shuddh, Sanskrit-heavy, or textbook-style Marathi." in prompt
+    assert "common English words are allowed" in prompt
+    assert "school, bag, game, bus, train, toy, team, park, picnic, idea, sorry, thank you" in prompt
+    assert "Keep Hindi grammar and sentence flow natural" in prompt
+    assert "Keep Marathi grammar and sentence flow natural" in prompt
+    assert "Do not overuse English or create random Hinglish." in prompt
+    assert "Do not overuse English or create random Manglish." in prompt
+    assert "Would a 3-9 year old understand this when read aloud?" in prompt
+
+
+def test_image_plan_prompt_uses_story_json_page_count_as_source_of_truth():
+    prompt = Path("prompts/generic_story/image_plan_prompt.txt").read_text(encoding="utf-8")
+
+    assert "Story JSON Page Count:" in prompt
+    assert "Story JSON Page Numbers:" in prompt
+    assert "Output pages.length must equal Story JSON Page Count exactly." in prompt
+    assert "Output page values must equal Story JSON Page Numbers exactly" in prompt
+    assert "Story JSON is the source of truth for page count" in prompt
+    assert "Do not use age-band ranges, Scene Plan page count, or adaptation_strategy.selected_page_count" in prompt
+
+
+@pytest.mark.asyncio
+async def test_generate_story_json_prompt_includes_scene_page_count_and_numbers():
+    service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
+    captured = {}
+
+    async def _generate_json(prompt, *, max_tokens):
+        captured["prompt"] = prompt
+        captured["max_tokens"] = max_tokens
+        return {
+            "title": {"en": "The Moon Bell", "hi": "Chaand ki Ghanti", "mr": "Chandrachi Ghanta"},
+            "summary": {"en": "Mira listens.", "hi": "Mira listens.", "mr": "Mira listens."},
+            "pages": [
+                {
+                    "page_number": 1,
+                    "emotion": "wonder",
+                    "text": {"en": "Mira listened.", "hi": "Mira listened.", "mr": "Mira listened."},
+                },
+                {
+                    "page_number": 2,
+                    "emotion": "joy",
+                    "text": {"en": "The bell rang.", "hi": "The bell rang.", "mr": "The bell rang."},
+                },
+            ],
+            "moral": {"en": "Listen carefully.", "hi": "Listen carefully.", "mr": "Listen carefully."},
+        }
+
+    service._generate_json = _generate_json
+    workflow = SimpleNamespace(
+        actual_story="Mira helps the moon bell.",
+        age_group="3-6",
+        language="en",
+        title="The Moon Bell",
+        character_analysis_json={"characters": [{"name": "Mira"}]},
+        scene_plan_json={"pages": [{"page": 1}, {"page": 2}]},
+        visual_bible_json={"characters": [{"name": "Mira"}]},
+    )
+
+    await service._generate_story_json(workflow)
+
+    assert "Scene Plan Page Count:\n2" in captured["prompt"]
+    assert "Scene Plan Page Numbers:\n[1, 2]" in captured["prompt"]
+    assert captured["max_tokens"] == 24000
+
+
+@pytest.mark.asyncio
+async def test_generate_image_plan_prompt_includes_story_page_count_and_numbers():
+    service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
+    captured = {}
+
+    async def _generate_json(prompt, *, max_tokens):
+        captured["prompt"] = prompt
+        captured["max_tokens"] = max_tokens
+        return {
+            "cover": {},
+            "pages": [
+                {"page": 1, "visual_focus": "Mira listens.", "camera_shot": "medium", "composition": "Mira centered.", "continuity_notes": []},
+                {"page": 2, "visual_focus": "The bell rings.", "camera_shot": "wide", "composition": "Bell above Mira.", "continuity_notes": []},
+            ],
+        }
+
+    service._generate_json = _generate_json
+    service._workflow_visual_bible = lambda workflow: {"characters": [{"name": "Mira"}]}
+    service._workflow_illustration_style = lambda workflow: "Premium storybook style."
+    service._validate_and_normalize_image_cover_plan = lambda image_plan, workflow: None
+    workflow = SimpleNamespace(
+        scene_plan_json={"pages": [{"page": 1}, {"page": 2}]},
+        visual_bible_json={"characters": [{"name": "Mira"}]},
+        story_json={
+            "title": "The Moon Bell",
+            "summary": "Mira listens.",
+            "moral": "Listen carefully.",
+            "pages": [
+                {"page_number": 1, "emotion": "wonder", "text": "Mira listened."},
+                {"page_number": 2, "emotion": "joy", "text": "The bell rang."},
+            ],
+        },
+    )
+
+    await service._generate_image_plan(workflow)
+
+    assert "Story JSON Page Count:\n2" in captured["prompt"]
+    assert "Story JSON Page Numbers:\n[1, 2]" in captured["prompt"]
+    assert "Story JSON is the source of truth for page count" in captured["prompt"]
+    assert captured["max_tokens"] == 16000
 
 
 def test_workflow_log_event_uses_consistent_ids_and_fields(caplog):
@@ -836,6 +1023,69 @@ def test_validate_image_cover_plan_requires_cover_continuity_when_characters_are
         service._validate_and_normalize_image_cover_plan(image_plan, workflow)
 
 
+def test_normalize_image_plan_pages_matches_story_json_page_numbers():
+    image_plan = {
+        "pages": [
+            {"page": 2, "visual_focus": "Second scene."},
+            {"page": 1, "visual_focus": "First scene."},
+        ]
+    }
+    story_pages = [
+        {"page_number": 1, "text": "First story page."},
+        {"page_number": 2, "text": "Second story page."},
+    ]
+
+    GenericStoryWorkflowService._normalize_image_plan_pages(image_plan, story_pages)
+
+    assert [page["page"] for page in image_plan["pages"]] == [1, 2]
+    assert [page["page_number"] for page in image_plan["pages"]] == [1, 2]
+    assert [page["visual_focus"] for page in image_plan["pages"]] == ["First scene.", "Second scene."]
+
+
+def test_normalize_image_plan_pages_rejects_duplicate_page_numbers():
+    image_plan = {
+        "pages": [
+            {"page": 1, "visual_focus": "First scene."},
+            {"page": 1, "visual_focus": "Duplicate scene."},
+        ]
+    }
+    story_pages = [
+        {"page_number": 1, "text": "First story page."},
+        {"page_number": 2, "text": "Second story page."},
+    ]
+
+    with pytest.raises(AppException) as exc_info:
+        GenericStoryWorkflowService._normalize_image_plan_pages(image_plan, story_pages)
+
+    assert exc_info.value.code == "GENERIC_IMAGE_PLAN_PAGE_COUNT_MISMATCH"
+    assert exc_info.value.details["expected_page_count"] == 2
+    assert exc_info.value.details["received_page_count"] == 2
+    assert exc_info.value.details["expected_page_numbers"] == [1, 2]
+    assert exc_info.value.details["received_page_numbers"] == [1, 1]
+
+
+def test_normalize_image_plan_pages_reports_expected_and_received_counts():
+    image_plan = {"pages": [{"page": 1, "visual_focus": "Only scene."}]}
+    story_pages = [
+        {"page_number": 1, "text": "First story page."},
+        {"page_number": 2, "text": "Second story page."},
+    ]
+
+    with pytest.raises(AppException) as exc_info:
+        GenericStoryWorkflowService._normalize_image_plan_pages(image_plan, story_pages)
+
+    assert exc_info.value.code == "GENERIC_IMAGE_PLAN_PAGE_COUNT_MISMATCH"
+    assert str(exc_info.value) == "Image plan returned 1 pages; expected 2 story JSON pages."
+    assert exc_info.value.details == {
+        "reason": "page count mismatch",
+        "expected_page_count": 2,
+        "received_page_count": 1,
+        "expected_page_numbers": [1, 2],
+        "received_page_numbers": [1],
+        "story_json_page_count": 2,
+    }
+
+
 def test_story_json_for_image_plan_prompt_removes_generated_artifacts():
     service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
 
@@ -1271,6 +1521,380 @@ async def test_execute_scene_plan_step_requires_character_extraction():
             public_base_url="https://api.example.test",
             payload=SimpleNamespace(publish_status=None),
         )
+
+
+def _retry_workflow(**overrides):
+    now = datetime.now(UTC)
+    defaults = {
+        "id": uuid4(),
+        "workflow_name": "generic_story",
+        "status": "FAILED",
+        "current_step": "IMAGE_PLAN_GENERATION",
+        "error_message": "Image plan page count must match story JSON pages.",
+        "generic_story_id": None,
+        "actual_story": "A story with enough text to retry from the failed workflow step.",
+        "age_group": "3-6",
+        "language": "en",
+        "requested_pages": None,
+        "title": "The Moon Bell",
+        "summary": "A child helps the moon bell.",
+        "theme": "listening",
+        "genre": "adventure",
+        "moral": "Listening helps.",
+        "learning_goal": "careful listening",
+        "cover_image": None,
+        "character_analysis_json": {"characters": [{"name": "Mira"}]},
+        "scene_plan_json": {"pages": [{"page": 1}]},
+        "visual_bible_json": {"characters": [{"name": "Mira"}]},
+        "story_json": {"title": "The Moon Bell", "pages": [{"page_number": 1, "text": "Mira listened."}]},
+        "image_plan_json": None,
+        "input_request": {"status": "inactive"},
+        "ai_provider": "google",
+        "text_model": "gemini",
+        "image_model": "imagen",
+        "created_at": now,
+        "updated_at": now,
+    }
+    defaults.update(overrides)
+    return SimpleNamespace(**defaults)
+
+
+@pytest.mark.asyncio
+async def test_retry_failed_workflow_resumes_from_failed_current_step():
+    workflow = _retry_workflow(current_step="IMAGE_PLAN_GENERATION")
+    service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
+    service.workflows = SimpleNamespace(update=lambda workflow_arg: workflow_arg)
+    service.session = SimpleNamespace(commit=lambda: None)
+    calls = []
+
+    async def _get_owned(user_id, workflow_id):
+        assert workflow_id == workflow.id
+        return workflow
+
+    async def _update(workflow_arg):
+        return workflow_arg
+
+    async def _commit():
+        return None
+
+    async def _execute_single_step(workflow_arg, step, *, public_base_url, payload):
+        calls.append(step)
+        if step == GenericStoryWorkflowStep.IMAGE_PLAN_GENERATION:
+            workflow_arg.image_plan_json = {"pages": [{"page": 1}]}
+        elif step == GenericStoryWorkflowStep.IMAGE_GENERATION:
+            workflow_arg.story_json["cover_image_url"] = "https://cdn.example.test/cover.png"
+            workflow_arg.story_json["pages"][0]["image_url"] = "https://cdn.example.test/page-1.png"
+        elif step == GenericStoryWorkflowStep.NARRATION_GENERATION:
+            workflow_arg.story_json["pages"][0]["audio_url"] = "https://cdn.example.test/page-1.wav"
+        elif step == GenericStoryWorkflowStep.PUBLISH_GENERIC_STORY:
+            workflow_arg.generic_story_id = uuid4()
+
+    service._get_owned = _get_owned
+    service.workflows.update = _update
+    service.session.commit = _commit
+    service._execute_single_step = _execute_single_step
+
+    response = await service.retry(
+        uuid4(),
+        workflow.id,
+        SimpleNamespace(skip_image_generation=False, skip_narration_generation=False, publish_status="inactive"),
+        public_base_url="https://api.example.test",
+    )
+
+    assert calls == [
+        GenericStoryWorkflowStep.IMAGE_PLAN_GENERATION,
+        GenericStoryWorkflowStep.IMAGE_GENERATION,
+        GenericStoryWorkflowStep.NARRATION_GENERATION,
+        GenericStoryWorkflowStep.PUBLISH_GENERIC_STORY,
+    ]
+    assert response.status == "COMPLETED"
+    assert response.current_step is None
+    assert response.error_message is None
+    assert response.generic_story_id is not None
+
+
+@pytest.mark.asyncio
+async def test_retry_failed_workflow_with_no_current_step_uses_first_incomplete_step():
+    workflow = _retry_workflow(current_step=None, image_plan_json=None)
+    service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
+
+    async def _get_owned(user_id, workflow_id):
+        return workflow
+
+    async def _update(workflow_arg):
+        return workflow_arg
+
+    async def _commit():
+        return None
+
+    calls = []
+
+    async def _execute_single_step(workflow_arg, step, *, public_base_url, payload):
+        calls.append(step)
+        workflow_arg.generic_story_id = uuid4()
+
+    service._get_owned = _get_owned
+    service.workflows = SimpleNamespace(update=_update)
+    service.session = SimpleNamespace(commit=_commit)
+    service._execute_single_step = _execute_single_step
+
+    await service.retry(
+        uuid4(),
+        workflow.id,
+        SimpleNamespace(skip_image_generation=False, skip_narration_generation=False, publish_status=None),
+        public_base_url="https://api.example.test",
+    )
+
+    assert calls[0] == GenericStoryWorkflowStep.IMAGE_PLAN_GENERATION
+
+
+@pytest.mark.asyncio
+async def test_delete_workflow_removes_workflow_story_media_generic_story_and_child_links(monkeypatch):
+    user_id = uuid4()
+    workflow_id = uuid4()
+    generic_story_id = uuid4()
+    generic_story = SimpleNamespace(id=generic_story_id)
+    workflow = _retry_workflow(
+        id=workflow_id,
+        generic_story_id=generic_story_id,
+        status="COMPLETED",
+        current_step=None,
+    )
+    image_storage = SimpleNamespace(deleted=[])
+    audio_storage = SimpleNamespace(deleted=[])
+    child_books = SimpleNamespace(deleted=[])
+    generic_stories = SimpleNamespace(deleted=[])
+    workflows = SimpleNamespace(deleted=[])
+    batch_jobs = SimpleNamespace()
+    commits = []
+
+    async def _delete_image_directory(story_id):
+        image_storage.deleted.append(story_id)
+
+    async def _delete_audio_directory(story_id):
+        audio_storage.deleted.append(story_id)
+
+    async def _get_owned(requested_user_id, requested_workflow_id):
+        assert requested_user_id == user_id
+        assert requested_workflow_id == workflow_id
+        return workflow
+
+    async def _delete_child_books(*, story_id, story_type):
+        child_books.deleted.append((story_id, story_type))
+
+    async def _get_generic_story(story_id):
+        assert story_id == generic_story_id
+        return generic_story
+
+    async def _delete_generic_story(story):
+        generic_stories.deleted.append(story)
+
+    async def _delete_workflow(workflow_arg):
+        workflows.deleted.append(workflow_arg)
+
+    async def _commit():
+        commits.append(True)
+
+    async def _list_active_for_workflow(requested_workflow_id):
+        assert requested_workflow_id == workflow_id
+        return []
+
+    image_storage.delete_story_directory = _delete_image_directory
+    audio_storage.delete_story_directory = _delete_audio_directory
+    batch_jobs.list_active_for_workflow = _list_active_for_workflow
+    generic_stories.get_by_id = _get_generic_story
+    generic_stories.delete = _delete_generic_story
+    child_books.delete_by_story = _delete_child_books
+    workflows.delete = _delete_workflow
+    monkeypatch.setattr("app.service.generic_story_workflow_service.get_image_storage_service", lambda: image_storage)
+    monkeypatch.setattr("app.service.generic_story_workflow_service.get_story_audio_storage_service", lambda: audio_storage)
+
+    service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
+    service._get_owned = _get_owned
+    service.generic_stories = generic_stories
+    service.child_books = child_books
+    service.batch_jobs = batch_jobs
+    service.workflows = workflows
+    service.session = SimpleNamespace(commit=_commit)
+
+    await service.delete(user_id, workflow_id)
+
+    assert image_storage.deleted == [workflow_id, generic_story_id]
+    assert audio_storage.deleted == [workflow_id, generic_story_id]
+    assert child_books.deleted == [(generic_story_id, "generic")]
+    assert generic_stories.deleted == [generic_story]
+    assert workflows.deleted == [workflow]
+    assert commits == [True]
+
+
+@pytest.mark.asyncio
+async def test_delete_workflow_without_generic_story_only_removes_workflow_media(monkeypatch):
+    user_id = uuid4()
+    workflow_id = uuid4()
+    workflow = _retry_workflow(id=workflow_id, generic_story_id=None, status="FAILED")
+    image_storage = SimpleNamespace(deleted=[])
+    audio_storage = SimpleNamespace(deleted=[])
+    generic_stories = SimpleNamespace(deleted=[])
+    child_books = SimpleNamespace(deleted=[])
+    workflows = SimpleNamespace(deleted=[])
+    batch_jobs = SimpleNamespace()
+
+    async def _delete_image_directory(story_id):
+        image_storage.deleted.append(story_id)
+
+    async def _delete_audio_directory(story_id):
+        audio_storage.deleted.append(story_id)
+
+    async def _get_owned(requested_user_id, requested_workflow_id):
+        return workflow
+
+    async def _delete_workflow(workflow_arg):
+        workflows.deleted.append(workflow_arg)
+
+    async def _commit():
+        return None
+
+    async def _list_active_for_workflow(requested_workflow_id):
+        assert requested_workflow_id == workflow_id
+        return []
+
+    image_storage.delete_story_directory = _delete_image_directory
+    audio_storage.delete_story_directory = _delete_audio_directory
+    batch_jobs.list_active_for_workflow = _list_active_for_workflow
+    workflows.delete = _delete_workflow
+    monkeypatch.setattr("app.service.generic_story_workflow_service.get_image_storage_service", lambda: image_storage)
+    monkeypatch.setattr("app.service.generic_story_workflow_service.get_story_audio_storage_service", lambda: audio_storage)
+
+    service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
+    service._get_owned = _get_owned
+    service.generic_stories = generic_stories
+    service.child_books = child_books
+    service.batch_jobs = batch_jobs
+    service.workflows = workflows
+    service.session = SimpleNamespace(commit=_commit)
+
+    await service.delete(user_id, workflow_id)
+
+    assert image_storage.deleted == [workflow_id]
+    assert audio_storage.deleted == [workflow_id]
+    assert not hasattr(child_books, "deleted_by_story")
+    assert generic_stories.deleted == []
+    assert workflows.deleted == [workflow]
+
+
+@pytest.mark.asyncio
+async def test_delete_workflow_cancels_active_batch_jobs_before_delete(monkeypatch):
+    user_id = uuid4()
+    workflow_id = uuid4()
+    workflow = _retry_workflow(id=workflow_id, generic_story_id=None, status="FAILED")
+    job = SimpleNamespace(
+        workflow_id=workflow_id,
+        status=StoryBatchJobStatus.RUNNING,
+        provider="google",
+        provider_job_name="batches/delete-workflow-test",
+        provider_state="JOB_STATE_PENDING",
+        request_keys=["cover", "page_1"],
+        missing_keys=[],
+        error_message=None,
+    )
+    batches = _FakeBatchesClient()
+    image_storage = SimpleNamespace(deleted=[])
+    audio_storage = SimpleNamespace(deleted=[])
+    workflows = SimpleNamespace(deleted=[])
+    batch_jobs = SimpleNamespace(updated=[])
+    commits = []
+
+    async def _get_owned(requested_user_id, requested_workflow_id):
+        assert requested_user_id == user_id
+        assert requested_workflow_id == workflow_id
+        return workflow
+
+    async def _list_active_for_workflow(requested_workflow_id):
+        assert requested_workflow_id == workflow_id
+        return [job]
+
+    async def _update_job(updated_job):
+        batch_jobs.updated.append(updated_job)
+        return updated_job
+
+    async def _delete_image_directory(story_id):
+        image_storage.deleted.append(story_id)
+
+    async def _delete_audio_directory(story_id):
+        audio_storage.deleted.append(story_id)
+
+    async def _delete_workflow(workflow_arg):
+        workflows.deleted.append(workflow_arg)
+
+    async def _commit():
+        commits.append(True)
+
+    batch_jobs.list_active_for_workflow = _list_active_for_workflow
+    batch_jobs.update = _update_job
+    image_storage.delete_story_directory = _delete_image_directory
+    audio_storage.delete_story_directory = _delete_audio_directory
+    workflows.delete = _delete_workflow
+    monkeypatch.setattr("app.service.generic_story_workflow_service.get_image_storage_service", lambda: image_storage)
+    monkeypatch.setattr("app.service.generic_story_workflow_service.get_story_audio_storage_service", lambda: audio_storage)
+
+    service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
+    service._get_owned = _get_owned
+    service.batch_jobs = batch_jobs
+    service.google_client = _FakeGoogleClient(batches)
+    service.generic_stories = SimpleNamespace(deleted=[])
+    service.child_books = SimpleNamespace()
+    service.workflows = workflows
+    service.session = SimpleNamespace(commit=_commit)
+
+    await service.delete(user_id, workflow_id)
+
+    assert batches.cancelled_names == ["batches/delete-workflow-test"]
+    assert job.status == StoryBatchJobStatus.CANCELLED
+    assert job.provider_state == "JOB_STATE_CANCELLED"
+    assert job.missing_keys == ["cover", "page_1"]
+    assert batch_jobs.updated == [job]
+    assert image_storage.deleted == [workflow_id]
+    assert audio_storage.deleted == [workflow_id]
+    assert workflows.deleted == [workflow]
+    assert commits == [True]
+
+
+@pytest.mark.asyncio
+async def test_execute_failure_preserves_failed_current_step():
+    workflow = _retry_workflow(status="PENDING", current_step=None, image_plan_json=None)
+    service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
+
+    async def _get_owned(user_id, workflow_id):
+        return workflow
+
+    async def _update(workflow_arg):
+        return workflow_arg
+
+    async def _commit():
+        return None
+
+    async def _execute_single_step(workflow_arg, step, *, public_base_url, payload):
+        raise AppException("Image plan page count must match story JSON pages.")
+
+    service._get_owned = _get_owned
+    service.workflows = SimpleNamespace(update=_update)
+    service.session = SimpleNamespace(commit=_commit)
+    service._execute_single_step = _execute_single_step
+
+    with pytest.raises(AppException):
+        await service.execute(
+            uuid4(),
+            workflow.id,
+            SimpleNamespace(
+                step_name=GenericStoryWorkflowStep.IMAGE_PLAN_GENERATION,
+                skip_image_generation=False,
+                skip_narration_generation=False,
+            ),
+            public_base_url="https://api.example.test",
+        )
+
+    assert workflow.status == "FAILED"
+    assert workflow.current_step == "IMAGE_PLAN_GENERATION"
 
 
 class _FakeGenericStories:

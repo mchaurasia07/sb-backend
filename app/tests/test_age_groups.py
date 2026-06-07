@@ -28,12 +28,12 @@ def test_age_group_validation_maps_legacy_values():
 
 
 def test_age_group_counts_ranges_and_labels_use_canonical_values():
-    assert page_count_for_age_group("0-3") == 6
+    assert page_count_for_age_group("0-3") == 8
     assert page_count_for_age_group("3-6") == 8
     assert page_count_for_age_group("6-9") == 10
-    assert page_count_range_for_age_group("0-3") == (6, 8)
+    assert page_count_range_for_age_group("0-3") == (8, 9)
     assert page_count_range_for_age_group("3-6") == (8, 10)
-    assert page_count_range_for_age_group("6-9") == (10, 11)
+    assert page_count_range_for_age_group("6-9") == (10, 12)
     assert age_group_label("4-6") == "Early Reader (3-6 years)"
 
 
