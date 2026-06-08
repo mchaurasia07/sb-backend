@@ -2,6 +2,13 @@ from app.entity.child_activity import ChildActivity
 from app.entity.child_audio import ChildAudio
 from app.entity.child_book import ChildBook
 from app.entity.child_profile import ChildProfile
+from app.entity.custom_story_workflow import (
+    CustomStoryBatchJob,
+    CustomStoryWorkflow,
+    CustomStoryWorkflowStatus,
+    CustomStoryWorkflowStep,
+    CustomStoryWorkflowStepRecord,
+)
 from app.entity.generic_audio import GenericAudio, GenericAudioLanguage
 from app.entity.generic_story import GenericStory, GenericStoryContent, GenericStoryLanguage
 from app.entity.generic_story_batch_job import GenericStoryBatchJob
@@ -31,6 +38,11 @@ __all__ = [
     "ChildAudio",
     "ChildBook",
     "ChildProfile",
+    "CustomStoryBatchJob",
+    "CustomStoryWorkflow",
+    "CustomStoryWorkflowStatus",
+    "CustomStoryWorkflowStep",
+    "CustomStoryWorkflowStepRecord",
     "GenericAudio",
     "GenericAudioLanguage",
     "GenericStory",

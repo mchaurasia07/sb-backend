@@ -120,7 +120,13 @@ def test_group_prompt_includes_ordered_item_ids_and_page_numbers():
     assert "Character consistency applies to every visible named character, not only the hero." in prompt
     assert "Do not replace a named character with a lookalike" in prompt
     assert "faceless named characters" in prompt
-    assert "Use scoped_visual_bible as the source of truth for character appearance" in prompt
+    assert "Use visual_context as the source of truth for character appearance" in prompt
+    assert "The required output is image parts" in prompt
+    assert "Do not stop after text markers" in prompt
+    assert "source_image_prompt" in prompt
+    assert "scoped_visual_bible" not in prompt
+    assert "image_plan_summary" not in prompt
+    assert "Meera sees the rakhi tray." not in prompt
     assert "Use page_image_plan.characters as the exact visible-character allow-list" in prompt
     assert "Respect page_image_plan.camera_shot, composition, emotion, environment, and continuity_notes." in prompt
 

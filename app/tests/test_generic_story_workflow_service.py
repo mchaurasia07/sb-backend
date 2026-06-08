@@ -860,12 +860,15 @@ def test_multi_image_prompt_forbids_caption_text_but_allows_planned_in_scene_tex
     assert "page_image_plan.allowed_in_scene_text" in prompt
     assert "visual_context as the source of truth" in prompt
     assert "source_image_prompt as the source of truth" in prompt
+    assert "The required output is image parts" in prompt
+    assert "Do not stop after text markers" in prompt
+    assert "Return image outputs, not a text explanation." in prompt
     assert "scoped_visual_bible" not in prompt
     assert "full nested prompt should not be included" not in prompt
     assert "Do not place words in empty wall/sky/background/negative space as a caption" in prompt
 
 
-def test_workflow_multi_image_payload_merges_rendered_prompt_metadata():
+def test_workflow_multi_image_payload_drops_rendered_prompt_metadata():
     service = GenericStoryBatchService.__new__(GenericStoryBatchService)
     job = SimpleNamespace(request_keys=["page_1"])
     payload = {
@@ -875,6 +878,7 @@ def test_workflow_multi_image_payload_merges_rendered_prompt_metadata():
                 "page_type": "story_page",
                 "page_number": 1,
                 "source_image_prompt": "planned page prompt",
+                "rendered_prompt": "inline rendered page prompt",
             }
         ],
         "rendered_prompts": {"page_1": "full rendered page prompt"},
@@ -882,7 +886,7 @@ def test_workflow_multi_image_payload_merges_rendered_prompt_metadata():
 
     items = service._workflow_multi_image_items_from_payload(job, payload)
 
-    assert items[0]["rendered_prompt"] == "full rendered page prompt"
+    assert "rendered_prompt" not in items[0]
     assert items[0]["source_image_prompt"] == "planned page prompt"
 
 
@@ -1956,10 +1960,7 @@ async def test_image_generation_submits_single_bulk_batch_request():
     assert created_payloads[0]["mode"] == "generic_story_workflow_multi_image_pages"
     assert [item["key"] for item in created_payloads[0]["items"]] == ["page_1", "page_2"]
     assert all("rendered_prompt" not in item for item in created_payloads[0]["items"])
-    assert created_payloads[0]["rendered_prompts"] == {
-        "page_1": "full page 1 prompt",
-        "page_2": "full page 2 prompt",
-    }
+    assert "rendered_prompts" not in created_payloads[0]
     assert created_payloads[0]["skip_narration_generation"] is True
     assert created_payloads[0]["publish_status"] == "active"
     assert created_payloads[0]["continue_after_image_generation"] is False

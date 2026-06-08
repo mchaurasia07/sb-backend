@@ -9,6 +9,10 @@ from app.core.dependencies import get_current_user
 from app.entity.user import User
 from app.model.request.story import StoryGenerationRequest
 from app.model.response.common import ApiResponse, PaginatedResponse, success_response
+from app.model.response.custom_story_workflow import (
+    CustomStoryWorkflowResponse,
+    CustomStoryWorkflowStepResponse,
+)
 from app.model.response.story import (
     StoryBatchJobCancelResponse,
     StoryBatchJobReconcileResponse,
@@ -16,11 +20,24 @@ from app.model.response.story import (
     StoryStatusResponse,
     StoryStepResponse,
 )
+from app.service.custom_story_workflow_service import CustomStoryWorkflowService
 from app.service.story_service import StoryService, StoryGenerationFlags
 from app.service.story_service_batch_service import StoryServiceBatchService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+async def execute_custom_story_workflow_background(workflow_id: UUID) -> None:
+    """Execute a custom story workflow with a fresh background session."""
+    logger.info("[CUSTOM_WORKFLOW_BACKGROUND] Starting workflow %s", workflow_id)
+    async with AsyncSessionLocal() as session:
+        try:
+            await CustomStoryWorkflowService(session).run(workflow_id)
+            logger.info("[CUSTOM_WORKFLOW_BACKGROUND] Workflow completed or deferred: %s", workflow_id)
+        except Exception as exc:
+            logger.error("[CUSTOM_WORKFLOW_BACKGROUND] Workflow failed: %s", workflow_id)
+            logger.exception("[CUSTOM_WORKFLOW_BACKGROUND] Exception: %s", str(exc))
 
 
 async def execute_story_workflow_background(
@@ -64,48 +81,82 @@ async def execute_story_batch_workflow_background(
             logger.exception("[BATCH_BACKGROUND] Exception: %s", str(e))
 
 
-@router.post("/generate", response_model=ApiResponse[StoryResponse], status_code=status.HTTP_202_ACCEPTED)
-async def generate_story(
+@router.post("/workflows", response_model=ApiResponse[CustomStoryWorkflowResponse], status_code=status.HTTP_202_ACCEPTED)
+async def create_custom_story_workflow(
     payload: StoryGenerationRequest,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db_session),
-) -> ApiResponse[StoryResponse]:
-    """Generate a new story (asynchronous with polling).
+) -> ApiResponse[CustomStoryWorkflowResponse]:
+    """Create a custom story workflow and start it in the background."""
+    data = await CustomStoryWorkflowService(session).create(current_user.id, payload)
+    background_tasks.add_task(execute_custom_story_workflow_background, data.workflow_id)
+    return success_response(data, "Custom story workflow started successfully")
 
-    Returns immediately with story_id and status=PENDING.
-    Client polls GET /stories/{story_id} to check generation progress.
 
-    Workflow steps executed in background:
-    1. Story Plan Generation
-    2. Story Plan Validation (3 retries)
-    3. Story Text Generation
-    4. Image Plan Generation
-    5. Image Plan Validation (optional)
-    6. Image Generation
-    7. Narration Generation
-    """
-    service = StoryService(session)
-
-    # Create story record (request session handles this)
-    story_response = await service.generate_story_async(
-        user_id=current_user.id,
-        child_id=payload.child_id,
-        payload=payload,
-        public_base_url="",  # Will be set during image generation
+@router.get("/workflows", response_model=ApiResponse[PaginatedResponse[CustomStoryWorkflowResponse]])
+async def list_custom_story_workflows(
+    child_id: UUID | None = None,
+    status_filter: str | None = Query(default=None, alias="status"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[PaginatedResponse[CustomStoryWorkflowResponse]]:
+    data = await CustomStoryWorkflowService(session).list(
+        current_user.id,
+        child_id=child_id,
+        status_filter=status_filter,
+        page=page,
+        page_size=page_size,
     )
+    return success_response(data, "Custom story workflows retrieved successfully")
 
-    # Kick off background workflow task
-    flags = StoryGenerationFlags.from_request(payload)
-    if payload.processing_mode == "delayed":
-        background_tasks.add_task(execute_story_batch_workflow_background, story_response.id, current_user.id, False, flags)
-        message = "Delayed batch story generation started successfully"
-    else:
-        background_tasks.add_task(execute_story_workflow_background, story_response.id, current_user.id, False, flags)
-        message = "Story generation started successfully"
 
-    logger.info(f"Story {story_response.id} generation started in background")
-    return success_response(story_response, message)
+@router.get("/workflows/{workflow_id}", response_model=ApiResponse[CustomStoryWorkflowResponse])
+async def get_custom_story_workflow(
+    workflow_id: UUID,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[CustomStoryWorkflowResponse]:
+    data = await CustomStoryWorkflowService(session).get(current_user.id, workflow_id)
+    return success_response(data, "Custom story workflow retrieved successfully")
+
+
+@router.delete("/workflows/{workflow_id}", response_model=ApiResponse[None])
+async def delete_custom_story_workflow(
+    workflow_id: UUID,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[None]:
+    await CustomStoryWorkflowService(session).delete(current_user.id, workflow_id)
+    return success_response(None, "Custom story workflow deleted successfully")
+
+
+@router.get("/workflows/{workflow_id}/steps", response_model=ApiResponse[list[CustomStoryWorkflowStepResponse]])
+async def get_custom_story_workflow_steps(
+    workflow_id: UUID,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[list[CustomStoryWorkflowStepResponse]]:
+    data = await CustomStoryWorkflowService(session).get_steps(current_user.id, workflow_id)
+    return success_response(data, "Custom story workflow steps retrieved successfully")
+
+
+@router.post(
+    "/workflows/{workflow_id}/retry",
+    response_model=ApiResponse[CustomStoryWorkflowResponse],
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def retry_custom_story_workflow(
+    workflow_id: UUID,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[CustomStoryWorkflowResponse]:
+    data = await CustomStoryWorkflowService(session).retry(current_user.id, workflow_id)
+    background_tasks.add_task(execute_custom_story_workflow_background, workflow_id)
+    return success_response(data, "Custom story workflow retry started successfully")
 
 
 @router.post("/batch-jobs/reconcile", response_model=ApiResponse[StoryBatchJobReconcileResponse])
@@ -116,52 +167,17 @@ async def reconcile_story_batch_jobs(
 ) -> ApiResponse[StoryBatchJobReconcileResponse]:
     """Manually reconcile submitted/running Google Batch jobs."""
     _ = current_user
-    data = await StoryServiceBatchService(session).reconcile_batch_jobs(limit=limit)
+    story_data = await StoryServiceBatchService(session).reconcile_batch_jobs(limit=limit)
+    workflow_data = await CustomStoryWorkflowService(session).reconcile_batch_jobs(limit=limit)
+    data = {
+        "checked_count": story_data.get("checked_count", 0) + workflow_data.get("checked_count", 0),
+        "processed_count": story_data.get("processed_count", 0) + workflow_data.get("processed_count", 0),
+        "results": [*story_data.get("results", []), *workflow_data.get("results", [])],
+    }
     return success_response(
         StoryBatchJobReconcileResponse(**data),
         "Story batch jobs reconciled successfully",
     )
-
-
-@router.post("/{story_id}/retry", response_model=ApiResponse[StoryStatusResponse], status_code=status.HTTP_202_ACCEPTED)
-async def retry_story_generation(
-    story_id: UUID,
-    background_tasks: BackgroundTasks,
-    current_user: User = Depends(get_current_user),
-    session: AsyncSession = Depends(get_db_session),
-) -> ApiResponse[StoryStatusResponse]:
-    """Retry a failed story generation workflow from the last saved checkpoint."""
-    service = StoryService(session)
-    story = await service.stories.get_for_user(current_user.id, story_id)
-    processing_mode = (
-        (story.input_request or {}).get("processing_mode")
-        if story is not None and isinstance(story.input_request, dict)
-        else None
-    )
-    data = await service.retry_story_async(current_user.id, story_id)
-    if processing_mode == "delayed":
-        background_tasks.add_task(execute_story_batch_workflow_background, story_id, current_user.id, True)
-    else:
-        background_tasks.add_task(execute_story_workflow_background, story_id, current_user.id, True)
-    logger.info("Story %s retry accepted", story_id)
-    return success_response(data, "Story generation retry accepted")
-
-
-@router.post("/{story_id}/recover", response_model=ApiResponse[StoryStatusResponse])
-async def recover_story_generation(
-    story_id: UUID,
-    stale_after_minutes: int = Query(15, ge=1, le=1440),
-    current_user: User = Depends(get_current_user),
-    session: AsyncSession = Depends(get_db_session),
-) -> ApiResponse[StoryStatusResponse]:
-    """Recover a stale in-progress story so it can be retried from checkpoint."""
-    service = StoryService(session)
-    data = await service.recover_story_async(
-        current_user.id,
-        story_id,
-        stale_after_minutes=stale_after_minutes,
-    )
-    return success_response(data, "Story recovery checked successfully")
 
 
 @router.post(

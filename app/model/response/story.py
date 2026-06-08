@@ -81,7 +81,8 @@ class StoryBatchJobCancelResponse(BaseModel):
 class StoryBatchJobReconcileItemResponse(BaseModel):
     """Single batch-job reconciliation result."""
 
-    story_id: UUID
+    story_id: UUID | None = None
+    workflow_id: UUID | None = None
     batch_job_id: UUID
     job_type: str
     status: str

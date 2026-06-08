@@ -55,7 +55,6 @@ def _job(workflow, *, continue_after_image_generation=False):
             "filename": "page_1.png",
             "aspect_ratio": "1:1",
             "source_image_prompt": "planned page 1",
-            "rendered_prompt": "rendered page 1",
         },
         {
             "key": "page_2",
@@ -64,7 +63,6 @@ def _job(workflow, *, continue_after_image_generation=False):
             "filename": "page_2.png",
             "aspect_ratio": "1:1",
             "source_image_prompt": "planned page 2",
-            "rendered_prompt": "rendered page 2",
         },
     ]
     return SimpleNamespace(
@@ -153,7 +151,7 @@ async def test_workflow_multi_image_reconcile_updates_pages_and_continues(monkey
     assert job.failed_item_count == 0
     assert job.missing_keys == []
     assert workflow.story_json["pages"][0]["image_url"].endswith("/page_1.png")
-    assert workflow.story_json["pages"][0]["image_prompt"] == "rendered page 1"
+    assert workflow.story_json["pages"][0]["image_prompt"] == "planned page 1"
     assert workflow.story_json["pages"][1]["planned_image_prompt"] == "planned page 2"
     assert workflow.status == GenericStoryWorkflowStatus.IN_PROGRESS.value
     assert workflow.current_step == GenericStoryWorkflowStep.IMAGE_GENERATION.value

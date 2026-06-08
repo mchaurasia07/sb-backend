@@ -4,6 +4,8 @@ You are generating a grouped set of children's storybook illustrations for one g
 
 Generate exactly {item_count} separate image outputs for the "{group_name}" group at aspect ratio {target_aspect_ratio}.
 
+The required output is image parts. Do not answer with only text, JSON, summaries, descriptions, or a list of plans.
+
 ---
 
 # STORY
@@ -64,6 +66,8 @@ Do not skip any item.
 Do not add extra images.
 Do not combine two items into one image.
 Do not output any image before its IMAGE_ITEM marker.
+Do not stop after text markers. Each marker must be followed by an actual generated image part.
+If you cannot place a marker and an image, prefer returning the image part rather than returning text-only.
 
 ---
 
@@ -108,3 +112,4 @@ back_cover:
 # FINAL INSTRUCTION
 
 Generate exactly {item_count} images, one per IMAGE_ITEM marker, in the requested order and aspect ratio.
+Return image outputs, not a text explanation.

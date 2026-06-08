@@ -1252,7 +1252,6 @@ class GenericStoryWorkflowService:
                 "provider": "google",
                 "attempt": 1,
                 "items": self._multi_image_item_payloads(batch_items),
-                "rendered_prompts": self._multi_image_rendered_prompt_map(batch_items),
                 "prompt": pages_prompt,
                 "aspect_ratio": settings.STORY_PAGE_ASPECT_RATIO,
                 "skip_narration_generation": payload.skip_narration_generation,
@@ -1392,14 +1391,6 @@ class GenericStoryWorkflowService:
             "source_image_prompt": item.get("source_image_prompt"),
         }
         return {key: value for key, value in payload.items() if value is not None}
-
-    @staticmethod
-    def _multi_image_rendered_prompt_map(items: list[dict[str, Any]]) -> dict[str, str]:
-        return {
-            str(item["key"]): str(item["rendered_prompt"])
-            for item in items
-            if str(item.get("key") or "").strip() and str(item.get("rendered_prompt") or "").strip()
-        }
 
     def _render_multi_image_pages_prompt(
         self,

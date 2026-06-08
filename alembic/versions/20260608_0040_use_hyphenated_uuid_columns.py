@@ -242,6 +242,7 @@ def upgrade() -> None:
     foreign_keys = _uuid_foreign_keys(bind, uuid_columns)
     _drop_foreign_keys(foreign_keys)
     _alter_uuid_columns(uuid_columns, sa.CHAR(36), sa.CHAR(32))
+    _hyphenate_uuid_values(uuid_columns)
     _create_foreign_keys(foreign_keys)
     _ensure_expected_foreign_keys(bind)
 
@@ -423,5 +424,24 @@ def _compact_uuid_values(uuid_columns: tuple[tuple[str, str, bool], ...]) -> Non
                 f"UPDATE `{table_name}` "
                 f"SET `{column_name}` = REPLACE(`{column_name}`, '-', '') "
                 f"WHERE `{column_name}` LIKE '%-%'"
+            )
+        )
+
+
+def _hyphenate_uuid_values(uuid_columns: tuple[tuple[str, str, bool], ...]) -> None:
+    for table_name, column_name, _ in uuid_columns:
+        op.execute(
+            sa.text(
+                f"UPDATE `{table_name}` "
+                f"SET `{column_name}` = CONCAT("
+                f"SUBSTRING(`{column_name}`, 1, 8), '-', "
+                f"SUBSTRING(`{column_name}`, 9, 4), '-', "
+                f"SUBSTRING(`{column_name}`, 13, 4), '-', "
+                f"SUBSTRING(`{column_name}`, 17, 4), '-', "
+                f"SUBSTRING(`{column_name}`, 21, 12)"
+                f") "
+                f"WHERE `{column_name}` IS NOT NULL "
+                f"AND LENGTH(`{column_name}`) = 32 "
+                f"AND `{column_name}` NOT LIKE '%-%'"
             )
         )

@@ -418,9 +418,9 @@ class GenericStoryMultiImageTestService:
             "filename": item.filename,
             "target_aspect_ratio": item.aspect_ratio,
             "page_image_plan": item.page_image_plan,
-            "image_plan_summary": GenericStoryWorkflowService._image_plan_summary(item.page_image_plan),
-            "story_page": item.story_page,
-            "scoped_visual_bible": compact_visual_bible_json_for_image_prompt(
+            "source_image_prompt": GenericStoryWorkflowService._image_plan_summary(item.page_image_plan),
+            "story_page": GenericStoryMultiImageTestService._story_page_context(item.story_page),
+            "visual_context": compact_visual_bible_json_for_image_prompt(
                 visual_bible,
                 page_type=item.page_type,
                 image_brief=item.page_image_plan,
@@ -441,6 +441,13 @@ class GenericStoryMultiImageTestService:
             "negative_constraints",
         )
         return {key: visual_bible[key] for key in keys if key in visual_bible}
+
+    @staticmethod
+    def _story_page_context(story_page: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(story_page, dict):
+            return {}
+        allowed_keys = ("page_number", "emotion")
+        return {key: story_page[key] for key in allowed_keys if story_page.get(key) is not None}
 
     async def _apply_saved_urls_to_all_contents(
         self,

@@ -695,16 +695,12 @@ class GenericStoryBatchService:
                 "Generic workflow multi-image batch has no request items.",
                 code="GENERIC_WORKFLOW_MULTI_IMAGE_ITEMS_MISSING",
             )
-        rendered_prompts = request_payload.get("rendered_prompts")
-        rendered_prompts_by_key = rendered_prompts if isinstance(rendered_prompts, dict) else {}
         items = []
         for item in raw_items:
             if not isinstance(item, dict) or not str(item.get("key") or "").strip():
                 continue
             normalized_item = dict(item)
-            key = str(normalized_item["key"])
-            if not normalized_item.get("rendered_prompt") and rendered_prompts_by_key.get(key):
-                normalized_item["rendered_prompt"] = rendered_prompts_by_key[key]
+            normalized_item.pop("rendered_prompt", None)
             items.append(normalized_item)
         if len(items) != len(raw_items):
             raise AppException(
@@ -882,7 +878,7 @@ class GenericStoryBatchService:
     ) -> None:
         if str(item.get("key") or "") == "cover" or item.get("page_type") == "cover":
             story_json["cover_image_url"] = image_url
-            story_json["cover_image_prompt"] = item.get("rendered_prompt")
+            story_json["cover_image_prompt"] = item.get("source_image_prompt")
             story_json["cover_planned_image_prompt"] = item.get("source_image_prompt")
             story_json.pop("cover_image_dummy", None)
             return
@@ -894,7 +890,7 @@ class GenericStoryBatchService:
             if int(page.get("page_number") or index) != page_number:
                 continue
             page["image_url"] = image_url
-            page["image_prompt"] = item.get("rendered_prompt")
+            page["image_prompt"] = item.get("source_image_prompt")
             page["planned_image_prompt"] = item.get("source_image_prompt")
             page.pop("image_dummy", None)
             return

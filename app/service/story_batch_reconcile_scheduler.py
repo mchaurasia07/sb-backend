@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.logger import get_logger
+from app.service.custom_story_workflow_service import CustomStoryWorkflowService
 from app.service.generic_story_batch_service import GenericStoryBatchService
 from app.service.story_service_batch_service import StoryServiceBatchService
 
@@ -90,6 +91,9 @@ class StoryBatchReconcileScheduler:
                     story_result = await StoryServiceBatchService(session).reconcile_batch_jobs(
                         limit=settings.STORY_BATCH_RECONCILE_LIMIT
                     )
+                    custom_story_result = await CustomStoryWorkflowService(session).reconcile_batch_jobs(
+                        limit=settings.STORY_BATCH_RECONCILE_LIMIT
+                    )
                     generic_result = await GenericStoryBatchService(session).reconcile_batch_jobs(
                         limit=settings.STORY_BATCH_RECONCILE_LIMIT
                     )
@@ -97,6 +101,8 @@ class StoryBatchReconcileScheduler:
                     "story_batch_reconcile_scheduler_run_completed",
                     checked_count=story_result.get("checked_count"),
                     processed_count=story_result.get("processed_count"),
+                    custom_story_checked_count=custom_story_result.get("checked_count"),
+                    custom_story_processed_count=custom_story_result.get("processed_count"),
                     generic_checked_count=generic_result.get("checked_count"),
                     generic_processed_count=generic_result.get("processed_count"),
                 )
