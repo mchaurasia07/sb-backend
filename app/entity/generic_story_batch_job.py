@@ -1,11 +1,12 @@
 from uuid import UUID
 
-from sqlalchemy import Enum as SAEnum, ForeignKey, Index, Integer, JSON, String, Text, Uuid
+from sqlalchemy import Enum as SAEnum, ForeignKey, Index, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.entity.base import TimestampMixin, UUIDPrimaryKeyMixin
 from app.entity.story_batch_job import StoryBatchJobStatus, StoryBatchJobType
+from app.entity.types import HyphenatedUUID
 
 
 class GenericStoryBatchJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -22,12 +23,12 @@ class GenericStoryBatchJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     generic_story_id: Mapped[UUID | None] = mapped_column(
-        Uuid(as_uuid=True),
+        HyphenatedUUID(),
         ForeignKey("generic_stories.id", ondelete="CASCADE"),
         nullable=True,
     )
     workflow_id: Mapped[UUID] = mapped_column(
-        Uuid(as_uuid=True),
+        HyphenatedUUID(),
         ForeignKey("generic_story_workflows.id", ondelete="CASCADE"),
         nullable=False,
     )

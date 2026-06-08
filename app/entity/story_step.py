@@ -2,11 +2,12 @@ from datetime import datetime
 from enum import Enum
 from uuid import UUID
 
-from sqlalchemy import DateTime, Enum as SAEnum, ForeignKey, Index, JSON, Integer, String, Text, Uuid
+from sqlalchemy import DateTime, Enum as SAEnum, ForeignKey, Index, JSON, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.entity.base import TimestampMixin, UUIDPrimaryKeyMixin
+from app.entity.types import HyphenatedUUID
 
 
 class StoryStepName(str, Enum):
@@ -41,7 +42,7 @@ class StoryStep(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     story_id: Mapped[UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("stories.id", ondelete="CASCADE"), nullable=False
+        HyphenatedUUID(), ForeignKey("stories.id", ondelete="CASCADE"), nullable=False
     )
 
     step_name: Mapped[StoryStepName] = mapped_column(

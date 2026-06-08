@@ -1,11 +1,12 @@
 from enum import Enum
 from uuid import UUID
 
-from sqlalchemy import Boolean, Enum as SAEnum, ForeignKey, Index, JSON, String, Text, Uuid
+from sqlalchemy import Boolean, Enum as SAEnum, ForeignKey, Index, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
 from app.entity.base import TimestampMixin, UUIDPrimaryKeyMixin
+from app.entity.types import HyphenatedUUID
 
 
 class NotificationAccountType(str, Enum):
@@ -42,12 +43,12 @@ class PushDeviceToken(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     user_id: Mapped[UUID] = mapped_column(
-        Uuid(as_uuid=True),
+        HyphenatedUUID(),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
     )
     child_id: Mapped[UUID | None] = mapped_column(
-        Uuid(as_uuid=True),
+        HyphenatedUUID(),
         ForeignKey("child_profiles.id", ondelete="CASCADE"),
         nullable=True,
     )
@@ -85,8 +86,8 @@ class Notification(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     body: Mapped[str] = mapped_column(Text, nullable=False)
     data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
-    user_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
-    child_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    user_id: Mapped[UUID | None] = mapped_column(HyphenatedUUID(), nullable=True)
+    child_id: Mapped[UUID | None] = mapped_column(HyphenatedUUID(), nullable=True)
     status: Mapped[NotificationDeliveryStatus] = mapped_column(
         SAEnum(NotificationDeliveryStatus, native_enum=False),
         nullable=False,

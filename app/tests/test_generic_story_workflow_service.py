@@ -100,7 +100,7 @@ def test_workflow_response_serializes_generic_story_id_like_db_value():
 
     dumped = GenericStoryWorkflowResponse.model_validate(workflow).model_dump(mode="json")
 
-    assert dumped["generic_story_id"] == generic_story_id.hex
+    assert dumped["generic_story_id"] == str(generic_story_id)
 
 
 def test_workflow_list_response_omits_large_json_payloads():
@@ -123,18 +123,18 @@ def test_workflow_create_request_has_illustration_type_without_requested_pages()
     assert "requested_pages" not in fields
 
 
-def test_workflow_execute_request_accepts_multi_image_mode_flag():
+def test_workflow_execute_request_ignores_multi_image_mode_flag():
     default_request = GenericStoryWorkflowExecuteRequest.model_validate({})
-    request = GenericStoryWorkflowExecuteRequest.model_validate({"multi_image_mode": True})
-    typo_request = GenericStoryWorkflowExecuteRequest.model_validate({"mutil_image_mode": True})
-    retry_request = GenericStoryWorkflowRetryRequest.model_validate({"mutil_image_mode": True})
+    request = GenericStoryWorkflowExecuteRequest.model_validate({"multi_image_mode": False})
+    typo_request = GenericStoryWorkflowExecuteRequest.model_validate({"mutil_image_mode": False})
+    retry_request = GenericStoryWorkflowRetryRequest.model_validate({"mutil_image_mode": False})
 
     assert default_request.skip_image_generation is False
-    assert default_request.multi_image_mode is True
     assert default_request.skip_narration_generation is True
-    assert request.multi_image_mode is True
-    assert typo_request.multi_image_mode is True
-    assert retry_request.multi_image_mode is True
+    assert not hasattr(default_request, "multi_image_mode")
+    assert not hasattr(request, "multi_image_mode")
+    assert not hasattr(typo_request, "multi_image_mode")
+    assert not hasattr(retry_request, "multi_image_mode")
     assert retry_request.skip_narration_generation is True
 
 
@@ -1604,7 +1604,7 @@ async def test_get_steps_returns_details_for_all_workflow_steps():
         "IMAGE_GENERATION",
         "NARRATION_GENERATION",
     ]
-    assert steps[0].genric_story_id == generic_story_id.hex
+    assert steps[0].genric_story_id == str(generic_story_id)
     assert "CHARACTER_EXTRACTION" not in by_name
     assert "SCENE_PLAN_GENERATION" not in by_name
     assert "IMAGE_PLAN_GENERATION" not in by_name
@@ -1693,7 +1693,7 @@ async def test_execute_scene_plan_step_requires_character_extraction():
 
 
 @pytest.mark.asyncio
-async def test_image_generation_step_uses_multi_image_mode_by_default():
+async def test_image_generation_step_always_uses_multi_image_batch():
     service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
     workflow = SimpleNamespace(
         story_json={"title": "The Moon Bell", "pages": [{"page_number": 1, "text": "Mira listened."}]},
@@ -1705,7 +1705,7 @@ async def test_image_generation_step_uses_multi_image_mode_by_default():
         calls.append((workflow_arg, payload, public_base_url))
 
     async def _single(workflow_arg, *, public_base_url):
-        raise AssertionError("single image generation should not run in multi_image_mode")
+        raise AssertionError("single image generation should not run for generic workflows")
 
     service._generate_cover_and_submit_multi_image_pages = _bulk
     service._generate_images = _single
@@ -1856,7 +1856,6 @@ async def test_execute_stores_original_execute_request_on_workflow():
         GenericStoryWorkflowExecuteRequest(
             step_name=GenericStoryWorkflowStep.IMAGE_GENERATION,
             skip_image_generation=False,
-            multi_image_mode=True,
             skip_narration_generation=True,
             publish_status="active",
         ),
@@ -1868,14 +1867,13 @@ async def test_execute_stores_original_execute_request_on_workflow():
     assert workflow.input_request["execute_request"] == {
         "step_name": "IMAGE_GENERATION",
         "skip_image_generation": False,
-        "multi_image_mode": True,
         "skip_narration_generation": True,
         "publish_status": "active",
     }
 
 
 @pytest.mark.asyncio
-async def test_multi_image_mode_submits_single_bulk_batch_request():
+async def test_image_generation_submits_single_bulk_batch_request():
     workflow_id = uuid4()
     generic_story_id = uuid4()
     page_items = [
@@ -1942,7 +1940,6 @@ async def test_multi_image_mode_submits_single_bulk_batch_request():
         error_message="previous error",
     )
     payload = GenericStoryWorkflowExecuteRequest(
-        multi_image_mode=True,
         skip_narration_generation=True,
         publish_status="active",
     )
@@ -1957,7 +1954,6 @@ async def test_multi_image_mode_submits_single_bulk_batch_request():
     assert len(batches.created["src"]) == 1
     assert created_jobs[0]["generic_story_id"] == generic_story_id
     assert created_payloads[0]["mode"] == "generic_story_workflow_multi_image_pages"
-    assert created_payloads[0]["multi_image_mode"] is True
     assert [item["key"] for item in created_payloads[0]["items"]] == ["page_1", "page_2"]
     assert all("rendered_prompt" not in item for item in created_payloads[0]["items"])
     assert created_payloads[0]["rendered_prompts"] == {
@@ -1973,7 +1969,7 @@ async def test_multi_image_mode_submits_single_bulk_batch_request():
 
 
 @pytest.mark.asyncio
-async def test_multi_image_mode_cover_is_submitted_in_batch_without_direct_generation():
+async def test_image_generation_cover_is_submitted_in_batch_without_direct_generation():
     workflow_id = uuid4()
     created_payloads = []
     batches = SimpleNamespace(created=None)
@@ -1994,7 +1990,7 @@ async def test_multi_image_mode_cover_is_submitted_in_batch_without_direct_gener
         return None
 
     async def _generate_image(*args, **kwargs):
-        raise AssertionError("multi_image_mode should not call direct image generation")
+        raise AssertionError("generic workflow should not call direct image generation")
 
     async def _create_batch(*, model, src, config):
         batches.created = {"model": model, "src": src, "config": config}
@@ -2028,7 +2024,6 @@ async def test_multi_image_mode_cover_is_submitted_in_batch_without_direct_gener
         error_message="previous error",
     )
     payload = GenericStoryWorkflowExecuteRequest(
-        multi_image_mode=True,
         skip_narration_generation=False,
         publish_status=None,
     )
@@ -2233,13 +2228,12 @@ async def test_retry_uses_stored_execute_request_from_workflow_table(retry_statu
     assert captured["event_name"] == "workflow_retry_started"
     assert captured["requested_step"] == GenericStoryWorkflowStep.IMAGE_GENERATION.value
     assert payload.skip_image_generation is False
-    assert payload.multi_image_mode is True
     assert payload.skip_narration_generation is True
     assert payload.publish_status == "active"
 
 
 @pytest.mark.asyncio
-async def test_retry_legacy_workflow_without_stored_execute_request_uses_multi_image_mode():
+async def test_retry_legacy_workflow_without_stored_execute_request_uses_batch_defaults():
     workflow = _retry_workflow(
         status="IN_PROGRESS",
         current_step="IMAGE_GENERATION",
@@ -2273,8 +2267,77 @@ async def test_retry_legacy_workflow_without_stored_execute_request_uses_multi_i
     payload = captured["payload"]
     assert captured["steps"][0] == GenericStoryWorkflowStep.IMAGE_GENERATION
     assert payload.skip_image_generation is False
-    assert payload.multi_image_mode is True
+    assert not hasattr(payload, "multi_image_mode")
     assert payload.publish_status == "inactive"
+
+
+@pytest.mark.asyncio
+async def test_retry_image_generation_uses_stored_request_and_bulk_batch():
+    workflow = _retry_workflow(
+        status="FAILED",
+        current_step="IMAGE_GENERATION",
+        generic_story_id=uuid4(),
+        image_plan_json={"cover": {"image_prompt": "cover"}, "pages": [{"page_number": 1}]},
+        input_request={
+            "status": "inactive",
+            "execute_request": {
+                "step_name": "ALL",
+                "skip_image_generation": False,
+                "skip_narration_generation": True,
+                "publish_status": "active",
+            },
+        },
+    )
+    service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
+    bulk_calls = []
+
+    async def _get_owned(user_id, workflow_id):
+        return workflow
+
+    async def _update(workflow_arg):
+        return workflow_arg
+
+    async def _commit():
+        return None
+
+    async def _rollback():
+        return None
+
+    async def _sync_generic_story_from_workflow(*args, **kwargs):
+        return None
+
+    async def _bulk(workflow_arg, *, payload, public_base_url):
+        bulk_calls.append((workflow_arg, payload, public_base_url))
+
+    async def _single(*args, **kwargs):
+        raise AssertionError("retry should not run direct image generation")
+
+    async def _publish(workflow_arg, *, publish_status, public_base_url):
+        workflow_arg.status = "COMPLETED"
+        workflow_arg.generic_story_id = workflow_arg.generic_story_id or uuid4()
+
+    service._get_owned = _get_owned
+    service.workflows = SimpleNamespace(update=_update)
+    service.session = SimpleNamespace(commit=_commit, rollback=_rollback)
+    service._sync_generic_story_from_workflow = _sync_generic_story_from_workflow
+    service._generate_cover_and_submit_multi_image_pages = _bulk
+    service._generate_images = _single
+    service._publish_generic_story = _publish
+    service._log_workflow_event = lambda *args, **kwargs: None
+
+    await service.retry(
+        uuid4(),
+        workflow.id,
+        public_base_url="https://api.example.test",
+    )
+
+    assert len(bulk_calls) == 1
+    assert bulk_calls[0][0] is workflow
+    assert bulk_calls[0][1].skip_image_generation is False
+    assert bulk_calls[0][1].skip_narration_generation is True
+    assert bulk_calls[0][1].publish_status == "active"
+    assert not hasattr(bulk_calls[0][1], "multi_image_mode")
+    assert workflow.status == "COMPLETED"
 
 
 @pytest.mark.asyncio

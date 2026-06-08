@@ -1,11 +1,12 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import DateTime, ForeignKey, Index, JSON, String, Text, Uuid
+from sqlalchemy import DateTime, ForeignKey, Index, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.entity.base import TimestampMixin, UUIDPrimaryKeyMixin
+from app.entity.types import HyphenatedUUID
 
 
 class ChildActivity(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -20,7 +21,7 @@ class ChildActivity(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     child_id: Mapped[UUID] = mapped_column(
-        Uuid(as_uuid=True),
+        HyphenatedUUID(),
         ForeignKey("child_profiles.id", ondelete="CASCADE"),
         nullable=False,
     )
@@ -28,7 +29,7 @@ class ChildActivity(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     activity_type: Mapped[str] = mapped_column(String(100), nullable=False)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     resource_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    resource_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    resource_id: Mapped[UUID | None] = mapped_column(HyphenatedUUID(), nullable=True)
     resource_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     metadata_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)

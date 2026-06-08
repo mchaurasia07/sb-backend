@@ -1,11 +1,12 @@
 from enum import StrEnum
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, Index, Integer, JSON, String, Text, Uuid
+from sqlalchemy import ForeignKey, Index, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.entity.base import TimestampMixin, UUIDPrimaryKeyMixin
+from app.entity.types import HyphenatedUUID
 
 
 class GenericStoryWorkflowStatus(StrEnum):
@@ -44,9 +45,9 @@ class GenericStoryWorkflow(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ),
     )
 
-    user_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[UUID] = mapped_column(HyphenatedUUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     generic_story_id: Mapped[UUID | None] = mapped_column(
-        Uuid(as_uuid=True),
+        HyphenatedUUID(),
         ForeignKey("generic_stories.id", ondelete="SET NULL"),
         nullable=True,
     )

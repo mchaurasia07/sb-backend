@@ -1,12 +1,12 @@
 from enum import StrEnum
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, Index, Integer, JSON, String, Text
-from sqlalchemy import ForeignKey, UniqueConstraint, Uuid
+from sqlalchemy import CheckConstraint, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.entity.base import TimestampMixin, UUIDPrimaryKeyMixin
+from app.entity.types import HyphenatedUUID
 
 
 class GenericStoryLanguage(StrEnum):
@@ -61,7 +61,7 @@ class GenericStoryContent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     generic_story_id: Mapped[UUID] = mapped_column(
-        Uuid(as_uuid=True),
+        HyphenatedUUID(),
         ForeignKey("generic_stories.id", ondelete="CASCADE"),
         nullable=False,
     )

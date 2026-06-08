@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, field_serializer
+from pydantic import BaseModel
 
 
 class GenericStoryWorkflowResponse(BaseModel):
@@ -37,11 +37,6 @@ class GenericStoryWorkflowResponse(BaseModel):
 
     model_config = {"from_attributes": True}
 
-    @field_serializer("generic_story_id", when_used="json")
-    def serialize_generic_story_id(self, value: UUID | None) -> str | None:
-        return value.hex if value else None
-
-
 class GenericStoryWorkflowListResponse(BaseModel):
     id: UUID
     workflow_name: str
@@ -67,11 +62,6 @@ class GenericStoryWorkflowListResponse(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
-
-    @field_serializer("generic_story_id", when_used="json")
-    def serialize_generic_story_id(self, value: UUID | None) -> str | None:
-        return value.hex if value else None
-
 
 class GenericStoryWorkflowStepDetailResponse(BaseModel):
     workflow_id: UUID

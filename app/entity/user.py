@@ -2,11 +2,12 @@ import enum
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, Integer, String, Uuid
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.entity.base import TimestampMixin, UUIDPrimaryKeyMixin
+from app.entity.types import HyphenatedUUID
 
 
 class AuthProvider(str, enum.Enum):
@@ -36,7 +37,11 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     failed_login_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    active_child_profile_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("child_profiles.id", use_alter=True), nullable=True)
+    active_child_profile_id: Mapped[UUID | None] = mapped_column(
+        HyphenatedUUID(),
+        ForeignKey("child_profiles.id", use_alter=True),
+        nullable=True,
+    )
 
     child_profiles = relationship(
         "ChildProfile",

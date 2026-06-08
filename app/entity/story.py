@@ -1,12 +1,13 @@
 from enum import Enum
 from uuid import UUID
 
-from sqlalchemy import Boolean, Enum as SAEnum, ForeignKey, Index, JSON, String, Text, UniqueConstraint, Uuid
+from sqlalchemy import Boolean, Enum as SAEnum, ForeignKey, Index, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.age_groups import AgeGroup
 from app.core.database import Base
 from app.entity.base import TimestampMixin, UUIDPrimaryKeyMixin
+from app.entity.types import HyphenatedUUID
 
 
 class StoryStatus(str, Enum):
@@ -40,10 +41,10 @@ class Story(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     # Ownership
     user_id: Mapped[UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+        HyphenatedUUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     child_id: Mapped[UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("child_profiles.id", ondelete="CASCADE"), nullable=False
+        HyphenatedUUID(), ForeignKey("child_profiles.id", ondelete="CASCADE"), nullable=False
     )
 
     # Story metadata
@@ -121,7 +122,7 @@ class StoryContent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     story_id: Mapped[UUID] = mapped_column(
-        Uuid(as_uuid=True),
+        HyphenatedUUID(),
         ForeignKey("stories.id", ondelete="CASCADE"),
         nullable=False,
     )

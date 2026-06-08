@@ -388,7 +388,7 @@ class GenericStoryWorkflowService:
         return [
             GenericStoryWorkflowStepDetailResponse(
                 workflow_id=workflow.id,
-                genric_story_id=self._compact_uuid(workflow.generic_story_id),
+                genric_story_id=self._uuid_string(workflow.generic_story_id),
                 step_name=step.value,
                 status=self._step_status(workflow, step),
                 summary=self._step_summary(workflow, step),
@@ -476,8 +476,6 @@ class GenericStoryWorkflowService:
             for key in (
                 "step_name",
                 "skip_image_generation",
-                "multi_image_mode",
-                "mutil_image_mode",
                 "skip_narration_generation",
                 "publish_status",
             )
@@ -487,14 +485,11 @@ class GenericStoryWorkflowService:
             legacy_request["publish_status"] = input_request["status"]
         if legacy_request:
             legacy_request.setdefault("skip_image_generation", False)
-            if "multi_image_mode" not in legacy_request and "mutil_image_mode" not in legacy_request:
-                legacy_request["multi_image_mode"] = True
             return GenericStoryWorkflowExecuteRequest.model_validate(legacy_request)
 
         return GenericStoryWorkflowExecuteRequest(
             step_name="ALL",
             skip_image_generation=False,
-            multi_image_mode=True,
             publish_status=input_request.get("status") if input_request.get("status") in {"active", "inactive"} else None,
         )
 
@@ -545,7 +540,6 @@ class GenericStoryWorkflowService:
                 requested_step=requested_step,
                 step_count=len(steps),
                 skip_image_generation=payload.skip_image_generation,
-                multi_image_mode=bool(getattr(payload, "multi_image_mode", False)),
                 skip_narration_generation=payload.skip_narration_generation,
             )
 
@@ -613,7 +607,7 @@ class GenericStoryWorkflowService:
                 )
                 await self.workflows.update(workflow)
                 await self.session.commit()
-                if step == GenericStoryWorkflowStep.IMAGE_GENERATION and bool(getattr(payload, "multi_image_mode", False)):
+                if step == GenericStoryWorkflowStep.IMAGE_GENERATION:
                     self._log_workflow_event(
                         "step_batch_submitted",
                         workflow,
@@ -929,15 +923,11 @@ class GenericStoryWorkflowService:
                 public_base_url=public_base_url,
                 copy_images=False,
             )
-            if bool(getattr(payload, "multi_image_mode", False)):
-                await self._generate_cover_and_submit_multi_image_pages(
-                    workflow,
-                    payload=payload,
-                    public_base_url=public_base_url,
-                )
-                self._apply_workflow_metadata(workflow)
-                return
-            await self._generate_images(workflow, public_base_url=public_base_url)
+            await self._generate_cover_and_submit_multi_image_pages(
+                workflow,
+                payload=payload,
+                public_base_url=public_base_url,
+            )
             self._apply_workflow_metadata(workflow)
             return
 
@@ -972,13 +962,6 @@ class GenericStoryWorkflowService:
                 workflow,
                 public_base_url=public_base_url,
                 copy_images=False,
-            )
-            return
-        if step == GenericStoryWorkflowStep.IMAGE_GENERATION and not bool(getattr(payload, "multi_image_mode", False)):
-            await self._sync_generic_story_from_workflow(
-                workflow,
-                public_base_url=public_base_url,
-                copy_images=True,
             )
             return
         if step == GenericStoryWorkflowStep.NARRATION_GENERATION:
@@ -1268,7 +1251,6 @@ class GenericStoryWorkflowService:
                 "mode": "generic_story_workflow_multi_image_pages",
                 "provider": "google",
                 "attempt": 1,
-                "multi_image_mode": True,
                 "items": self._multi_image_item_payloads(batch_items),
                 "rendered_prompts": self._multi_image_rendered_prompt_map(batch_items),
                 "prompt": pages_prompt,
@@ -3143,12 +3125,13 @@ class GenericStoryWorkflowService:
         return workflow
 
     @staticmethod
-    def _compact_uuid(value: Any) -> str | None:
+    def _uuid_string(value: Any) -> str | None:
         if value is None:
             return None
-        if isinstance(value, UUID):
-            return value.hex
-        return str(value).replace("-", "")
+        try:
+            return str(value if isinstance(value, UUID) else UUID(str(value)))
+        except (TypeError, ValueError):
+            return str(value)
 
     @staticmethod
     def _require(value: Any, message: str) -> None:

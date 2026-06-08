@@ -1,11 +1,12 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, Uuid
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.entity.base import TimestampMixin, UUIDPrimaryKeyMixin
+from app.entity.types import HyphenatedUUID
 
 
 class ChildBook(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -23,11 +24,11 @@ class ChildBook(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     child_id: Mapped[UUID] = mapped_column(
-        Uuid(as_uuid=True),
+        HyphenatedUUID(),
         ForeignKey("child_profiles.id", ondelete="CASCADE"),
         nullable=False,
     )
-    story_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    story_id: Mapped[UUID] = mapped_column(HyphenatedUUID(), nullable=False)
     story_type: Mapped[str] = mapped_column(String(32), nullable=False)
     language: Mapped[str] = mapped_column(String(2), nullable=False, default="en")
     title: Mapped[str] = mapped_column(String(255), nullable=False)

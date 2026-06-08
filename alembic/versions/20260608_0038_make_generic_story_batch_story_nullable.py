@@ -1,7 +1,7 @@
 """make generic story batch story nullable
 
 Revision ID: 20260608_0038
-Revises: 20260605_0034
+Revises: 20260607_0036
 Create Date: 2026-06-08
 """
 
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "20260608_0038"
-down_revision: str | None = "20260605_0034"
+down_revision: str | None = "20260607_0036"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

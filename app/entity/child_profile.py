@@ -1,11 +1,12 @@
 from datetime import date
 from uuid import UUID
 
-from sqlalchemy import Boolean, CheckConstraint, Date, ForeignKey, Index, Integer, JSON, String, Uuid
+from sqlalchemy import Boolean, CheckConstraint, Date, ForeignKey, Index, Integer, JSON, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.entity.base import TimestampMixin, UUIDPrimaryKeyMixin
+from app.entity.types import HyphenatedUUID
 
 
 class ChildProfile(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -18,7 +19,7 @@ class ChildProfile(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Index("ix_child_profiles_child_user_id", "child_user_id", unique=True),
     )
 
-    user_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[UUID] = mapped_column(HyphenatedUUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     first_name: Mapped[str] = mapped_column(String(60), nullable=False)
     last_name: Mapped[str] = mapped_column(String(60), nullable=False)
     dob: Mapped[date | None] = mapped_column(Date, nullable=True)

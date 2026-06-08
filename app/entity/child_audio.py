@@ -1,11 +1,12 @@
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, ForeignKey, Index, String, UniqueConstraint, Uuid
+from sqlalchemy import CheckConstraint, ForeignKey, Index, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.entity.base import TimestampMixin, UUIDPrimaryKeyMixin
 from app.entity.generic_audio import GenericAudioLanguage
+from app.entity.types import HyphenatedUUID
 
 
 class ChildAudio(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -22,12 +23,12 @@ class ChildAudio(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     child_id: Mapped[UUID] = mapped_column(
-        Uuid(as_uuid=True),
+        HyphenatedUUID(),
         ForeignKey("child_profiles.id", ondelete="CASCADE"),
         nullable=False,
     )
     audio_id: Mapped[UUID] = mapped_column(
-        Uuid(as_uuid=True),
+        HyphenatedUUID(),
         ForeignKey("generic_audios.id", ondelete="CASCADE"),
         nullable=False,
     )

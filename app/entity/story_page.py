@@ -1,10 +1,11 @@
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, Index, Integer, String, Text, Uuid
+from sqlalchemy import ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.entity.base import TimestampMixin, UUIDPrimaryKeyMixin
+from app.entity.types import HyphenatedUUID
 
 
 class StoryPage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -17,7 +18,7 @@ class StoryPage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     story_id: Mapped[UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("stories.id", ondelete="CASCADE"), nullable=False
+        HyphenatedUUID(), ForeignKey("stories.id", ondelete="CASCADE"), nullable=False
     )
 
     page_number: Mapped[int] = mapped_column(Integer, nullable=False)

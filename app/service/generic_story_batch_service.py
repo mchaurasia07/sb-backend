@@ -926,7 +926,6 @@ class GenericStoryBatchService:
         payload = GenericStoryWorkflowExecuteRequest(
             step_name="ALL",
             skip_image_generation=False,
-            multi_image_mode=False,
             skip_narration_generation=bool(request_payload.get("skip_narration_generation", True)),
             publish_status=request_payload.get("publish_status"),
         )

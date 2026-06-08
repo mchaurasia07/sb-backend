@@ -2,11 +2,12 @@ import enum
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, Integer, String, Uuid
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.entity.base import TimestampMixin, UUIDPrimaryKeyMixin
+from app.entity.types import HyphenatedUUID
 
 
 class OtpPurpose(str, enum.Enum):
@@ -23,7 +24,7 @@ class OtpVerification(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Index("ix_otp_expires_at", "expires_at"),
     )
 
-    user_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[UUID] = mapped_column(HyphenatedUUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     purpose: Mapped[OtpPurpose] = mapped_column(Enum(OtpPurpose), nullable=False)
     otp_hash: Mapped[str] = mapped_column(String(128), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
