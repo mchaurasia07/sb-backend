@@ -668,7 +668,12 @@ class GenericStoryWorkflowService:
                     code="GENERIC_STORY_WORKFLOW_RETRY_STEP_INVALID",
                 ) from exc
             if current_step in self.ORDERED_STEPS:
-                return current_step
+                if not self._step_is_complete(workflow, current_step):
+                    return current_step
+                current_index = self.ORDERED_STEPS.index(current_step)
+                for step in self.ORDERED_STEPS[current_index + 1 :]:
+                    if not self._step_is_complete(workflow, step):
+                        return step
 
         for step in self.ORDERED_STEPS:
             if not self._step_is_complete(workflow, step):
@@ -1264,7 +1269,8 @@ class GenericStoryWorkflowService:
                 "provider": "google",
                 "attempt": 1,
                 "multi_image_mode": True,
-                "items": batch_items,
+                "items": self._multi_image_item_payloads(batch_items),
+                "rendered_prompts": self._multi_image_rendered_prompt_map(batch_items),
                 "prompt": pages_prompt,
                 "aspect_ratio": settings.STORY_PAGE_ASPECT_RATIO,
                 "skip_narration_generation": payload.skip_narration_generation,
@@ -1385,6 +1391,34 @@ class GenericStoryWorkflowService:
         allowed_keys = ("page_number", "emotion")
         return {key: story_page[key] for key in allowed_keys if story_page.get(key) is not None}
 
+    @classmethod
+    def _multi_image_item_payloads(cls, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [cls._multi_image_item_payload(item) for item in items]
+
+    @staticmethod
+    def _multi_image_item_payload(item: dict[str, Any]) -> dict[str, Any]:
+        payload = {
+            "key": item.get("key"),
+            "item_id": item.get("item_id"),
+            "page_type": item.get("page_type"),
+            "page_number": item.get("page_number"),
+            "filename": item.get("filename"),
+            "aspect_ratio": item.get("aspect_ratio"),
+            "page_image_plan": item.get("page_image_plan") if isinstance(item.get("page_image_plan"), dict) else {},
+            "visual_context": item.get("visual_context"),
+            "story_page": item.get("story_page") if isinstance(item.get("story_page"), dict) else {},
+            "source_image_prompt": item.get("source_image_prompt"),
+        }
+        return {key: value for key, value in payload.items() if value is not None}
+
+    @staticmethod
+    def _multi_image_rendered_prompt_map(items: list[dict[str, Any]]) -> dict[str, str]:
+        return {
+            str(item["key"]): str(item["rendered_prompt"])
+            for item in items
+            if str(item.get("key") or "").strip() and str(item.get("rendered_prompt") or "").strip()
+        }
+
     def _render_multi_image_pages_prompt(
         self,
         *,
@@ -1415,7 +1449,7 @@ class GenericStoryWorkflowService:
                 "target_aspect_ratio": settings.STORY_PAGE_ASPECT_RATIO,
                 "item_count": len(page_items),
                 "item_order": "\n".join(f"- {item['key']}" for item in page_items),
-                "items_json": _compact_json(page_items),
+                "items_json": _compact_json(self._multi_image_item_payloads(page_items)),
                 "global_visual_context": _compact_json(global_visual_context),
             },
         )

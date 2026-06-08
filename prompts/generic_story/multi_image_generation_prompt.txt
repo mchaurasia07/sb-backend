@@ -31,7 +31,7 @@ Character consistency is mandatory:
 - Do not crop off heads, faces, hands, feet, tails, wings, fixed accessories, signature objects, or important objects.
 - Do not add unlisted main characters, side characters, family members, background people, animals, props, signs, or locations.
 
-Before generating each item, silently check page_image_plan.characters and page_image_plan.continuity_notes against scoped_visual_bible:
+Before generating each item, silently check page_image_plan.characters and page_image_plan.continuity_notes against visual_context:
 - same face and facial proportions
 - same hair/fur style and color
 - same skin/body color
@@ -71,14 +71,15 @@ Do not output any image before its IMAGE_ITEM marker.
 
 {items_json}
 
-Each item includes page_image_plan, image_plan_summary, limited non-prose story_page context, and scoped_visual_bible.
-Use page_image_plan and image_plan_summary as the source of truth for what to draw.
+Each item includes page_image_plan, source_image_prompt, limited non-prose story_page context, and visual_context.
+Use page_image_plan and source_image_prompt as the source of truth for what to draw.
 Use story_page only for page number or emotion context, not as text to render.
-Use scoped_visual_bible as the source of truth for character appearance, object appearance, location identity, and forbidden variations.
+Use visual_context as the source of truth for character appearance, object appearance, location identity, and forbidden variations.
 Use page_image_plan.characters as the exact visible-character allow-list for that item.
 Use page_image_plan.important_objects as the exact important-object allow-list for that item.
 Do not draw characters or objects that are not listed for that item.
 Respect page_image_plan.camera_shot, composition, emotion, environment, and continuity_notes.
+Use page_image_plan.allowed_in_scene_text as the complete allow-list for readable words on story pages.
 
 ---
 
@@ -92,10 +93,10 @@ cover:
 story_page:
 - Show one clear story moment from the item only.
 - Draw only the visible characters listed in page_image_plan.characters.
-- Keep every listed character visually consistent with scoped_visual_bible and page_image_plan.continuity_notes.
+- Keep every listed character visually consistent with visual_context and page_image_plan.continuity_notes.
 - Include text-safe negative space at bottom or sides.
 - Do not render story prose, narration text, captions, subtitles, title text, speech bubbles, floating text, UI text, or any top/bottom overlay text.
-- Readable text is allowed only when page_image_plan explicitly requires short in-scene object text, such as blackboard writing, a chair name label, a classroom sign, or a book cover inside the scene.
+- Readable text is allowed only when page_image_plan.allowed_in_scene_text explicitly lists short in-scene object text, such as blackboard writing, a chair name label, a classroom sign, or a book cover inside the scene.
 - Any allowed text must stay physically on that object. Do not place words in empty wall/sky/background/negative space as a caption.
 
 back_cover:

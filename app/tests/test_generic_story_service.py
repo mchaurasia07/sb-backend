@@ -16,6 +16,7 @@ class _FakeGenericStoryRepository:
         self.requested_ids = []
         self.flush_called = False
         self.updated_content = None
+        self.updated_contents = []
 
     async def get_by_id(self, generic_story_id):
         self.requested_ids.append(generic_story_id)
@@ -30,6 +31,7 @@ class _FakeGenericStoryRepository:
 
     async def update_content(self, content):
         self.updated_content = content
+        self.updated_contents.append(content)
         return content
 
     async def flush(self):
@@ -134,6 +136,69 @@ async def test_update_generic_story_page_text_updates_only_requested_page_text()
     assert service.generic_stories.updated_content is story.contents[0]
     assert response.language == "en"
     assert response.story_json["pages"] == pages
+
+
+class _FakeUpload:
+    def __init__(self, content: bytes = b"image-bytes", filename: str = "page.png", content_type: str = "image/png"):
+        self._content = content
+        self.filename = filename
+        self.content_type = content_type
+
+    async def read(self):
+        return self._content
+
+
+class _FakeImageStorage:
+    def __init__(self):
+        self.saved_images = []
+        self.saved_reduced_images = []
+
+    async def save_story_image(self, story_id, image_bytes, filename, public_base_url):
+        self.saved_images.append((story_id, image_bytes, filename, public_base_url))
+        return f"https://cdn.example.test/stories/{story_id}/{filename}"
+
+    async def save_story_reduced_image(self, story_id, image_bytes, filename, public_base_url):
+        self.saved_reduced_images.append((story_id, image_bytes, filename, public_base_url))
+        return f"https://cdn.example.test/stories/{story_id}/reduced/{filename}"
+
+
+@pytest.mark.asyncio
+async def test_update_generic_story_page_images_updates_all_languages_without_text_changes(monkeypatch):
+    story = _generic_story()
+    story.contents.append(
+        SimpleNamespace(
+            language="hi",
+            story_json={
+                "title": "Chaand ki Ghanti",
+                "pages": [
+                    {"page_number": 1, "text": "Mira ne purani ghanti suni.", "image_url": "old-page-1"},
+                    {"page_number": 2, "text": "Chaand dheere chamka."},
+                ],
+            },
+        )
+    )
+    storage = _FakeImageStorage()
+    monkeypatch.setattr("app.service.generic_story_service.get_image_storage_service", lambda: storage)
+    monkeypatch.setattr("app.service.generic_story_service.optimize_display_image", lambda content, filename: b"reduced")
+    service = GenericStoryService.__new__(GenericStoryService)
+    service.generic_stories = _FakeGenericStoryRepository(story)
+
+    response = await service.update_page_images(
+        story.id,
+        {"page_1": _FakeUpload()},
+        language="en",
+        public_base_url="https://api.example.test",
+    )
+
+    image_url = f"https://cdn.example.test/stories/{story.id}/page_1.png"
+    assert storage.saved_images == [(story.id, b"image-bytes", "page_1.png", "https://api.example.test")]
+    assert storage.saved_reduced_images == [(story.id, b"reduced", "page_1.png", "https://api.example.test")]
+    assert story.contents[0].story_json["pages"][0]["text"] == "Mira heard the old bell."
+    assert story.contents[0].story_json["pages"][0]["image_url"] == image_url
+    assert story.contents[1].story_json["pages"][0]["text"] == "Mira ne purani ghanti suni."
+    assert story.contents[1].story_json["pages"][0]["image_url"] == image_url
+    assert service.generic_stories.updated_contents == story.contents
+    assert response.story_json["pages"][0]["image_url"] == image_url
 
 
 @pytest.mark.asyncio

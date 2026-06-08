@@ -695,7 +695,17 @@ class GenericStoryBatchService:
                 "Generic workflow multi-image batch has no request items.",
                 code="GENERIC_WORKFLOW_MULTI_IMAGE_ITEMS_MISSING",
             )
-        items = [item for item in raw_items if isinstance(item, dict) and str(item.get("key") or "").strip()]
+        rendered_prompts = request_payload.get("rendered_prompts")
+        rendered_prompts_by_key = rendered_prompts if isinstance(rendered_prompts, dict) else {}
+        items = []
+        for item in raw_items:
+            if not isinstance(item, dict) or not str(item.get("key") or "").strip():
+                continue
+            normalized_item = dict(item)
+            key = str(normalized_item["key"])
+            if not normalized_item.get("rendered_prompt") and rendered_prompts_by_key.get(key):
+                normalized_item["rendered_prompt"] = rendered_prompts_by_key[key]
+            items.append(normalized_item)
         if len(items) != len(raw_items):
             raise AppException(
                 "Generic workflow multi-image batch request items are invalid.",

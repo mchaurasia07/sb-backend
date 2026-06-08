@@ -125,6 +125,10 @@ Use recurring visual elements from Actual Story when they matter, such as a tree
 
 Vary shot_type and composition enough to avoid repeated-looking pages, while keeping the book visually coherent.
 
+Interior story pages must not include title areas, caption areas, subtitles, narration text, page text, typography, floating text, or top/bottom overlay text in scene_summary, image_brief, visual_focus, or visual_direction.
+
+Readable text on interior pages is allowed only when it is a physical object inside the scene, such as blackboard writing, chair labels, classroom signs, or book covers. If such text matters visually, describe it as object-bound text only.
+
 # CHARACTER AND VISUAL CONTINUITY RULES
 
 Use Character Analysis JSON as the canonical source for character names, roles, relationships, and stable identity.
@@ -222,4 +226,5 @@ Do not describe or redesign character appearances in scene_summary, visual_focus
 9. visual_direction must include shot_type, composition, focal_subject, lighting, mood, and key_visual_elements.
 10. visual_direction must use children's picture-book illustration language, not technical film jargon.
 11. Do not include character appearance descriptions or redesign characters.
-12. Return STRICT VALID JSON ONLY: no markdown, explanations, comments, or text outside JSON.
+12. Story-page visual_direction, image_brief, and scene_summary must not include cover, title-area, caption-area, subtitle, page-text, typography, or overlay-text instructions.
+13. Return STRICT VALID JSON ONLY: no markdown, explanations, comments, or text outside JSON.

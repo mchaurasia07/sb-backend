@@ -166,6 +166,9 @@ def test_scene_plan_prompt_does_not_accept_requested_pages_override():
     assert '"visual_direction": {' in prompt
     assert '"shot_type": "close-up|medium scene|wide scene|overhead view|group scene"' in prompt
     assert '"focal_subject": ""' in prompt
+    assert "Interior story pages must not include title areas" in prompt
+    assert "Readable text on interior pages is allowed only when it is a physical object inside the scene" in prompt
+    assert "Story-page visual_direction, image_brief, and scene_summary must not include cover" in prompt
     assert '"key_visual_elements": []' in prompt
     assert "Every page must include image_brief and visual_direction." in prompt
     assert "technical film jargon" in prompt
@@ -319,6 +322,9 @@ def test_image_plan_prompt_uses_story_json_page_count_as_source_of_truth():
     assert "Do not ignore scene_plan.pages[].image_brief or scene_plan.pages[].visual_direction" in prompt
     assert "Convert scene_plan.pages[].visual_direction into concrete image-plan camera_shot" in prompt
     assert "image-plan camera_shot, composition, visual_focus, environment, and continuity_notes must reflect it" in prompt
+    assert '"allowed_in_scene_text": []' in prompt
+    assert "allowed_in_scene_text is the only place to request readable text on story pages" in prompt
+    assert "Page composition, visual_focus, environment, and continuity_notes must not mention title area" in prompt
     assert "scene_plan.cinematography" not in prompt
 
 
@@ -418,6 +424,7 @@ async def test_generate_image_plan_prompt_includes_story_page_count_and_numbers(
     assert "Story JSON Page Count:\n2" in captured["prompt"]
     assert "Story JSON Page Numbers:\n[1, 2]" in captured["prompt"]
     assert "Story JSON is the source of truth for page count" in captured["prompt"]
+    assert '"allowed_in_scene_text": []' in captured["prompt"]
     assert captured["max_tokens"] == 16000
 
 
@@ -819,6 +826,9 @@ def test_multi_image_page_items_remove_story_text_from_image_context():
 
     assert items[0]["story_page"] == {"page_number": 1, "emotion": "kindness"}
     assert "text" not in items[0]["story_page"]
+    compact_items = service._multi_image_item_payloads(items)
+    assert "rendered_prompt" not in compact_items[0]
+    assert compact_items[0]["page_image_plan"] == items[0]["page_image_plan"]
 
 
 def test_multi_image_prompt_forbids_caption_text_but_allows_planned_in_scene_text():
@@ -836,9 +846,10 @@ def test_multi_image_prompt_forbids_caption_text_but_allows_planned_in_scene_tex
                     "visual_focus": "Children listen in class.",
                     "important_objects": ["blackboard writing", "chair name labels"],
                 },
-                "image_plan_summary": "Classroom scene with blackboard.",
+                "source_image_prompt": "Classroom scene with blackboard.",
                 "story_page": {"page_number": 1, "emotion": "happy"},
-                "scoped_visual_bible": {},
+                "visual_context": "Saavi model sheet.",
+                "rendered_prompt": "full nested prompt should not be included",
             }
         ],
     )
@@ -846,7 +857,33 @@ def test_multi_image_prompt_forbids_caption_text_but_allows_planned_in_scene_tex
     assert "Do not render story prose" in prompt
     assert "top/bottom overlay text" in prompt
     assert "blackboard writing, a chair name label" in prompt
+    assert "page_image_plan.allowed_in_scene_text" in prompt
+    assert "visual_context as the source of truth" in prompt
+    assert "source_image_prompt as the source of truth" in prompt
+    assert "scoped_visual_bible" not in prompt
+    assert "full nested prompt should not be included" not in prompt
     assert "Do not place words in empty wall/sky/background/negative space as a caption" in prompt
+
+
+def test_workflow_multi_image_payload_merges_rendered_prompt_metadata():
+    service = GenericStoryBatchService.__new__(GenericStoryBatchService)
+    job = SimpleNamespace(request_keys=["page_1"])
+    payload = {
+        "items": [
+            {
+                "key": "page_1",
+                "page_type": "story_page",
+                "page_number": 1,
+                "source_image_prompt": "planned page prompt",
+            }
+        ],
+        "rendered_prompts": {"page_1": "full rendered page prompt"},
+    }
+
+    items = service._workflow_multi_image_items_from_payload(job, payload)
+
+    assert items[0]["rendered_prompt"] == "full rendered page prompt"
+    assert items[0]["source_image_prompt"] == "planned page prompt"
 
 
 def test_generic_batch_cover_prompt_uses_current_image_prompt_contract():
@@ -1842,8 +1879,22 @@ async def test_multi_image_mode_submits_single_bulk_batch_request():
     workflow_id = uuid4()
     generic_story_id = uuid4()
     page_items = [
-        {"key": "page_1", "page_number": 1, "filename": "page_1.png"},
-        {"key": "page_2", "page_number": 2, "filename": "page_2.png"},
+        {
+            "key": "page_1",
+            "page_number": 1,
+            "filename": "page_1.png",
+            "page_type": "story_page",
+            "page_image_plan": {"page": 1, "allowed_in_scene_text": []},
+            "rendered_prompt": "full page 1 prompt",
+        },
+        {
+            "key": "page_2",
+            "page_number": 2,
+            "filename": "page_2.png",
+            "page_type": "story_page",
+            "page_image_plan": {"page": 2, "allowed_in_scene_text": []},
+            "rendered_prompt": "full page 2 prompt",
+        },
     ]
     created_payloads = []
     created_jobs = []
@@ -1907,7 +1958,12 @@ async def test_multi_image_mode_submits_single_bulk_batch_request():
     assert created_jobs[0]["generic_story_id"] == generic_story_id
     assert created_payloads[0]["mode"] == "generic_story_workflow_multi_image_pages"
     assert created_payloads[0]["multi_image_mode"] is True
-    assert created_payloads[0]["items"] == page_items
+    assert [item["key"] for item in created_payloads[0]["items"]] == ["page_1", "page_2"]
+    assert all("rendered_prompt" not in item for item in created_payloads[0]["items"])
+    assert created_payloads[0]["rendered_prompts"] == {
+        "page_1": "full page 1 prompt",
+        "page_2": "full page 2 prompt",
+    }
     assert created_payloads[0]["skip_narration_generation"] is True
     assert created_payloads[0]["publish_status"] == "active"
     assert created_payloads[0]["continue_after_image_generation"] is False
@@ -2113,6 +2169,19 @@ async def test_retry_failed_workflow_with_no_current_step_uses_first_incomplete_
     )
 
     assert calls[0] == GenericStoryWorkflowStep.IMAGE_PLAN_GENERATION
+
+
+def test_retry_start_step_skips_completed_stale_current_step():
+    workflow = _retry_workflow(
+        current_step="SCENE_PLAN_GENERATION",
+        scene_plan_json={"pages": [{"page": 1}]},
+        visual_bible_json={"characters": [{"name": "Mira"}]},
+        story_json={"title": "The Moon Bell", "pages": [{"page_number": 1, "text": "Mira listened."}]},
+        image_plan_json=None,
+    )
+    service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
+
+    assert service._retry_start_step(workflow) == GenericStoryWorkflowStep.IMAGE_PLAN_GENERATION
 
 
 @pytest.mark.parametrize("retry_status", ["FAILED", "IN_PROGRESS"])

@@ -1,6 +1,6 @@
+import logging
 from typing import Literal
 from uuid import UUID
-import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Query, Request, Response, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -75,6 +75,26 @@ def _content_type_for_extension(extension: str) -> str:
         ".png": "image/png",
         ".webp": "image/webp",
     }.get(extension.lower(), "application/octet-stream")
+
+
+def _is_upload_value(value) -> bool:
+    return hasattr(value, "read") and hasattr(value, "filename")
+
+
+async def _read_uploads_from_form(request: Request, *, duplicate_code: str) -> dict[str, UploadFile]:
+    form = await request.form()
+    uploads: dict[str, UploadFile] = {}
+    for field_name, value in form.multi_items():
+        if not _is_upload_value(value):
+            continue
+        normalized_field_name = str(field_name).strip()
+        if normalized_field_name in uploads:
+            raise AppException(
+                f"Duplicate upload field: {normalized_field_name}",
+                code=duplicate_code,
+            )
+        uploads[normalized_field_name] = value
+    return uploads
 
 
 async def send_new_generic_story_notification_background(*, story_id: UUID, title: str) -> None:
@@ -489,6 +509,27 @@ async def update_generic_story_page_text(
 ) -> ApiResponse[GenericStoryResponse]:
     data = await GenericStoryService(session).update_page_text(generic_story_id, payload, language=language)
     return success_response(data, "Generic story retrieved successfully")
+
+
+@router.patch("/{generic_story_id}/content/page-images", response_model=ApiResponse[GenericStoryResponse])
+async def update_generic_story_page_images(
+    generic_story_id: UUID,
+    request: Request,
+    language: str = Query("en", min_length=2, max_length=16),
+    _: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[GenericStoryResponse]:
+    page_image_uploads = await _read_uploads_from_form(
+        request,
+        duplicate_code="GENERIC_STORY_PAGE_IMAGE_DUPLICATE_FIELD",
+    )
+    data = await GenericStoryService(session).update_page_images(
+        generic_story_id,
+        page_image_uploads,
+        language=language,
+        public_base_url=str(request.base_url).rstrip("/"),
+    )
+    return success_response(data, "Generic story page images updated successfully")
 
 
 @router.get("/{generic_story_id}", response_model=ApiResponse[GenericStoryResponse])

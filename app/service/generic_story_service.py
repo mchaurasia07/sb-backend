@@ -1,8 +1,12 @@
 from copy import deepcopy
+from pathlib import Path
+from typing import Any
 from uuid import UUID
 
+from fastapi import UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.exceptions import AppException, NotFoundException
 from app.entity.generic_story import GenericStory
 from app.model.request.generic_story import (
@@ -19,9 +23,17 @@ from app.model.response.generic_story import (
 from app.model.response.story_content import StoryContentResponse
 from app.repository.child_book_repository import ChildBookRepository
 from app.repository.generic_story_repository import GenericStoryRepository
+from app.service.image_optimizer import optimize_display_image
+from app.service.image_storage_provider import get_image_storage_service
 
 
 DEFAULT_GENERIC_STORY_LANGUAGE = "en"
+PAGE_IMAGE_CONTENT_TYPES = {
+    "image/jpeg": ".jpg",
+    "image/jpg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+}
 
 
 class GenericStoryService:
@@ -154,17 +166,84 @@ class GenericStoryService:
             if isinstance(page, dict) and (page_number := self._story_page_number(page)) is not None
         }
         for item in payload.pages:
-            page = pages_by_number.get(item.page_number)
-            if page is None:
-                raise AppException(
-                    f"Generic story page {item.page_number} not found",
-                    code="GENERIC_STORY_PAGE_NOT_FOUND",
-                    details={"page_number": item.page_number, "language": normalized_language},
-                )
-            page["text"] = item.text
+            self._require_story_page(pages_by_number, item.page_number, normalized_language)
+            pages_by_number[item.page_number]["text"] = item.text
 
         content.story_json = story_json
         await self.generic_stories.update_content(content)
+
+        generic_story = await self.generic_stories.get_by_id(generic_story_id)
+        if generic_story is None:
+            raise NotFoundException("Generic story not found", "GENERIC_STORY_NOT_FOUND")
+        return self._to_response(generic_story, language=normalized_language)
+
+    async def update_page_images(
+        self,
+        generic_story_id: UUID,
+        page_image_uploads: dict[str, UploadFile],
+        language: str = DEFAULT_GENERIC_STORY_LANGUAGE,
+        *,
+        public_base_url: str = "",
+    ) -> GenericStoryResponse:
+        normalized_language = language.strip().lower()
+        page_uploads = self._extract_page_image_uploads(page_image_uploads)
+        if not page_uploads:
+            raise AppException(
+                "At least one page image upload is required",
+                code="GENERIC_STORY_PAGE_IMAGE_UPLOAD_REQUIRED",
+            )
+
+        content = await self.generic_stories.get_content_by_story_and_language(
+            generic_story_id=generic_story_id,
+            language=normalized_language,
+        )
+        if content is None:
+            raise NotFoundException("Generic story content not found", "GENERIC_STORY_CONTENT_NOT_FOUND")
+
+        story_json = deepcopy(content.story_json)
+        pages = story_json.get("pages") if isinstance(story_json, dict) else None
+        if not isinstance(pages, list):
+            raise AppException(
+                "Generic story content has no pages array",
+                code="GENERIC_STORY_CONTENT_PAGES_MISSING",
+            )
+
+        pages_by_number = {
+            page_number: page
+            for page in pages
+            if isinstance(page, dict) and (page_number := self._story_page_number(page)) is not None
+        }
+        for page_number in page_uploads:
+            self._require_story_page(pages_by_number, page_number, normalized_language)
+
+        image_storage = get_image_storage_service()
+        page_image_urls: dict[int, str] = {}
+        for page_number, upload in page_uploads.items():
+            page_image_urls[page_number] = await self._save_uploaded_page_image(
+                image_storage,
+                story_id=generic_story_id,
+                page_number=page_number,
+                upload=upload,
+                public_base_url=public_base_url,
+            )
+
+        generic_story = await self.generic_stories.get_by_id(generic_story_id)
+        if generic_story is None:
+            raise NotFoundException("Generic story not found", "GENERIC_STORY_NOT_FOUND")
+
+        for story_content in generic_story.contents:
+            content_story_json = deepcopy(story_content.story_json)
+            if isinstance(content_story_json, dict):
+                self._apply_page_image_urls(content_story_json, page_image_urls)
+                story_content.story_json = content_story_json
+                await self.generic_stories.update_content(story_content)
+                if str(story_content.language).lower() == normalized_language:
+                    story_json = content_story_json
+            elif str(story_content.language).lower() == normalized_language:
+                raise AppException(
+                    "Generic story content has no pages array",
+                    code="GENERIC_STORY_CONTENT_PAGES_MISSING",
+                )
 
         generic_story = await self.generic_stories.get_by_id(generic_story_id)
         if generic_story is None:
@@ -228,6 +307,116 @@ class GenericStoryService:
         if isinstance(raw_page_number, str) and raw_page_number.strip().isdigit():
             return int(raw_page_number.strip())
         return None
+
+    @classmethod
+    def _require_story_page(
+        cls,
+        pages_by_number: dict[int, dict],
+        page_number: int,
+        language: str,
+    ) -> dict:
+        page = pages_by_number.get(page_number)
+        if page is None:
+            raise AppException(
+                f"Generic story page {page_number} not found",
+                code="GENERIC_STORY_PAGE_NOT_FOUND",
+                details={"page_number": page_number, "language": language},
+            )
+        return page
+
+    @classmethod
+    def _extract_page_image_uploads(cls, uploads: dict[str, UploadFile]) -> dict[int, UploadFile]:
+        page_uploads: dict[int, UploadFile] = {}
+        for field_name, upload in uploads.items():
+            page_number = cls._page_image_upload_number(field_name)
+            if page_number is None:
+                continue
+            if page_number in page_uploads:
+                raise AppException(
+                    f"Duplicate image upload provided for page {page_number}",
+                    code="GENERIC_STORY_PAGE_IMAGE_DUPLICATE",
+                )
+            page_uploads[page_number] = upload
+        return page_uploads
+
+    @staticmethod
+    def _page_image_upload_number(field_name: str) -> int | None:
+        normalized = field_name.strip().lower()
+        candidates = []
+        if normalized.startswith("page_image_"):
+            candidates.append(normalized.removeprefix("page_image_"))
+        if normalized.startswith("image_page_"):
+            candidates.append(normalized.removeprefix("image_page_"))
+        if normalized.startswith("page_"):
+            candidates.append(normalized.removeprefix("page_").removesuffix("_image"))
+        if normalized.startswith("page"):
+            candidates.append(normalized.removeprefix("page").removesuffix("_image"))
+
+        for candidate in candidates:
+            if candidate.isdigit():
+                page_number = int(candidate)
+                if page_number > 0:
+                    return page_number
+        return None
+
+    @classmethod
+    async def _save_uploaded_page_image(
+        cls,
+        image_storage: Any,
+        *,
+        story_id: UUID,
+        page_number: int,
+        upload: UploadFile,
+        public_base_url: str,
+    ) -> str:
+        extension = cls._upload_image_extension(upload)
+        content = await upload.read()
+        if not content:
+            raise AppException("Image file is empty", status.HTTP_400_BAD_REQUEST, "EMPTY_IMAGE")
+        if len(content) > settings.IMAGE_MAX_UPLOAD_BYTES:
+            raise AppException(
+                "Image must be 5 MB or smaller",
+                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                "IMAGE_TOO_LARGE",
+            )
+
+        filename = f"page_{page_number}{extension}"
+        image_url = await image_storage.save_story_image(story_id, content, filename, public_base_url)
+        reduced_content = optimize_display_image(content, filename)
+        await image_storage.save_story_reduced_image(story_id, reduced_content, filename, public_base_url)
+        return image_url
+
+    @staticmethod
+    def _upload_image_extension(upload: UploadFile) -> str:
+        content_type = str(upload.content_type or "").lower()
+        if content_type in PAGE_IMAGE_CONTENT_TYPES:
+            return PAGE_IMAGE_CONTENT_TYPES[content_type]
+
+        suffix = Path(upload.filename or "").suffix.lower()
+        if suffix in set(PAGE_IMAGE_CONTENT_TYPES.values()):
+            return suffix
+
+        raise AppException(
+            "Image must be a JPEG, PNG, or WEBP file",
+            status.HTTP_400_BAD_REQUEST,
+            "UNSUPPORTED_IMAGE_TYPE",
+        )
+
+    @classmethod
+    def _apply_page_image_urls(cls, story_json: dict[str, Any], page_image_urls: dict[int, str]) -> None:
+        if not page_image_urls:
+            return
+        pages = story_json.get("pages") if isinstance(story_json, dict) else None
+        if not isinstance(pages, list):
+            return
+        for index, page in enumerate(pages, start=1):
+            if not isinstance(page, dict):
+                continue
+            page_number = cls._story_page_number(page) or index
+            image_url = page_image_urls.get(page_number)
+            if image_url:
+                page["image_url"] = image_url
+                page.pop("image_dummy", None)
 
     @staticmethod
     def _to_response(

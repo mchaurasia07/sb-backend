@@ -68,6 +68,10 @@ Pages:
 * Avoid adding unnamed background characters. If a crowd is required, keep it simple and never let background figures resemble or replace named characters.
 * Show clear emotion, strong focal point, varied framing, child-friendly age-appropriate composition.
 * Avoid repeated poses, nursery/mat setups, object layouts, or character groups unless the scene repeats them.
+* Story pages must not request title text, top text, captions, subtitles, narration text, story prose, floating text, UI text, or overlay text.
+* allowed_in_scene_text is the only place to request readable text on story pages. Default it to [].
+* Populate allowed_in_scene_text only for short physical object-bound text explicitly needed in the scene, such as "blackboard: HAPPY RAKHI CELEBRATION", "chair labels: Saavi, Myra, Aarav", "classroom sign: Welcome", or "book cover: Neem Care".
+* If allowed_in_scene_text is empty, the page must contain no readable text.
 
 Camera shot values: wide, medium, closeup, overhead, low_angle, eye_level.
 
@@ -101,6 +105,7 @@ Camera shot values: wide, medium, closeup, overhead, low_angle, eye_level.
 "emotion": "",
 "characters": [],
 "important_objects": [],
+"allowed_in_scene_text": [],
 "continuity_notes": []
 }
 ]
@@ -115,6 +120,8 @@ visual_focus: single most important illustration moment.
 composition: visual layout, for example "Hero in left foreground, treasure map centered, forest path leading into background."
 
 environment: brief setting description.
+
+allowed_in_scene_text: readable text that may appear physically on scene objects only. Use [] unless the page explicitly needs object-bound text such as blackboard writing, chair labels, classroom signs, or book covers. Do not use this for captions, title text, story prose, narration, subtitles, floating text, or top/bottom overlay text.
 
 continuity_notes: character/object/location continuity only; must not add characters or objects outside characters/important_objects.
 Include visual_direction continuity when relevant, such as recurring visual element, lighting, mood, composition, or important object continuity.
@@ -140,5 +147,7 @@ For side characters, use the same format and the same strictness as the hero.
 12. Every visible named character on every page has continuity_notes covering face, hair/fur, outfit/color, fixed accessories, body scale/age/species, and forbidden variations when present.
 13. Side characters must have the same level of continuity detail as the hero.
 14. When Scene Plan page visual_direction is present, image-plan camera_shot, composition, visual_focus, environment, and continuity_notes must reflect it.
-15. Do not redesign characters or modify Visual Bible appearance details.
-16. Return STRICT VALID JSON ONLY.
+15. Every page must include allowed_in_scene_text, defaulting to [].
+16. Page composition, visual_focus, environment, and continuity_notes must not mention title area, caption area, top text, subtitles, story prose, narration text, typography, or overlay text unless the text is short object-bound text listed in allowed_in_scene_text.
+17. Do not redesign characters or modify Visual Bible appearance details.
+18. Return STRICT VALID JSON ONLY.
