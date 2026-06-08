@@ -23,9 +23,19 @@ Actual Story:
 Character Analysis JSON:
 {character_analysis_json}
 
+# RAW STORY HANDLING
+
+Actual Story may be raw copied text with dialogue, repeated lines, location changes, emotional moments, moral text, or imperfect pasted punctuation/encoding.
+
+Treat Actual Story as the main source of truth for story meaning, emotional beats, locations, transitions, objects, and visual motifs.
+
+Do not mechanically split the raw story by paragraph length. Split by meaningful story beats, visual moments, location/time changes, emotional turns, and page-turn rhythm.
+
+If the raw story includes copied punctuation artifacts or broken quote characters, infer the intended dialogue and story meaning, but do not output those artifacts.
+
 # ADAPTATION METHOD
 
-Before planning pages, silently identify: beginning, major beats, age-appropriate problem if present, turning points, climax if present, resolution, moral, story complexity, adaptation_type, optimal page count, and scene boundaries. Do not output this analysis.
+Before planning pages, silently identify: beginning, major beats, age-appropriate problem if present, turning points, climax if present, resolution, moral, story complexity, adaptation_type, optimal page count, scene boundaries, visual motifs, and visual storytelling needs. Do not output this analysis.
 
 Select page count by story complexity. Use fewer pages for very short/simple stories and more pages when many beats, locations, or emotional transitions matter. Use this mapping only: 0-3 = 8-9 pages, 3-6 = 8-10 pages, 6-9 = 10-12 pages.
 
@@ -97,6 +107,42 @@ Continuity should evolve naturally.
 Characters, goals, emotions, objects, and location states should carry forward when still relevant.
 Do not repeat continuity items that are no longer important to the story.
 
+# VISUAL STORYTELLING GUIDANCE
+
+For every page, include concise illustration-oriented visual guidance.
+
+Use children's picture-book language, not film-industry terminology.
+
+visual_direction should help the image planner understand how to stage the scene while keeping the story clean.
+
+Use simple shot_type values such as: close-up, medium scene, wide scene, overhead view, group scene.
+
+Avoid complex cinema jargon, technical camera settings, lens specifications, and movie-storyboard language.
+
+visual_direction must support only the current page scene. Do not preview future events or add characters, objects, actions, or locations.
+
+Use recurring visual elements from Actual Story when they matter, such as a tree, leaf, rakhi thread, classroom board, park bench, water bottle, moonlight, flowers, lamps, or repeated sound/motion.
+
+Vary shot_type and composition enough to avoid repeated-looking pages, while keeping the book visually coherent.
+
+# CHARACTER AND VISUAL CONTINUITY RULES
+
+Use Character Analysis JSON as the canonical source for character names, roles, relationships, and stable identity.
+
+For each page, characters must list only characters physically visible in that page. Use exact canonical names from Character Analysis JSON whenever available.
+
+Do not use vague group labels such as "family", "friends", "children", "villagers", or "classmates" when named characters are known. List the visible named characters instead.
+
+Side characters, helpers, parents, grandparents, friends, classmates, animals, and antagonists must remain the same people across all pages where they appear.
+
+continuity.characters must include every visible named character whose identity, relationship, outfit, accessory, body scale, or emotional state should remain consistent into or from that page.
+
+If a recurring side character appears on multiple pages, carry that character through continuity.characters with the same name each time.
+
+Do not introduce new background people or side characters only to make an image fuller. Add unnamed background figures only if the source story or scene clearly requires them.
+
+Do not describe or redesign character appearances in scene_summary, visual_focus, or main_action. The Visual Bible handles appearance. Scene Plan should preserve who appears and what they do.
+
 # OUTPUT JSON
 
 {
@@ -143,6 +189,15 @@ Do not repeat continuity items that are no longer important to the story.
 "main_action": "",
 "emotion": "",
 "visual_focus": "",
+"image_brief": "",
+"visual_direction": {
+  "shot_type": "close-up|medium scene|wide scene|overhead view|group scene",
+  "composition": "",
+  "focal_subject": "",
+  "lighting": "",
+  "mood": "",
+  "key_visual_elements": []
+},
 "source_connection": "",
 "page_turn_hook": "",
 "continuity": {
@@ -162,5 +217,9 @@ Do not repeat continuity items that are no longer important to the story.
 4. story_role must use only the selected age group's story_role values; roles may repeat when the source story requires it.
 5. Every page must be continuous, visually illustratable, and story-moving.
 6. Every page must include continuity.characters, continuity.objects, and continuity.location_state arrays.
-7. Do not include character appearance descriptions or redesign characters.
-8. Return STRICT VALID JSON ONLY: no markdown, explanations, comments, or text outside JSON.
+7. Every visible named character must use the same canonical name across pages.
+8. Every page must include image_brief and visual_direction.
+9. visual_direction must include shot_type, composition, focal_subject, lighting, mood, and key_visual_elements.
+10. visual_direction must use children's picture-book illustration language, not technical film jargon.
+11. Do not include character appearance descriptions or redesign characters.
+12. Return STRICT VALID JSON ONLY: no markdown, explanations, comments, or text outside JSON.

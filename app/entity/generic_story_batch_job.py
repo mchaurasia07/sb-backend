@@ -17,13 +17,14 @@ class GenericStoryBatchJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Index("ix_generic_story_batch_jobs_workflow_id", "workflow_id"),
         Index("ix_generic_story_batch_jobs_provider_job_name", "provider_job_name"),
         Index("ix_generic_story_batch_jobs_status", "status"),
+        Index("ix_generic_story_batch_jobs_status_updated_at", "status", "updated_at"),
         Index("ix_generic_story_batch_jobs_job_type", "job_type"),
     )
 
-    generic_story_id: Mapped[UUID] = mapped_column(
+    generic_story_id: Mapped[UUID | None] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("generic_stories.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
     )
     workflow_id: Mapped[UUID] = mapped_column(
         Uuid(as_uuid=True),

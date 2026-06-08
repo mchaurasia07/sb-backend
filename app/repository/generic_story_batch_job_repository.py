@@ -17,7 +17,7 @@ class GenericStoryBatchJobRepository:
     async def create(
         self,
         *,
-        generic_story_id: UUID,
+        generic_story_id: UUID | None,
         workflow_id: UUID,
         job_type: StoryBatchJobType,
         attempt: int,
@@ -75,8 +75,8 @@ class GenericStoryBatchJobRepository:
         return result.scalar_one_or_none()
 
     async def list_reconcilable(self, limit: int = 50) -> list[GenericStoryBatchJob]:
-        result = await self.session.execute(
-            select(GenericStoryBatchJob)
+        id_result = await self.session.execute(
+            select(GenericStoryBatchJob.id)
             .where(
                 GenericStoryBatchJob.status.in_(
                     [
@@ -88,6 +88,15 @@ class GenericStoryBatchJobRepository:
             )
             .order_by(GenericStoryBatchJob.updated_at.asc())
             .limit(limit)
+        )
+        job_ids = list(id_result.scalars().all())
+        if not job_ids:
+            return []
+
+        result = await self.session.execute(
+            select(GenericStoryBatchJob)
+            .where(GenericStoryBatchJob.id.in_(job_ids))
+            .order_by(GenericStoryBatchJob.updated_at.asc())
         )
         return list(result.scalars().all())
 

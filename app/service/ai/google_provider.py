@@ -12,7 +12,9 @@ from app.core.config import settings
 from app.core.exceptions import AppException
 from app.service.ai.base import (
     AIProvider,
+    GeneratedImagePart,
     ImageGenerationResult,
+    MultiImageGenerationResult,
     TextGenerationResult,
     parse_base64_image_data,
 )
@@ -101,24 +103,57 @@ class GoogleProvider(AIProvider):
 
     @staticmethod
     def _extract_image_from_content_response(response: types.GenerateContentResponse) -> tuple[bytes, str | None]:
-        text_parts: list[str] = []
-        for part in response.parts or []:
-            if part.text:
-                text_parts.append(part.text)
-            if part.inline_data and part.inline_data.data:
-                return part.inline_data.data, "\n".join(text_parts) or None
+        images, response_text = GoogleProvider._extract_images_from_content_response(response)
+        if images:
+            return images[0].image_bytes, response_text
 
-            image = part.as_image()
-            if image and image.image_bytes:
-                return image.image_bytes, "\n".join(text_parts) or None
-
-        finish_reason = None
-        if response.candidates:
-            finish_reason = response.candidates[0].finish_reason
+        candidates = getattr(response, "candidates", None) or []
+        finish_reason = candidates[0].finish_reason if candidates else None
         raise AppException(
             f"Google image model returned no image data. Finish reason: {finish_reason}",
             code="EMPTY_RESPONSE",
         )
+
+    @staticmethod
+    def _extract_images_from_content_response(
+        response: types.GenerateContentResponse,
+    ) -> tuple[list[GeneratedImagePart], str | None]:
+        text_parts: list[str] = []
+        pending_text_parts: list[str] = []
+        images: list[GeneratedImagePart] = []
+
+        for part in getattr(response, "parts", None) or []:
+            text = getattr(part, "text", None)
+            if text:
+                text_parts.append(text)
+                pending_text_parts.append(text)
+
+            inline_data = getattr(part, "inline_data", None)
+            inline_bytes = getattr(inline_data, "data", None)
+            if inline_bytes:
+                images.append(
+                    GeneratedImagePart(
+                        image_bytes=inline_bytes,
+                        mime_type=getattr(inline_data, "mime_type", None),
+                        preceding_text="\n".join(pending_text_parts) or None,
+                    )
+                )
+                pending_text_parts.clear()
+                continue
+
+            as_image = getattr(part, "as_image", None)
+            image = as_image() if callable(as_image) else None
+            if image and image.image_bytes:
+                images.append(
+                    GeneratedImagePart(
+                        image_bytes=image.image_bytes,
+                        mime_type=getattr(image, "mime_type", None),
+                        preceding_text="\n".join(pending_text_parts) or None,
+                    )
+                )
+                pending_text_parts.clear()
+
+        return images, "\n".join(text_parts) or None
 
     async def create_character_from_photo(
         self,
@@ -703,3 +738,73 @@ Format your response as a clear visual identity list."""
         except Exception as e:
             logger.error(f"Google image generation failed: {e}")
             raise AppException(f"Image generation failed: {str(e)}", code="IMAGEN_ERROR")
+
+    async def generate_interleaved_images(
+        self,
+        prompt: str,
+        *,
+        expected_count: int,
+        aspect_ratio: str = "1:1",
+        model: str | None = None,
+    ) -> MultiImageGenerationResult:
+        """Generate multiple Gemini image outputs from one interleaved prompt."""
+        if expected_count <= 0:
+            raise AppException("expected_count must be greater than zero", code="INVALID_IMAGE_COUNT")
+
+        image_model = _normalize_model_name(model, self.reference_image_model)
+        if not _is_gemini_image_model(image_model):
+            raise AppException(
+                f"Multi-image generation requires a Gemini image model. Use '{DEFAULT_GEMINI_IMAGE_MODEL}'.",
+                code="UNSUPPORTED_MODEL",
+            )
+
+        logger.info(
+            "Generating %s interleaved images with Google model: %s",
+            expected_count,
+            image_model,
+        )
+
+        try:
+            response = await self.client.aio.models.generate_content(
+                model=image_model,
+                contents=[prompt],
+                config=types.GenerateContentConfig(
+                    response_modalities=["IMAGE", "TEXT"],
+                    image_config=types.ImageConfig(aspect_ratio=aspect_ratio),
+                ),
+            )
+            images, response_text = self._extract_images_from_content_response(response)
+            usage_metadata = getattr(response, "usage_metadata", None)
+            usage = usage_metadata.model_dump() if hasattr(usage_metadata, "model_dump") else None
+
+            if len(images) != expected_count:
+                raise AppException(
+                    f"Google Gemini returned {len(images)} images; expected {expected_count}.",
+                    code="GOOGLE_MULTI_IMAGE_COUNT_MISMATCH",
+                    details={
+                        "expected_count": expected_count,
+                        "received_count": len(images),
+                        "aspect_ratio": aspect_ratio,
+                        "model": image_model,
+                        "response_text": response_text,
+                    },
+                )
+
+            return MultiImageGenerationResult(
+                images=images,
+                prompt_used=prompt,
+                model=image_model,
+                metadata={
+                    "provider": "google",
+                    "mode": "gemini_interleaved_multi_image",
+                    "aspect_ratio": aspect_ratio,
+                    "image_response_text": response_text,
+                    "usage": usage,
+                },
+            )
+
+        except AppException:
+            raise
+        except Exception as e:
+            logger.error(f"Google interleaved image generation failed: {e}")
+            raise AppException(f"Interleaved image generation failed: {str(e)}", code="GOOGLE_ERROR")

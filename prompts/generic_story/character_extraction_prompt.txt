@@ -73,11 +73,11 @@ Optional Learning Goal:
 
 1. title must exactly match Requested Title when provided.
 2. Identify exactly one hero whenever possible.
-3. Extract only recurring or story-important characters.
+3. Extract every named, recurring, or story-important visible character, including side characters, helpers, family members, friends, classmates, animals, fantasy beings, and antagonists.
 4. anchor must be one concise sentence describing the character's permanent visual identity.
 5. look must contain only details explicitly stated or strongly implied by the story.
 6. traits should contain 3-5 stable personality traits.
-7. lock should contain visual traits that must never change.
+7. lock should contain visual traits that must never change across scenes and images.
 8. rules should contain story-world continuity rules that future generations must preserve.
 9. preserve should contain critical facts that must never change, including:
 * moral
@@ -87,7 +87,9 @@ Optional Learning Goal:
 * major story facts
 10. Use empty strings or empty arrays when information is unavailable.
 11. Do not infer ethnicity, religion, nationality, or physical details not supported by the story.
-12. Return STRICT VALID JSON ONLY.
+12. Do not collapse named characters into vague labels such as "family", "friends", "children", or "villagers" when individual names or roles are available.
+13. Unnamed background crowds may be omitted unless they affect the plot or appear repeatedly.
+14. Return STRICT VALID JSON ONLY.
 
 # CHARACTER CONSISTENCY PRIORITY
 For each recurring character, prioritize extracting:
@@ -99,3 +101,11 @@ For each recurring character, prioritize extracting:
 
 Temporary emotions, poses, actions, and scene-specific details should NOT be included unless they define the character throughout the story. 
 
+# IMAGE CONSISTENCY REQUIREMENTS
+
+For every character in chars:
+- anchor should be stable enough for the Visual Bible and image prompts to keep the same person across all images.
+- lock should include any known face, hair, outfit, accessory, body scale, species/breed, color, or distinctive feature.
+- If a visual detail is not stated, do not invent it here; instead include a lock note such as "Keep this character's final Visual Bible design consistent across every image."
+- Side characters must receive the same consistency treatment as the hero.
+- If a character changes clothing or appearance in the source story, preserve that change as a story-specific rule; otherwise clothing and fixed accessories should remain consistent.

@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.core.age_groups import validate_age_group
 from app.core.illustration_styles import DEFAULT_ILLUSTRATION_TYPE, normalize_illustration_type
@@ -40,11 +40,29 @@ class GenericStoryWorkflowCreateRequest(BaseModel):
 class GenericStoryWorkflowExecuteRequest(BaseModel):
     step_name: GenericStoryWorkflowStep | Literal["ALL"] = "ALL"
     skip_image_generation: bool = False
-    skip_narration_generation: bool = False
+    multi_image_mode: bool = True
+    skip_narration_generation: bool = True
     publish_status: Literal["active", "inactive"] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_multi_image_mode_alias(cls, data):
+        if isinstance(data, dict) and "multi_image_mode" not in data and "mutil_image_mode" in data:
+            data = dict(data)
+            data["multi_image_mode"] = data.pop("mutil_image_mode")
+        return data
 
 
 class GenericStoryWorkflowRetryRequest(BaseModel):
     skip_image_generation: bool = False
-    skip_narration_generation: bool = False
+    multi_image_mode: bool = True
+    skip_narration_generation: bool = True
     publish_status: Literal["active", "inactive"] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_multi_image_mode_alias(cls, data):
+        if isinstance(data, dict) and "multi_image_mode" not in data and "mutil_image_mode" in data:
+            data = dict(data)
+            data["multi_image_mode"] = data.pop("mutil_image_mode")
+        return data

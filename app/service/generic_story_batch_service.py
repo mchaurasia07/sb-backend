@@ -23,6 +23,7 @@ from app.core.exceptions import AppException, NotFoundException
 from app.entity.generic_story_batch_job import GenericStoryBatchJob
 from app.entity.generic_story_workflow import GenericStoryWorkflow, GenericStoryWorkflowStatus, GenericStoryWorkflowStep
 from app.entity.story_batch_job import StoryBatchJobStatus, StoryBatchJobType
+from app.model.request.generic_story_workflow import GenericStoryWorkflowExecuteRequest
 from app.model.response.generic_story import GenericStoryBatchImageSubmitResponse
 from app.repository.generic_story_batch_job_repository import GenericStoryBatchJobRepository
 from app.repository.generic_story_repository import GenericStoryRepository
@@ -57,6 +58,7 @@ class GenericStoryBatchService:
     OPENAI_SUCCEEDED_STATES = {"completed"}
     OPENAI_CANCELLED_STATES = {"cancelled"}
     OPENAI_FAILED_STATES = {"failed", "expired"}
+    WORKFLOW_MULTI_IMAGE_MODE = "generic_story_workflow_multi_image_pages"
 
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -301,6 +303,9 @@ class GenericStoryBatchService:
         job.provider_state = state_name
 
         if state_name in self.SUCCEEDED_STATES:
+            if self._job_request_mode(job) == self.WORKFLOW_MULTI_IMAGE_MODE:
+                await self._process_reconciled_workflow_multi_image_job(job, provider_job)
+                return self._reconcile_result(job, "processed", "Generic story workflow multi-image job processed")
             await self._process_reconciled_image_job(job, provider_job)
             return self._reconcile_result(job, "processed", "Generic story image job processed")
 
@@ -308,7 +313,15 @@ class GenericStoryBatchService:
             job.status = StoryBatchJobStatus.CANCELLED
             job.error_message = str(getattr(provider_job, "error", None) or f"Google batch state {state_name}")
             await self.batch_jobs.update(job)
-            await self._mark_workflow_failed(job.workflow_id, job.error_message)
+            await self._mark_workflow_failed(
+                job.workflow_id,
+                job.error_message,
+                current_step=(
+                    GenericStoryWorkflowStep.IMAGE_GENERATION.value
+                    if self._job_request_mode(job) == self.WORKFLOW_MULTI_IMAGE_MODE
+                    else None
+                ),
+            )
             await self.session.commit()
             return self._reconcile_result(job, "cancelled", job.error_message)
 
@@ -316,7 +329,15 @@ class GenericStoryBatchService:
             job.status = StoryBatchJobStatus.FAILED
             job.error_message = str(getattr(provider_job, "error", None) or f"Google batch state {state_name}")
             await self.batch_jobs.update(job)
-            await self._mark_workflow_failed(job.workflow_id, job.error_message)
+            await self._mark_workflow_failed(
+                job.workflow_id,
+                job.error_message,
+                current_step=(
+                    GenericStoryWorkflowStep.IMAGE_GENERATION.value
+                    if self._job_request_mode(job) == self.WORKFLOW_MULTI_IMAGE_MODE
+                    else None
+                ),
+            )
             await self.session.commit()
             return self._reconcile_result(job, "failed", job.error_message)
 
@@ -603,6 +624,313 @@ class GenericStoryBatchService:
             )
         await self.workflows.update(workflow)
         await self.session.commit()
+
+    async def _process_reconciled_workflow_multi_image_job(
+        self,
+        job: GenericStoryBatchJob,
+        provider_job: types.BatchJob,
+    ) -> None:
+        workflow = await self.workflows.get_by_id(job.workflow_id)
+        if workflow is None:
+            raise NotFoundException("Generic story workflow not found", "GENERIC_STORY_WORKFLOW_NOT_FOUND")
+
+        story_json = dict(workflow.story_json or {})
+        request_payload = job.request_payload if isinstance(job.request_payload, dict) else {}
+        items = self._workflow_multi_image_items_from_payload(job, request_payload)
+
+        completed_keys, failed_keys, response_summary = await self._process_workflow_multi_image_response(
+            workflow,
+            story_json,
+            items,
+            provider_job,
+            storage_story_id=job.generic_story_id or workflow.id,
+        )
+
+        job.status = StoryBatchJobStatus.SUCCEEDED if not failed_keys else StoryBatchJobStatus.FAILED
+        job.completed_item_count = len(completed_keys)
+        job.failed_item_count = len(failed_keys)
+        job.missing_keys = sorted({str(item["key"]) for item in items} - completed_keys)
+        job.response_payload = response_summary
+        job.error_message = self._workflow_multi_image_error_message(response_summary, failed_keys)
+        workflow.story_json = story_json
+
+        if failed_keys:
+            workflow.status = GenericStoryWorkflowStatus.FAILED.value
+            workflow.current_step = GenericStoryWorkflowStep.IMAGE_GENERATION.value
+            workflow.error_message = job.error_message
+            await self.batch_jobs.update(job)
+            await self.workflows.update(workflow)
+            await self.session.commit()
+            return
+
+        continue_after_image_generation = request_payload.get("continue_after_image_generation", True)
+        if continue_after_image_generation:
+            workflow.status = GenericStoryWorkflowStatus.IN_PROGRESS.value
+            workflow.current_step = GenericStoryWorkflowStep.IMAGE_GENERATION.value
+        elif workflow.generic_story_id is not None:
+            generic_story = await self.generic_stories.get_by_id(workflow.generic_story_id)
+            if generic_story is not None:
+                await self._apply_image_urls_to_contents(generic_story, story_json, workflow=workflow)
+            workflow.status = GenericStoryWorkflowStatus.COMPLETED.value
+            workflow.current_step = None
+        else:
+            workflow.status = GenericStoryWorkflowStatus.IN_PROGRESS.value
+            workflow.current_step = GenericStoryWorkflowStep.IMAGE_GENERATION.value
+        workflow.error_message = None
+        await self.batch_jobs.update(job)
+        await self.workflows.update(workflow)
+        await self.session.commit()
+
+        if continue_after_image_generation:
+            await self._continue_workflow_after_multi_image_generation(workflow, request_payload)
+
+    def _workflow_multi_image_items_from_payload(
+        self,
+        job: GenericStoryBatchJob,
+        request_payload: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        raw_items = request_payload.get("items")
+        if not isinstance(raw_items, list) or not raw_items:
+            raise AppException(
+                "Generic workflow multi-image batch has no request items.",
+                code="GENERIC_WORKFLOW_MULTI_IMAGE_ITEMS_MISSING",
+            )
+        items = [item for item in raw_items if isinstance(item, dict) and str(item.get("key") or "").strip()]
+        if len(items) != len(raw_items):
+            raise AppException(
+                "Generic workflow multi-image batch request items are invalid.",
+                code="GENERIC_WORKFLOW_MULTI_IMAGE_ITEMS_INVALID",
+            )
+        requested_keys = [str(key) for key in (job.request_keys or []) if str(key).strip()]
+        if not requested_keys:
+            return items
+
+        items_by_key = {str(item["key"]): item for item in items}
+        missing_payload_keys = [key for key in requested_keys if key not in items_by_key]
+        if missing_payload_keys:
+            raise AppException(
+                "Generic workflow multi-image batch payload is missing requested page items.",
+                code="GENERIC_WORKFLOW_MULTI_IMAGE_REQUEST_KEYS_MISMATCH",
+                details={"missing_keys": missing_payload_keys},
+            )
+        return [items_by_key[key] for key in requested_keys]
+
+    async def _process_workflow_multi_image_response(
+        self,
+        workflow: GenericStoryWorkflow,
+        story_json: dict[str, Any],
+        items: list[dict[str, Any]],
+        provider_job: types.BatchJob,
+        *,
+        storage_story_id: UUID,
+    ) -> tuple[set[str], set[str], dict[str, Any]]:
+        responses = list((provider_job.dest.inlined_responses if provider_job.dest else None) or [])
+        by_key = self._responses_by_key(responses)
+        cover_items = [item for item in items if str(item.get("key") or "") == "cover" or item.get("page_type") == "cover"]
+        page_items = [item for item in items if item not in cover_items]
+        response_summary: dict[str, Any] = {"items": [], "response_count": len(responses)}
+        completed_keys: set[str] = set()
+        failed_keys: set[str] = set()
+
+        for cover_item in cover_items:
+            key = str(cover_item["key"])
+            inlined_response = by_key.get(key)
+            if inlined_response is None:
+                failed_keys.add(key)
+                response_summary["items"].append({"key": key, "status": "missing_response"})
+                continue
+            if inlined_response.error:
+                failed_keys.add(key)
+                response_summary["items"].append(
+                    {"key": key, "status": "error", "error": self._model_dump_safe(inlined_response.error)}
+                )
+                continue
+            if inlined_response.response is None:
+                failed_keys.add(key)
+                response_summary["items"].append({"key": key, "status": "empty_response"})
+                continue
+            try:
+                image_bytes, response_text = GoogleProvider._extract_image_from_content_response(
+                    inlined_response.response
+                )
+                aspect_ratio = str(cover_item.get("aspect_ratio") or settings.STORY_COVER_ASPECT_RATIO)
+                cropped = StoryService._crop_image_bytes_to_aspect_ratio(image_bytes, aspect_ratio)
+                image_url = await self.image_storage.save_story_image(
+                    storage_story_id,
+                    cropped,
+                    str(cover_item.get("filename") or "cover.png"),
+                    "",
+                )
+                self._set_story_json_page_image_fields(story_json, cover_item, image_url)
+                completed_keys.add(key)
+                response_summary["items"].append(
+                    {"key": key, "status": "completed", "image_url": image_url, "response_text": response_text}
+                )
+            except Exception as exc:
+                failed_keys.add(key)
+                response_summary["items"].append({"key": key, "status": "save_failed", "error": str(exc)})
+
+        if not page_items:
+            return completed_keys, failed_keys, response_summary
+
+        inlined_response = by_key.get("pages_multi") or (responses[0] if not cover_items and responses else None)
+        if inlined_response is None:
+            failed_keys.update({str(item["key"]) for item in page_items})
+            response_summary["status"] = "missing_response"
+            return completed_keys, failed_keys, response_summary
+        if inlined_response.error:
+            failed_keys.update({str(item["key"]) for item in page_items})
+            response_summary["status"] = "error"
+            response_summary["error"] = self._model_dump_safe(inlined_response.error)
+            return completed_keys, failed_keys, response_summary
+        if inlined_response.response is None:
+            failed_keys.update({str(item["key"]) for item in page_items})
+            response_summary["status"] = "empty_response"
+            return completed_keys, failed_keys, response_summary
+
+        try:
+            images, response_text = GoogleProvider._extract_images_from_content_response(inlined_response.response)
+        except Exception as exc:
+            failed_keys.update({str(item["key"]) for item in page_items})
+            response_summary["status"] = "parse_failed"
+            response_summary["error"] = str(exc)
+            return completed_keys, failed_keys, response_summary
+
+        response_summary["response_text"] = response_text
+        response_summary["received_count"] = len(images)
+        response_summary["expected_count"] = len(page_items)
+        if len(images) != len(page_items):
+            error = f"Gemini returned {len(images)} images; expected {len(page_items)}."
+            response_summary["status"] = "count_mismatch"
+            response_summary["error"] = error
+            failed_keys.update({str(item["key"]) for item in page_items})
+            return completed_keys, failed_keys, response_summary
+
+        marker_errors: list[dict[str, str]] = []
+        for item, image in zip(page_items, images, strict=True):
+            key = str(item["key"])
+            try:
+                self._validate_multi_image_marker(key, image.preceding_text)
+            except Exception as exc:
+                marker_errors.append(
+                    {
+                        "key": key,
+                        "marker_text": str(image.preceding_text or ""),
+                        "error": str(exc),
+                    }
+                )
+        if marker_errors:
+            response_summary["status"] = "marker_mismatch"
+            response_summary["error"] = "Gemini image markers did not match the requested page order."
+            response_summary["items"] = marker_errors
+            failed_keys.update({str(item["key"]) for item in page_items})
+            return completed_keys, failed_keys, response_summary
+
+        for item, image in zip(page_items, images, strict=True):
+            key = str(item["key"])
+            try:
+                aspect_ratio = str(item.get("aspect_ratio") or settings.STORY_PAGE_ASPECT_RATIO)
+                cropped = StoryService._crop_image_bytes_to_aspect_ratio(image.image_bytes, aspect_ratio)
+                image_url = await self.image_storage.save_story_image(
+                    storage_story_id,
+                    cropped,
+                    str(item.get("filename") or f"{key}.png"),
+                    "",
+                )
+                self._set_story_json_page_image_fields(story_json, item, image_url)
+                completed_keys.add(key)
+                response_summary["items"].append(
+                    {
+                        "key": key,
+                        "status": "completed",
+                        "image_url": image_url,
+                        "marker_text": image.preceding_text,
+                    }
+                )
+            except Exception as exc:
+                failed_keys.add(key)
+                response_summary["items"].append({"key": key, "status": "save_failed", "error": str(exc)})
+        return completed_keys, failed_keys, response_summary
+
+    @staticmethod
+    def _validate_multi_image_marker(expected_key: str, marker_text: str | None) -> None:
+        if not marker_text or "IMAGE_ITEM" not in marker_text.upper():
+            return
+        expected_marker = f"IMAGE_ITEM: {expected_key}".lower()
+        if expected_marker not in marker_text.lower():
+            raise AppException(
+                f"Gemini image marker mismatch; expected {expected_key}.",
+                code="GENERIC_WORKFLOW_MULTI_IMAGE_MARKER_MISMATCH",
+                details={"expected_key": expected_key, "marker_text": marker_text},
+            )
+
+    @staticmethod
+    def _set_story_json_page_image_fields(
+        story_json: dict[str, Any],
+        item: dict[str, Any],
+        image_url: str,
+    ) -> None:
+        if str(item.get("key") or "") == "cover" or item.get("page_type") == "cover":
+            story_json["cover_image_url"] = image_url
+            story_json["cover_image_prompt"] = item.get("rendered_prompt")
+            story_json["cover_planned_image_prompt"] = item.get("source_image_prompt")
+            story_json.pop("cover_image_dummy", None)
+            return
+
+        page_number = int(item.get("page_number") or 0)
+        for index, page in enumerate(story_json.get("pages") or [], start=1):
+            if not isinstance(page, dict):
+                continue
+            if int(page.get("page_number") or index) != page_number:
+                continue
+            page["image_url"] = image_url
+            page["image_prompt"] = item.get("rendered_prompt")
+            page["planned_image_prompt"] = item.get("source_image_prompt")
+            page.pop("image_dummy", None)
+            return
+
+        raise AppException(
+            f"Workflow story JSON is missing page {page_number} for multi-image result.",
+            code="GENERIC_WORKFLOW_MULTI_IMAGE_STORY_PAGE_MISSING",
+            details={"page_number": page_number, "item_key": item.get("key")},
+        )
+
+    @staticmethod
+    def _workflow_multi_image_error_message(
+        response_summary: dict[str, Any],
+        failed_keys: set[str],
+    ) -> str | None:
+        if not failed_keys:
+            return None
+        error = response_summary.get("error")
+        if error:
+            return str(error)
+        return f"Missing image keys: {', '.join(sorted(failed_keys))}"
+
+    async def _continue_workflow_after_multi_image_generation(
+        self,
+        workflow: GenericStoryWorkflow,
+        request_payload: dict[str, Any],
+    ) -> None:
+        service = GenericStoryWorkflowService(self.session)
+        payload = GenericStoryWorkflowExecuteRequest(
+            step_name="ALL",
+            skip_image_generation=False,
+            multi_image_mode=False,
+            skip_narration_generation=bool(request_payload.get("skip_narration_generation", True)),
+            publish_status=request_payload.get("publish_status"),
+        )
+        await service._execute_steps(
+            workflow,
+            [
+                GenericStoryWorkflowStep.NARRATION_GENERATION,
+                GenericStoryWorkflowStep.PUBLISH_GENERIC_STORY,
+            ],
+            payload=payload,
+            public_base_url=str(request_payload.get("public_base_url") or ""),
+            event_name="workflow_multi_image_batch_continuation_started",
+            requested_step=GenericStoryWorkflowStep.NARRATION_GENERATION.value,
+        )
 
     async def _process_image_batch_responses(
         self,
@@ -987,12 +1315,18 @@ class GenericStoryBatchService:
                     page[field_name] = value
             page.pop("image_dummy", None)
 
-    async def _mark_workflow_failed(self, workflow_id: UUID, error_message: str) -> None:
+    async def _mark_workflow_failed(
+        self,
+        workflow_id: UUID,
+        error_message: str,
+        *,
+        current_step: str | None = None,
+    ) -> None:
         workflow = await self.workflows.get_by_id(workflow_id)
         if workflow is None:
             return
         workflow.status = GenericStoryWorkflowStatus.FAILED.value
-        workflow.current_step = None
+        workflow.current_step = current_step
         workflow.error_message = error_message
         await self.workflows.update(workflow)
 
@@ -1115,6 +1449,11 @@ class GenericStoryBatchService:
             if key:
                 by_key[key] = response
         return by_key
+
+    @staticmethod
+    def _job_request_mode(job: GenericStoryBatchJob) -> str:
+        request_payload = job.request_payload if isinstance(job.request_payload, dict) else {}
+        return str(request_payload.get("mode") or "")
 
     @staticmethod
     def _job_state_name(job: types.BatchJob) -> str:

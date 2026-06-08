@@ -41,13 +41,36 @@ Use only characters and objects listed in the image plan. Do not add extra chara
 
 Keep identities and continuity from the model sheet. Do not redesign characters or change outfit, hairstyle, face shape, age, skin tone, body scale, accessories, fixed objects, or forbidden variations. For covers, use the same story characters, not marketing redesigns, alternate costumes, older/younger versions, or lookalikes.
 
+Character consistency is mandatory for every visible character, not only the hero.
+
+Before drawing, silently check every character listed in IMAGE PLAN.characters against the CHARACTER AND CONTINUITY MODEL SHEET:
+- same face and facial proportions
+- same hair/fur style and color
+- same skin/body color
+- same outfit colors and fixed accessories
+- same body scale, age appearance, species/breed, and distinctive features
+- no forbidden variations
+
+If IMAGE PLAN.continuity_notes contains character locks, follow them exactly.
+
+Side characters, helpers, parents, grandparents, friends, classmates, animals, and antagonists must stay visually consistent across pages.
+
+Do not replace a named character with a lookalike, generic child, generic adult, generic animal, or background figure.
+
+Named characters important to the scene should have identifiable faces. Do not hide, blur, crop off, or omit faces unless the image plan explicitly calls for a back view or closeup.
+
+Do not crop off heads, hands, feet, tails, wings, fixed accessories, or signature objects for visible named characters.
+
 Each interior page must look like its own story moment. Do not reuse generic poses, nursery/mat setups, object layouts, or previous-page compositions unless requested.
 
-Follow TITLE AND TEXT INSTRUCTION exactly. The only allowed text is the exact cover title when PAGE TYPE is "cover".
+Follow TITLE AND TEXT INSTRUCTION exactly.
+For interior story pages, never render story prose, narration, captions, subtitles, title text, floating text, UI text, top text, bottom text, or overlay text.
+Interior story pages may contain readable words only when IMAGE PLAN explicitly requires short in-scene object text, such as blackboard writing, a chair name label, a classroom sign, or a book cover inside the scene. Keep that text physically on the object. Do not place any words in empty sky/wall/negative space as a caption.
+For covers, the only allowed text is the exact cover title.
 
 Composition: one clear focal point, child-friendly clean layout, expressive faces, no clutter.
 
-Negative rules: no scary elements, violence, distorted hands, extra fingers, watermark, random outfit changes, or unwanted text.
+Negative rules: no scary elements, violence, distorted hands, extra fingers, missing limbs, missing faces, faceless named characters, cropped heads, cropped signature accessories, watermark, random outfit changes, character redesigns, lookalike substitutions, story prose on the image, top caption text, bottom caption text, or unwanted text.
 
 # OUTPUT
 

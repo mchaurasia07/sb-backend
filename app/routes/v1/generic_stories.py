@@ -2,7 +2,7 @@ from typing import Literal
 from uuid import UUID
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, Query, Request, Response, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Query, Request, Response, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.age_groups import validate_age_group
@@ -21,7 +21,6 @@ from app.model.request.generic_story import (
 from app.model.request.generic_story_workflow import (
     GenericStoryWorkflowCreateRequest,
     GenericStoryWorkflowExecuteRequest,
-    GenericStoryWorkflowRetryRequest,
 )
 from app.model.response.common import ApiResponse, PaginatedResponse, success_response
 from app.model.response.generic_story import (
@@ -39,6 +38,7 @@ from app.model.response.generic_story_workflow import (
 from app.model.response.story_catalog import StoryCatalogResponse
 from app.model.response.story_content import StoryContentResponse
 from app.service.generic_story_batch_service import GenericStoryBatchService
+from app.service.generic_story_multi_image_service import GenericStoryMultiImageTestService
 from app.service.generic_story_service import GenericStoryService
 from app.service.generic_story_workflow_service import GenericStoryWorkflowService
 from app.service.image_optimizer import optimize_display_image
@@ -195,14 +195,12 @@ async def execute_generic_story_workflow(
 async def retry_generic_story_workflow(
     workflow_id: UUID,
     request: Request,
-    payload: GenericStoryWorkflowRetryRequest = Body(default_factory=GenericStoryWorkflowRetryRequest),
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[GenericStoryWorkflowResponse]:
     data = await GenericStoryWorkflowService(session).retry(
         current_user.id,
         workflow_id,
-        payload,
         public_base_url=str(request.base_url).rstrip("/"),
     )
     message = (
@@ -338,6 +336,26 @@ async def submit_generic_story_image_batch(
         provider=provider,
     )
     return success_response(data, data.message)
+
+
+@router.post(
+    "/{generic_story_id}/images/multi-generate-test",
+    response_model=ApiResponse[dict],
+)
+async def multi_generate_generic_story_images_test(
+    generic_story_id: UUID,
+    request: Request,
+    language: str = Query("en", min_length=2, max_length=16),
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[dict]:
+    data = await GenericStoryMultiImageTestService(session).generate(
+        current_user.id,
+        generic_story_id,
+        language=language,
+        public_base_url=str(request.base_url).rstrip("/"),
+    )
+    return success_response(data, "Generic story multi-image test generation completed")
 
 
 @router.post(

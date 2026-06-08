@@ -1,0 +1,109 @@
+# ROLE
+
+You are generating a grouped set of children's storybook illustrations for one generic story.
+
+Generate exactly {item_count} separate image outputs for the "{group_name}" group at aspect ratio {target_aspect_ratio}.
+
+---
+
+# STORY
+
+Title: {story_title}
+Age group: {age_group}
+
+---
+
+# GLOBAL STYLE AND CONSISTENCY RULES
+
+{global_visual_context}
+
+Use one consistent book style across every image in this call.
+
+Character consistency is mandatory:
+- Use the same face, hair, skin tone, body scale, outfit colors, accessories, and age appearance for each named character in every image.
+- Character consistency applies to every visible named character, not only the hero.
+- Side characters, helpers, parents, grandparents, friends, classmates, animals, and antagonists must stay visually consistent across all images where they appear.
+- Do not redesign characters between outputs.
+- Do not change clothing unless the item explicitly says the scene requires it.
+- Do not replace a named character with a lookalike, generic child, generic adult, generic animal, or background figure.
+- Keep faces fully visible when a character is important to the scene.
+- Named characters important to the scene should have identifiable faces and complete bodies unless the item explicitly requires a closeup or back view.
+- Do not crop off heads, faces, hands, feet, tails, wings, fixed accessories, signature objects, or important objects.
+- Do not add unlisted main characters, side characters, family members, background people, animals, props, signs, or locations.
+
+Before generating each item, silently check page_image_plan.characters and page_image_plan.continuity_notes against scoped_visual_bible:
+- same face and facial proportions
+- same hair/fur style and color
+- same skin/body color
+- same outfit colors and fixed accessories
+- same body scale, age appearance, species/breed, and distinctive features
+- no forbidden variations
+
+If page_image_plan.continuity_notes contains character locks, follow them exactly.
+If a character appears in more than one requested item, keep that character's model identical across all outputs in this call.
+
+Safety and quality:
+- Child-safe, warm, family-friendly imagery only.
+- No violence, horror, injury, threatening expressions, distress, watermarks, logos, UI elements, story prose on the image, top caption text, bottom caption text, floating text, unwanted text, character redesigns, lookalike substitutions, missing faces, faceless named characters, cropped heads, cropped signature accessories, or random outfit changes.
+- Natural anatomy, correct hands, correct fingers, no duplicate or missing limbs.
+- Premium polished storybook illustration quality.
+
+---
+
+# OUTPUT ORDER
+
+Return the images in this exact order:
+
+{item_order}
+
+For every item:
+1. Emit a short text marker exactly: IMAGE_ITEM: <item_id>
+2. Immediately after that marker, emit exactly one image for that item.
+
+Do not skip any item.
+Do not add extra images.
+Do not combine two items into one image.
+Do not output any image before its IMAGE_ITEM marker.
+
+---
+
+# IMAGE ITEMS
+
+{items_json}
+
+Each item includes page_image_plan, image_plan_summary, limited non-prose story_page context, and scoped_visual_bible.
+Use page_image_plan and image_plan_summary as the source of truth for what to draw.
+Use story_page only for page number or emotion context, not as text to render.
+Use scoped_visual_bible as the source of truth for character appearance, object appearance, location identity, and forbidden variations.
+Use page_image_plan.characters as the exact visible-character allow-list for that item.
+Use page_image_plan.important_objects as the exact important-object allow-list for that item.
+Do not draw characters or objects that are not listed for that item.
+Respect page_image_plan.camera_shot, composition, emotion, environment, and continuity_notes.
+
+---
+
+# PAGE TYPE RULES
+
+cover:
+- Strong emotional appeal and clear story promise.
+- Render the exact title text: "{story_title}".
+- No words other than the exact story title.
+
+story_page:
+- Show one clear story moment from the item only.
+- Draw only the visible characters listed in page_image_plan.characters.
+- Keep every listed character visually consistent with scoped_visual_bible and page_image_plan.continuity_notes.
+- Include text-safe negative space at bottom or sides.
+- Do not render story prose, narration text, captions, subtitles, title text, speech bubbles, floating text, UI text, or any top/bottom overlay text.
+- Readable text is allowed only when page_image_plan explicitly requires short in-scene object text, such as blackboard writing, a chair name label, a classroom sign, or a book cover inside the scene.
+- Any allowed text must stay physically on that object. Do not place words in empty wall/sky/background/negative space as a caption.
+
+back_cover:
+- Warm, calm, emotionally complete closing image.
+- No title text, no labels, no extra words.
+
+---
+
+# FINAL INSTRUCTION
+
+Generate exactly {item_count} images, one per IMAGE_ITEM marker, in the requested order and aspect ratio.

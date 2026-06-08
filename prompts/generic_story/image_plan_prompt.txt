@@ -30,6 +30,10 @@ Use the Visual Bible as the only source for character appearances, locations, an
 
 Do not redesign characters, change appearances, add characters, add story events, or change story events.
 
+Use Scene Plan image_brief and visual_direction as source guidance for page staging, shot type, focal subject, lighting, mood, key visual elements, and page-to-page visual continuity.
+
+Do not ignore scene_plan.pages[].image_brief or scene_plan.pages[].visual_direction when present.
+
 Cover:
 * Plan a finished front book cover, not page 1, the first interior scene, or any single page composition.
 * Base it on the full story summary/arc and Scene Plan cover_brief when available.
@@ -52,7 +56,16 @@ Pages:
 * Story JSON is the source of truth for page count. Do not use age-band ranges, Scene Plan page count, or adaptation_strategy.selected_page_count if they differ from Story JSON pages.
 * Each page must show the corresponding scene only.
 * characters is an allow-list for visible characters in that page. Do not include parents, grandparents, siblings, helpers, recurring characters, or background people unless physically visible in that scene.
+* characters must use exact Visual Bible names only. Do not use vague labels such as "family", "friends", "children", "villagers", or "classmates" when named characters are available.
 * Preserve character, object, and location continuity.
+* Preserve the Scene Plan page visual_direction: shot_type, composition, focal_subject, lighting, mood, and key_visual_elements.
+* Convert scene_plan.pages[].visual_direction into concrete image-plan camera_shot, composition, environment, visual_focus, and continuity_notes.
+* Every visible named character, including side characters, must keep the same Visual Bible identity across all images.
+* For every visible character on every page, continuity_notes must include the character's Visual Bible locks: face, hair/fur, skin or body color, outfit, fixed accessories, body scale/age/species, and forbidden variations when present.
+* If a character appears on multiple pages, repeat that character's same lock notes consistently. Do not weaken side-character locks on later pages.
+* Do not change clothing, colors, hairstyle, face, body shape, age, accessories, or species unless the story explicitly requires a change.
+* Important named characters should have faces visible and bodies complete enough to identify them. Do not crop off heads, faces, hands, feet, tails, wings, or signature objects unless the scene specifically requires a closeup.
+* Avoid adding unnamed background characters. If a crowd is required, keep it simple and never let background figures resemble or replace named characters.
 * Show clear emotion, strong focal point, varied framing, child-friendly age-appropriate composition.
 * Avoid repeated poses, nursery/mat setups, object layouts, or character groups unless the scene repeats them.
 
@@ -104,6 +117,12 @@ composition: visual layout, for example "Hero in left foreground, treasure map c
 environment: brief setting description.
 
 continuity_notes: character/object/location continuity only; must not add characters or objects outside characters/important_objects.
+Include visual_direction continuity when relevant, such as recurring visual element, lighting, mood, composition, or important object continuity.
+
+For page continuity_notes, include one concise lock note per visible named character. Example format:
+"Meera lock: same round face, black bob hair, yellow kurta, blue leggings, small silver anklet; no outfit color changes."
+
+For side characters, use the same format and the same strictness as the hero.
 
 # VALIDATE BEFORE RETURN
 
@@ -117,5 +136,9 @@ continuity_notes: character/object/location continuity only; must not add charac
 8. page values equal Story JSON Page Numbers exactly, in the same order.
 9. Every page has visual_focus, camera_shot, composition, and continuity_notes.
 10. Use only characters physically visible in each scene.
-11. Do not redesign characters or modify Visual Bible appearance details.
-12. Return STRICT VALID JSON ONLY.
+11. Every page character must use an exact Visual Bible name.
+12. Every visible named character on every page has continuity_notes covering face, hair/fur, outfit/color, fixed accessories, body scale/age/species, and forbidden variations when present.
+13. Side characters must have the same level of continuity detail as the hero.
+14. When Scene Plan page visual_direction is present, image-plan camera_shot, composition, visual_focus, environment, and continuity_notes must reflect it.
+15. Do not redesign characters or modify Visual Bible appearance details.
+16. Return STRICT VALID JSON ONLY.

@@ -11,6 +11,7 @@ from uuid import UUID
 import wave
 
 from fastapi import UploadFile, status
+from google.genai import types
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.age_groups import age_group_label, page_count_range_for_age_group, validate_age_group
@@ -22,11 +23,10 @@ from app.entity.generic_story_workflow import (
     GenericStoryWorkflowStatus,
     GenericStoryWorkflowStep,
 )
-from app.entity.story_batch_job import StoryBatchJobStatus
+from app.entity.story_batch_job import StoryBatchJobStatus, StoryBatchJobType
 from app.model.request.generic_story_workflow import (
     GenericStoryWorkflowCreateRequest,
     GenericStoryWorkflowExecuteRequest,
-    GenericStoryWorkflowRetryRequest,
 )
 from app.model.response.common import PaginatedResponse
 from app.model.response.generic_story import GenericStoryAudioUploadResponse, GenericStoryImageUploadResponse
@@ -155,6 +155,8 @@ def _compact_json(data: Any) -> str:
 
 class GenericStoryWorkflowService:
     """Google-backed workflow for converting actual story text into a generic story."""
+
+    NARRATION_GENERATION_ENABLED = False
 
     DUMMY_PNG_DATA_URL = (
         "data:image/png;base64,"
@@ -408,6 +410,8 @@ class GenericStoryWorkflowService:
         public_base_url: str,
     ) -> GenericStoryWorkflowResponse:
         workflow = await self._get_owned(user_id, workflow_id)
+        payload = self._apply_workflow_feature_flags(payload)
+        self._store_workflow_execute_request(workflow, payload)
         steps = self.ORDERED_STEPS if payload.step_name == "ALL" else [GenericStoryWorkflowStep(payload.step_name)]
         return await self._execute_steps(
             workflow,
@@ -422,25 +426,25 @@ class GenericStoryWorkflowService:
         self,
         user_id: UUID,
         workflow_id: UUID,
-        payload: GenericStoryWorkflowRetryRequest,
         *,
         public_base_url: str,
     ) -> GenericStoryWorkflowResponse:
         workflow = await self._get_owned(user_id, workflow_id)
-        if workflow.status != GenericStoryWorkflowStatus.FAILED.value:
+        retryable_statuses = {
+            GenericStoryWorkflowStatus.FAILED.value,
+            GenericStoryWorkflowStatus.IN_PROGRESS.value,
+        }
+        if workflow.status not in retryable_statuses:
             raise AppException(
-                "Only failed generic story workflows can be retried",
+                "Only failed or in-progress generic story workflows can be retried",
                 code="GENERIC_STORY_WORKFLOW_RETRY_STATUS_INVALID",
+                details={"status": workflow.status},
             )
 
         retry_step = self._retry_start_step(workflow)
         steps = self.ORDERED_STEPS[self.ORDERED_STEPS.index(retry_step) :]
-        execute_payload = GenericStoryWorkflowExecuteRequest(
-            step_name="ALL",
-            skip_image_generation=payload.skip_image_generation,
-            skip_narration_generation=payload.skip_narration_generation,
-            publish_status=payload.publish_status,
-        )
+        execute_payload = self._stored_workflow_execute_request(workflow)
+        execute_payload = self._apply_workflow_feature_flags(execute_payload)
         return await self._execute_steps(
             workflow,
             steps,
@@ -449,6 +453,69 @@ class GenericStoryWorkflowService:
             event_name="workflow_retry_started",
             requested_step=retry_step.value,
         )
+
+    @staticmethod
+    def _store_workflow_execute_request(
+        workflow: GenericStoryWorkflow,
+        payload: GenericStoryWorkflowExecuteRequest,
+    ) -> None:
+        input_request = workflow.input_request if isinstance(workflow.input_request, dict) else {}
+        updated = dict(input_request)
+        updated["execute_request"] = payload.model_dump(mode="json")
+        workflow.input_request = updated
+
+    @staticmethod
+    def _stored_workflow_execute_request(workflow: GenericStoryWorkflow) -> GenericStoryWorkflowExecuteRequest:
+        input_request = workflow.input_request if isinstance(workflow.input_request, dict) else {}
+        execute_request = input_request.get("execute_request")
+        if isinstance(execute_request, dict):
+            return GenericStoryWorkflowExecuteRequest.model_validate(execute_request)
+
+        legacy_request = {
+            key: input_request[key]
+            for key in (
+                "step_name",
+                "skip_image_generation",
+                "multi_image_mode",
+                "mutil_image_mode",
+                "skip_narration_generation",
+                "publish_status",
+            )
+            if key in input_request
+        }
+        if "publish_status" not in legacy_request and input_request.get("status") in {"active", "inactive"}:
+            legacy_request["publish_status"] = input_request["status"]
+        if legacy_request:
+            legacy_request.setdefault("skip_image_generation", False)
+            if "multi_image_mode" not in legacy_request and "mutil_image_mode" not in legacy_request:
+                legacy_request["multi_image_mode"] = True
+            return GenericStoryWorkflowExecuteRequest.model_validate(legacy_request)
+
+        return GenericStoryWorkflowExecuteRequest(
+            step_name="ALL",
+            skip_image_generation=False,
+            multi_image_mode=True,
+            publish_status=input_request.get("status") if input_request.get("status") in {"active", "inactive"} else None,
+        )
+
+    @classmethod
+    def _apply_workflow_feature_flags(
+        cls,
+        payload: GenericStoryWorkflowExecuteRequest,
+    ) -> GenericStoryWorkflowExecuteRequest:
+        if cls.NARRATION_GENERATION_ENABLED or bool(getattr(payload, "skip_narration_generation", True)):
+            return payload
+        return payload.model_copy(update={"skip_narration_generation": True})
+
+    @classmethod
+    def _effective_execution_steps(
+        cls,
+        steps: list[GenericStoryWorkflowStep],
+        payload: GenericStoryWorkflowExecuteRequest,
+    ) -> list[GenericStoryWorkflowStep]:
+        if cls.NARRATION_GENERATION_ENABLED and not payload.skip_narration_generation:
+            return steps
+        return [step for step in steps if step != GenericStoryWorkflowStep.NARRATION_GENERATION]
 
     async def _execute_steps(
         self,
@@ -460,7 +527,12 @@ class GenericStoryWorkflowService:
         event_name: str,
         requested_step: str,
     ) -> GenericStoryWorkflowResponse:
+        payload = self._apply_workflow_feature_flags(payload)
+        steps = self._effective_execution_steps(steps, payload)
         workflow_started_at = perf_counter()
+        workflow_id_for_log = getattr(workflow, "id", None)
+        generic_story_id_for_log = getattr(workflow, "generic_story_id", None)
+        current_step_for_log = getattr(workflow, "current_step", None)
 
         try:
             workflow.status = GenericStoryWorkflowStatus.IN_PROGRESS.value
@@ -473,17 +545,24 @@ class GenericStoryWorkflowService:
                 requested_step=requested_step,
                 step_count=len(steps),
                 skip_image_generation=payload.skip_image_generation,
+                multi_image_mode=bool(getattr(payload, "multi_image_mode", False)),
                 skip_narration_generation=payload.skip_narration_generation,
             )
 
             for step in steps:
                 step_started_at = perf_counter()
+                current_step_for_log = step.value
                 if step == GenericStoryWorkflowStep.IMAGE_GENERATION and payload.skip_image_generation:
                     workflow.current_step = step.value
                     await self.workflows.update(workflow)
                     await self.session.commit()
                     self._log_workflow_event("step_skipped_started", workflow, step=step, reason="skip_image_generation")
                     self._generate_dummy_images(workflow)
+                    await self._sync_generic_story_from_workflow(
+                        workflow,
+                        public_base_url=public_base_url,
+                        copy_images=False,
+                    )
                     await self.workflows.update(workflow)
                     await self.session.commit()
                     self._log_workflow_event(
@@ -505,6 +584,11 @@ class GenericStoryWorkflowService:
                         reason="skip_narration_generation",
                     )
                     self._generate_dummy_narration(workflow)
+                    await self._sync_generic_story_from_workflow(
+                        workflow,
+                        public_base_url=public_base_url,
+                        copy_images=False,
+                    )
                     await self.workflows.update(workflow)
                     await self.session.commit()
                     self._log_workflow_event(
@@ -521,8 +605,21 @@ class GenericStoryWorkflowService:
                 await self.session.commit()
                 self._log_workflow_event("step_started", workflow, step=step)
                 await self._execute_single_step(workflow, step, public_base_url=public_base_url, payload=payload)
+                await self._sync_generic_story_after_step(
+                    workflow,
+                    step,
+                    payload=payload,
+                    public_base_url=public_base_url,
+                )
                 await self.workflows.update(workflow)
                 await self.session.commit()
+                if step == GenericStoryWorkflowStep.IMAGE_GENERATION and bool(getattr(payload, "multi_image_mode", False)):
+                    self._log_workflow_event(
+                        "step_batch_submitted",
+                        workflow,
+                        step=step,
+                        duration_ms=self._duration_ms(step_started_at),
+                    )
                 self._log_workflow_event(
                     "step_completed",
                     workflow,
@@ -531,7 +628,7 @@ class GenericStoryWorkflowService:
                 )
 
             workflow.current_step = None
-            if workflow.generic_story_id is not None:
+            if GenericStoryWorkflowStep.PUBLISH_GENERIC_STORY in steps and workflow.generic_story_id is not None:
                 workflow.status = GenericStoryWorkflowStatus.COMPLETED.value
             await self.workflows.update(workflow)
             await self.session.commit()
@@ -543,16 +640,20 @@ class GenericStoryWorkflowService:
             return GenericStoryWorkflowResponse.model_validate(workflow)
 
         except Exception as exc:
+            await self.session.rollback()
             workflow.status = GenericStoryWorkflowStatus.FAILED.value
+            workflow.current_step = current_step_for_log
             workflow.error_message = str(exc)
-            self._log_workflow_event(
-                "workflow_failed",
-                workflow,
-                level=logging.ERROR,
-                error=str(exc),
-                duration_ms=self._duration_ms(workflow_started_at),
+            logger.error(
+                "generic_story_workflow event=workflow_failed workflow_id=%s generic_story_id=%s step=%s status=%s error=%s duration_ms=%s",
+                self._log_field_value(workflow_id_for_log),
+                self._log_field_value(generic_story_id_for_log),
+                self._log_field_value(current_step_for_log),
+                GenericStoryWorkflowStatus.FAILED.value,
+                self._log_field_value(str(exc)),
+                self._duration_ms(workflow_started_at),
             )
-            logger.exception("Generic story workflow failed: workflow_id=%s step=%s", workflow.id, workflow.current_step)
+            logger.exception("Generic story workflow failed: workflow_id=%s step=%s", workflow_id_for_log, current_step_for_log)
             await self.workflows.update(workflow)
             await self.session.commit()
             raise
@@ -782,6 +883,7 @@ class GenericStoryWorkflowService:
         public_base_url: str,
         payload: GenericStoryWorkflowExecuteRequest,
     ) -> None:
+        payload = self._apply_workflow_feature_flags(payload)
         if step == GenericStoryWorkflowStep.CHARACTER_EXTRACTION:
             workflow.character_analysis_json = await self._generate_character_analysis(workflow)
             self._apply_workflow_metadata(workflow)
@@ -817,11 +919,26 @@ class GenericStoryWorkflowService:
         if step == GenericStoryWorkflowStep.IMAGE_GENERATION:
             self._require(workflow.story_json, "Run STORY_GENERATION before IMAGE_GENERATION.")
             self._require(workflow.image_plan_json, "Run IMAGE_PLAN_GENERATION before IMAGE_GENERATION.")
+            await self._sync_generic_story_from_workflow(
+                workflow,
+                public_base_url=public_base_url,
+                copy_images=False,
+            )
+            if bool(getattr(payload, "multi_image_mode", False)):
+                await self._generate_cover_and_submit_multi_image_pages(
+                    workflow,
+                    payload=payload,
+                    public_base_url=public_base_url,
+                )
+                self._apply_workflow_metadata(workflow)
+                return
             await self._generate_images(workflow, public_base_url=public_base_url)
             self._apply_workflow_metadata(workflow)
             return
 
         if step == GenericStoryWorkflowStep.NARRATION_GENERATION:
+            if payload.skip_narration_generation:
+                return
             self._require(workflow.story_json, "Run STORY_GENERATION before NARRATION_GENERATION.")
             workflow.story_json = await self._generate_google_narration(workflow)
             return
@@ -836,6 +953,35 @@ class GenericStoryWorkflowService:
             return
 
         raise AppException(f"Unsupported generic story workflow step: {step}", code="GENERIC_STORY_STEP_INVALID")
+
+    async def _sync_generic_story_after_step(
+        self,
+        workflow: GenericStoryWorkflow,
+        step: GenericStoryWorkflowStep,
+        *,
+        payload: GenericStoryWorkflowExecuteRequest,
+        public_base_url: str,
+    ) -> None:
+        if step == GenericStoryWorkflowStep.STORY_GENERATION:
+            await self._sync_generic_story_from_workflow(
+                workflow,
+                public_base_url=public_base_url,
+                copy_images=False,
+            )
+            return
+        if step == GenericStoryWorkflowStep.IMAGE_GENERATION and not bool(getattr(payload, "multi_image_mode", False)):
+            await self._sync_generic_story_from_workflow(
+                workflow,
+                public_base_url=public_base_url,
+                copy_images=True,
+            )
+            return
+        if step == GenericStoryWorkflowStep.NARRATION_GENERATION:
+            await self._sync_generic_story_from_workflow(
+                workflow,
+                public_base_url=public_base_url,
+                copy_images=False,
+            )
 
     async def _generate_character_analysis(self, workflow: GenericStoryWorkflow) -> dict[str, Any]:
         if settings.STORY_MOCK_LLM_RESPONSES:
@@ -1037,6 +1183,242 @@ class GenericStoryWorkflowService:
             )
 
         workflow.story_json = story_json
+
+    async def _generate_cover_and_submit_multi_image_pages(
+        self,
+        workflow: GenericStoryWorkflow,
+        *,
+        payload: GenericStoryWorkflowExecuteRequest,
+        public_base_url: str,
+    ) -> None:
+        active_job = await self._active_multi_image_pages_job(workflow.id)
+        if active_job is not None:
+            workflow.status = GenericStoryWorkflowStatus.IN_PROGRESS.value
+            workflow.current_step = GenericStoryWorkflowStep.IMAGE_GENERATION.value
+            workflow.error_message = None
+            self._log_workflow_event(
+                "multi_image_batch_already_active",
+                workflow,
+                step=GenericStoryWorkflowStep.IMAGE_GENERATION,
+                batch_job_id=active_job.id,
+                provider_job_name=active_job.provider_job_name,
+            )
+            return
+
+        story_json = workflow.story_json or {}
+        image_plan = workflow.image_plan_json or {}
+        visual_bible = self._workflow_visual_bible(workflow)
+        story_title = story_json.get("title") or workflow.title or "Untitled Story"
+
+        cover_item = self._multi_image_cover_item(workflow, story_json)
+        page_items = self._multi_image_page_items(workflow, story_json)
+        batch_items = ([cover_item] if cover_item else []) + page_items
+        if not batch_items:
+            raise AppException(
+                "Generic story workflow has no page image prompts for multi-image mode.",
+                code="GENERIC_MULTI_IMAGE_PAGES_EMPTY",
+            )
+
+        model = settings.GOOGLE_REFERENCE_IMAGE_MODEL.removeprefix("models/")
+        requests: list[types.InlinedRequest] = []
+        if cover_item:
+            requests.append(
+                types.InlinedRequest(
+                    contents=[types.Content(role="user", parts=[types.Part(text=cover_item["rendered_prompt"])])],
+                    metadata={"key": cover_item["key"]},
+                    config=types.GenerateContentConfig(
+                        response_modalities=["IMAGE", "TEXT"],
+                        image_config=types.ImageConfig(aspect_ratio=cover_item["aspect_ratio"]),
+                    ),
+                )
+            )
+        pages_prompt = None
+        if page_items:
+            pages_prompt = self._render_multi_image_pages_prompt(
+                story_title=story_title,
+                age_group=age_group_label(workflow.age_group),
+                visual_bible=visual_bible,
+                page_items=page_items,
+            )
+            requests.append(
+                types.InlinedRequest(
+                    contents=[types.Content(role="user", parts=[types.Part(text=pages_prompt)])],
+                    metadata={"key": "pages_multi"},
+                    config=types.GenerateContentConfig(
+                        response_modalities=["IMAGE", "TEXT"],
+                        image_config=types.ImageConfig(aspect_ratio=settings.STORY_PAGE_ASPECT_RATIO),
+                    ),
+                )
+            )
+        job = await self.batch_jobs.create(
+            generic_story_id=workflow.generic_story_id,
+            workflow_id=workflow.id,
+            job_type=StoryBatchJobType.IMAGE,
+            attempt=1,
+            expected_item_count=len(batch_items),
+            request_keys=[str(item["key"]) for item in batch_items],
+            provider_model=model,
+            provider="google",
+            request_payload={
+                "mode": "generic_story_workflow_multi_image_pages",
+                "provider": "google",
+                "attempt": 1,
+                "multi_image_mode": True,
+                "items": batch_items,
+                "prompt": pages_prompt,
+                "aspect_ratio": settings.STORY_PAGE_ASPECT_RATIO,
+                "skip_narration_generation": payload.skip_narration_generation,
+                "publish_status": payload.publish_status,
+                "public_base_url": public_base_url,
+                "continue_after_image_generation": False,
+            },
+        )
+        await self.session.flush()
+        try:
+            provider_job = await self.ai_provider.client.aio.batches.create(
+                model=model,
+                src=requests,
+                config={"display_name": f"generic-workflow-{workflow.id}-multi-page-images"},
+            )
+            job.provider_job_name = provider_job.name
+            job.provider_state = self._google_job_state_name(provider_job)
+            await self.batch_jobs.update(job)
+        except Exception as exc:
+            job.status = StoryBatchJobStatus.FAILED
+            job.error_message = str(exc)
+            job.missing_keys = [str(item["key"]) for item in batch_items]
+            await self.batch_jobs.update(job)
+            raise
+
+        workflow.story_json = story_json
+        workflow.status = GenericStoryWorkflowStatus.IN_PROGRESS.value
+        workflow.current_step = GenericStoryWorkflowStep.IMAGE_GENERATION.value
+        workflow.error_message = None
+
+    async def _active_multi_image_pages_job(self, workflow_id: UUID):
+        jobs = await self.batch_jobs.list_active_for_workflow(workflow_id)
+        for job in jobs:
+            request_payload = job.request_payload if isinstance(job.request_payload, dict) else {}
+            if request_payload.get("mode") == "generic_story_workflow_multi_image_pages":
+                return job
+        return None
+
+    def _multi_image_cover_item(
+        self,
+        workflow: GenericStoryWorkflow,
+        story_json: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        image_plan = workflow.image_plan_json or {}
+        cover_plan = image_plan.get("cover") if isinstance(image_plan.get("cover"), dict) else {}
+        if not cover_plan:
+            return None
+        visual_bible = self._workflow_visual_bible(workflow)
+        story_title = story_json.get("title") or workflow.title or "Untitled Story"
+        rendered_prompt = self._render_image_prompt(
+            page_type="cover",
+            story_title=story_title,
+            visual_bible=visual_bible,
+            page_image_plan=cover_plan,
+        )
+        return {
+            "key": "cover",
+            "item_id": "cover",
+            "page_type": "cover",
+            "page_number": 0,
+            "filename": "cover.png",
+            "aspect_ratio": settings.STORY_COVER_ASPECT_RATIO,
+            "page_image_plan": cover_plan,
+            "story_page": {},
+            "visual_context": self._image_visual_context(visual_bible, cover_plan),
+            "source_image_prompt": self._image_plan_summary(cover_plan),
+            "rendered_prompt": rendered_prompt,
+        }
+
+    def _multi_image_page_items(
+        self,
+        workflow: GenericStoryWorkflow,
+        story_json: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        image_plan = workflow.image_plan_json or {}
+        visual_bible = self._workflow_visual_bible(workflow)
+        story_title = story_json.get("title") or workflow.title or "Untitled Story"
+        story_pages_by_number = {
+            int(page.get("page_number") or index): page
+            for index, page in enumerate(story_json.get("pages") or [], start=1)
+            if isinstance(page, dict)
+        }
+        page_items: list[dict[str, Any]] = []
+        for page_plan in image_plan.get("pages") or []:
+            if not isinstance(page_plan, dict):
+                continue
+            page_number = self._image_plan_page_number(page_plan)
+            if page_number is None:
+                continue
+            rendered_prompt = self._render_image_prompt(
+                page_type="story_page",
+                story_title=story_title,
+                visual_bible=visual_bible,
+                page_image_plan=page_plan,
+            )
+            page_items.append(
+                {
+                    "key": f"page_{page_number}",
+                    "item_id": f"page_{page_number}",
+                    "page_type": "story_page",
+                    "page_number": page_number,
+                    "filename": f"page_{page_number}.png",
+                    "aspect_ratio": settings.STORY_PAGE_ASPECT_RATIO,
+                    "page_image_plan": page_plan,
+                    "story_page": self._image_story_page_context(story_pages_by_number.get(page_number) or {}),
+                    "visual_context": self._image_visual_context(visual_bible, page_plan),
+                    "source_image_prompt": self._image_plan_summary(page_plan),
+                    "rendered_prompt": rendered_prompt,
+                }
+            )
+        return page_items
+
+    @staticmethod
+    def _image_story_page_context(story_page: dict[str, Any]) -> dict[str, Any]:
+        """Keep non-prose page context out of image prompts to prevent rendered captions."""
+        if not isinstance(story_page, dict):
+            return {}
+        allowed_keys = ("page_number", "emotion")
+        return {key: story_page[key] for key in allowed_keys if story_page.get(key) is not None}
+
+    def _render_multi_image_pages_prompt(
+        self,
+        *,
+        story_title: str,
+        age_group: str,
+        visual_bible: dict[str, Any],
+        page_items: list[dict[str, Any]],
+    ) -> str:
+        global_visual_context = {
+            key: visual_bible[key]
+            for key in (
+                "style",
+                "illustration_notes",
+                "style_consistency_rules",
+                "color_palette_global",
+                "rendering_style",
+                "safety_rules",
+                "negative_constraints",
+            )
+            if isinstance(visual_bible, dict) and key in visual_bible
+        }
+        return load_and_render_prompt(
+            "prompts/generic_story/multi_image_generation_prompt.txt",
+            {
+                "group_name": "pages",
+                "story_title": story_title,
+                "age_group": age_group,
+                "target_aspect_ratio": settings.STORY_PAGE_ASPECT_RATIO,
+                "item_count": len(page_items),
+                "item_order": "\n".join(f"- {item['key']}" for item in page_items),
+                "items_json": _compact_json(page_items),
+                "global_visual_context": _compact_json(global_visual_context),
+            },
+        )
 
     def _generate_dummy_images(self, workflow: GenericStoryWorkflow) -> None:
         """Attach generated image prompts and dummy image URLs without image LLM/storage calls."""
@@ -1249,9 +1631,94 @@ class GenericStoryWorkflowService:
         publish_status: str | None,
         public_base_url: str,
     ) -> None:
+        generic_story = await self._sync_generic_story_from_workflow(
+            workflow,
+            publish_status=publish_status,
+            public_base_url=public_base_url,
+            copy_images=True,
+            finalize=True,
+        )
+        workflow.status = GenericStoryWorkflowStatus.COMPLETED.value
+        self._log_workflow_event(
+            "generic_story_published",
+            workflow,
+            step=GenericStoryWorkflowStep.PUBLISH_GENERIC_STORY,
+            publish_status=generic_story.status,
+        )
+
+    async def _sync_generic_story_from_workflow(
+        self,
+        workflow: GenericStoryWorkflow,
+        *,
+        publish_status: str | None = None,
+        public_base_url: str,
+        copy_images: bool,
+        finalize: bool = False,
+    ):
+        if not hasattr(self, "generic_stories"):
+            return None
         story_json = workflow.story_json or {}
         title = str(story_json.get("title") or workflow.title or "Untitled Story")[:255]
-        data = {
+        generic_story = None
+        if workflow.generic_story_id is not None:
+            generic_story = await self.generic_stories.get_by_id(workflow.generic_story_id)
+            if generic_story is None:
+                raise NotFoundException("Generic story not found", "GENERIC_STORY_NOT_FOUND")
+            await self._ensure_generic_story_title_available(title, current_story_id=generic_story.id)
+        else:
+            await self._ensure_generic_story_title_available(title)
+
+        current_status = getattr(generic_story, "status", None) if generic_story is not None else None
+        status_value = (
+            publish_status or (workflow.input_request or {}).get("status") or current_status or "inactive"
+            if finalize
+            else current_status or "inactive"
+        )
+        data = self._generic_story_data_from_workflow(
+            workflow,
+            story_json,
+            title=title,
+            status=status_value or "inactive",
+        )
+
+        if generic_story is None:
+            generic_story = await self.generic_stories.create(**data)
+
+        for field, value in data.items():
+            setattr(generic_story, field, value)
+
+        if copy_images:
+            story_json = await self._copy_story_images_to_generic_story_storage(
+                story_json,
+                generic_story_id=generic_story.id,
+                public_base_url=public_base_url,
+            )
+        workflow.story_json = story_json
+        workflow.cover_image = story_json.get("cover_image_url") or workflow.cover_image
+        generic_story.cover_image = workflow.cover_image
+
+        await self.generic_stories.upsert_contents(
+            generic_story,
+            self._story_content_payloads(story_json, workflow_language=workflow.language),
+        )
+        workflow.generic_story_id = generic_story.id
+        self._log_workflow_event(
+            "generic_story_synced",
+            workflow,
+            step=getattr(workflow, "current_step", None),
+            publish_status=data["status"],
+        )
+        return generic_story
+
+    def _generic_story_data_from_workflow(
+        self,
+        workflow: GenericStoryWorkflow,
+        story_json: dict[str, Any],
+        *,
+        title: str,
+        status: str,
+    ) -> dict[str, Any]:
+        return {
             "title": title,
             "summary": workflow.summary or story_json.get("summary") or "",
             "age_group": workflow.age_group,
@@ -1263,42 +1730,8 @@ class GenericStoryWorkflowService:
             "character_type": self._character_type(workflow.character_analysis_json),
             "total_pages": len(story_json.get("pages") or []),
             "cover_image": workflow.cover_image or story_json.get("cover_image_url"),
-            "status": publish_status or (workflow.input_request or {}).get("status") or "inactive",
+            "status": status,
         }
-
-        if workflow.generic_story_id is not None:
-            generic_story = await self.generic_stories.get_by_id(workflow.generic_story_id)
-            if generic_story is None:
-                raise NotFoundException("Generic story not found", "GENERIC_STORY_NOT_FOUND")
-            await self._ensure_generic_story_title_available(title, current_story_id=generic_story.id)
-        else:
-            await self._ensure_generic_story_title_available(title)
-            generic_story = await self.generic_stories.create(**data)
-
-        for field, value in data.items():
-            setattr(generic_story, field, value)
-
-        story_json = await self._copy_story_images_to_generic_story_storage(
-            story_json,
-            generic_story_id=generic_story.id,
-            public_base_url=public_base_url,
-        )
-        workflow.story_json = story_json
-        workflow.cover_image = story_json.get("cover_image_url") or workflow.cover_image
-        generic_story.cover_image = workflow.cover_image
-
-        await self.generic_stories.upsert_contents(
-            generic_story,
-            self._story_content_payloads(story_json, workflow_language=workflow.language),
-        )
-        workflow.generic_story_id = generic_story.id
-        workflow.status = GenericStoryWorkflowStatus.COMPLETED.value
-        self._log_workflow_event(
-            "generic_story_published",
-            workflow,
-            step=GenericStoryWorkflowStep.PUBLISH_GENERIC_STORY,
-            publish_status=data["status"],
-        )
 
     async def _copy_story_images_to_generic_story_storage(
         self,
@@ -1627,8 +2060,11 @@ class GenericStoryWorkflowService:
     def _image_title_instruction(page_type: str, story_title: str) -> str:
         if page_type != "cover":
             return (
-                "This is an interior story page. Do not render any written text, letters, captions, signs, "
-                "labels, logos, or typography."
+                "This is an interior story page. Do not render story prose, narration text, title text, "
+                "captions, subtitles, speech bubbles, UI text, floating text, or any top/bottom overlay text. "
+                "Only render readable text when IMAGE PLAN explicitly requires short in-scene object text, "
+                "such as a blackboard note, chair name label, classroom sign, or book cover inside the scene. "
+                "Any allowed text must stay physically on that object and must not appear as a caption."
             )
         title = str(story_title or "").strip() or "Untitled Story"
         return (
@@ -2772,7 +3208,7 @@ class GenericStoryWorkflowService:
         if step == GenericStoryWorkflowStep.NARRATION_GENERATION:
             return self._story_has_audio(workflow.story_json or {})
         if step == GenericStoryWorkflowStep.PUBLISH_GENERIC_STORY:
-            return workflow.generic_story_id is not None
+            return workflow.generic_story_id is not None and workflow.status == GenericStoryWorkflowStatus.COMPLETED.value
         return False
 
     def _step_summary(self, workflow: GenericStoryWorkflow, step: GenericStoryWorkflowStep) -> dict[str, Any]:

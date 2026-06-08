@@ -218,6 +218,16 @@ English, Hindi, and Marathi must preserve:
 
 The languages should feel like they were originally written for children in that language.
 
+Write each language independently from the Scene Plan.
+
+Do NOT write English first and then translate it into Hindi or Marathi.
+
+Treat English source text, Actual Story, and Scene Plan text as meaning and structure only.
+
+For Hindi and Marathi, create native child-friendly sentences directly from each page's story_role, scene_summary, main_action, emotion, and continuity.
+
+Hindi and Marathi must be complete story sentences, not word-by-word substitutions, fragments, captions, or glossary-like lines.
+
 Do NOT translate sentence-by-sentence.
 
 Do NOT copy English sentence structure into Hindi or Marathi.
@@ -245,6 +255,14 @@ HINDI
 
 Write in modern spoken children's Hindi.
 Do not write shuddh, Sanskrit-heavy, or textbook-style Hindi.
+
+Write title.hi, summary.hi, moral.hi, and every text.hi in Hindi using Devanagari script.
+
+Do not output romanized Hindi.
+
+Do not leave Hindi fields in English.
+
+Do not copy English word order into Hindi. Rephrase the scene as a natural Hindi children's story moment.
 
 Use:
 
@@ -305,6 +323,14 @@ MARATHI
 
 Write in modern spoken children's Marathi.
 Do not write shuddh, Sanskrit-heavy, or textbook-style Marathi.
+
+Write title.mr, summary.mr, moral.mr, and every text.mr in Marathi using Devanagari script.
+
+Do not output romanized Marathi.
+
+Do not leave Marathi fields in English.
+
+Do not copy English word order into Marathi. Rephrase the scene as a natural Marathi children's story moment.
 
 Use:
 
@@ -434,4 +460,7 @@ voice_style should remain mostly consistent throughout the story unless a major 
    * text.mr
 4. Every text field must be non-empty.
 5. All languages must remain semantically aligned.
-6. Return STRICT VALID JSON ONLY.
+6. Hindi fields must be Hindi in Devanagari script, except for a few natural English words when appropriate.
+7. Marathi fields must be Marathi in Devanagari script, except for a few natural English words when appropriate.
+8. Hindi and Marathi page text must be complete natural story sentences, not literal translations or fragments.
+9. Return STRICT VALID JSON ONLY.

@@ -28,6 +28,25 @@ class ImageGenerationResult:
 
 
 @dataclass(frozen=True)
+class GeneratedImagePart:
+    """One image emitted from an interleaved image generation response."""
+
+    image_bytes: bytes
+    mime_type: str | None = None
+    preceding_text: str | None = None
+
+
+@dataclass(frozen=True)
+class MultiImageGenerationResult:
+    """Result from a prompt that asks a provider to emit multiple images."""
+
+    images: list[GeneratedImagePart]
+    prompt_used: str
+    model: str
+    metadata: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
 class Base64ImageData:
     """Decoded base64 image input."""
 
