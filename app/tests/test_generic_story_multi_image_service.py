@@ -120,7 +120,9 @@ def test_group_prompt_includes_ordered_item_ids_and_page_numbers():
     assert "Character consistency applies to every visible named character, not only the hero." in prompt
     assert "Do not replace a named character with a lookalike" in prompt
     assert "faceless named characters" in prompt
-    assert "Use visual_context as the source of truth for character appearance" in prompt
+    assert "GLOBAL CHARACTER REFERENCE JSON" in prompt
+    assert "Use GLOBAL CHARACTER REFERENCE JSON as the source of truth for character appearance" in prompt
+    assert "Use visual_context as the source of truth for page-scoped style" in prompt
     assert "The required output is image parts" in prompt
     assert "Do not stop after text markers" in prompt
     assert "source_image_prompt" in prompt

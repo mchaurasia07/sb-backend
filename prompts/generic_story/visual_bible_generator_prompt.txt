@@ -24,6 +24,9 @@ Requested Title:
 Actual Story:
 {actual_story}
 
+Age Group:
+{age_group}
+
 Character Analysis JSON:
 {character_analysis_json}
 
@@ -32,6 +35,9 @@ Scene Plan JSON:
 
 Illustration Style:
 {illustration_style}
+
+Visual Diversity Seed:
+{visual_diversity_seed}
 
 # VISUAL DESIGN RULES
 
@@ -52,6 +58,7 @@ Illustration Style:
    * exact type
    * exact colors
    * exact patterns
+   * exact footwear
 
 5. Hair must have:
 
@@ -67,7 +74,7 @@ Illustration Style:
    * sometimes present
    * never present
 
-7. If a detail is unknown from the story, create ONE child-friendly design and keep it fixed.
+7. If a detail is unknown from the story, invent missing visual details exactly once in this Visual Bible: face type, skin tone, eye shape/color, hair, outfit, footwear, accessories, distinctive features, and body scale. Once invented, these details become hard locks for the cover and all pages.
 
 8. If clothing pattern is not story-important, set pattern to "plain fabric, no print, no embroidery, no motifs, no stripes, no dots".
 
@@ -75,12 +82,38 @@ Illustration Style:
 
 10. Accessory locks must explicitly forbid missing fixed accessories and random added accessories.
 
+11. face_lock must include face shape, skin tone, eye shape, and eye color.
+
+12. outfit_lock must include clothing type, exact colors, pattern, and footwear.
+
+13. forbidden_variations must include hairstyle changes, outfit/color changes, footwear changes, missing fixed accessories, random added accessories, skin tone changes, and eye color changes.
+
+# CROSS-STORY VARIETY RULES
+
+Use Visual Diversity Seed as the design seed for this story's cast. Retry for the same workflow must preserve the same designs.
+
+Design each story's cast as visually distinct from generic/default child and parent templates. Do not reuse the same repeated child look across stories.
+
+Do not default every girl to the same pigtails, pink kurta, round face, and brown eyes. Do not default every boy to the same short hair, orange shirt, round face, and shorts. Do not default every parent or grandparent to the same face, clothing, hair, and color palette.
+
+Invented designs must fit the story setting, culture, age group, role, relationship, and activity. For Indian/desi, family, school, classroom, festival, or neighborhood stories, use context-appropriate clothing and details, but vary outfit type, colors, hair structure, footwear, accessories, body scale, and face shape across characters and across different stories.
+
+Within the same story, make each named human character visually distinguishable unless the story explicitly requires matching uniforms, twins, siblings, or a dress code.
+
+Every character must have a design_fingerprint summarizing the locked look. The cast_design_fingerprint must summarize how this story's cast is visually distinct.
+
 # OUTPUT JSON
 
 {
 "style": "{illustration_style}",
 
 "age_group": "",
+
+"visual_diversity_seed": "{visual_diversity_seed}",
+
+"cast_design_fingerprint": "",
+
+"design_rationale": "",
 
 "characters": [
 {
@@ -116,6 +149,7 @@ Illustration Style:
   "accessory_lock": ""
 },
 "forbidden_variations": [],
+"design_fingerprint": "",
 "size_relative_to_hero": ""
 }
 ],
@@ -150,4 +184,11 @@ Illustration Style:
 9. All visual descriptions must be deterministic.
 10. Every tied hairstyle must state exact visible count and placement.
 11. Every fixed accessory must state whether it is always present.
-12. Return STRICT VALID JSON ONLY.
+12. face_lock includes face shape, skin tone, eye shape, and eye color.
+13. outfit_lock includes clothing type, exact colors, pattern, and footwear.
+14. forbidden_variations cover hairstyle, outfit/color, footwear, fixed accessories, random accessories, skin tone, and eye color.
+15. visual_diversity_seed exactly equals "{visual_diversity_seed}".
+16. Every character has design_fingerprint.
+17. cast_design_fingerprint explains the story-specific cast look.
+18. Invented details are locked and reused by cover and all pages.
+19. Return STRICT VALID JSON ONLY.

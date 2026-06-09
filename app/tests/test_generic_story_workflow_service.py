@@ -26,6 +26,39 @@ from app.service.generic_story_workflow_service import (
     GenericStoryWorkflowService,
     _repair_json,
 )
+from app.service.story_narration_profile import normalize_page_emotion
+
+
+def _locked_visual_character(name: str, *, design_fingerprint: str) -> dict:
+    return {
+        "name": name,
+        "role": "hero",
+        "appearance": {
+            "age": "seven years old",
+            "height_build": "short child, slim build",
+            "skin_tone": "warm brown skin",
+            "face_shape": "round face",
+            "eye_shape": "large almond eyes",
+            "eye_color": "dark brown",
+            "hair": {"color": "black", "length": "short", "style": "neatly combed bob"},
+            "outfit": {
+                "type": "cotton kurta",
+                "primary_color": "blue",
+                "secondary_color": "white",
+                "pattern": "plain fabric",
+            },
+            "footwear": "brown sandals",
+            "accessories": ["small silver bracelet always present"],
+        },
+        "locks": {
+            "face_lock": "round face, warm brown skin, large almond dark brown eyes",
+            "hair_lock": "short black neatly combed bob",
+            "outfit_lock": "blue cotton kurta, white leggings, and brown sandals",
+            "accessory_lock": "small silver bracelet always present; no random accessories",
+        },
+        "forbidden_variations": ["pink dress", "pigtails", "missing silver bracelet"],
+        "design_fingerprint": design_fingerprint,
+    }
 
 
 def test_generic_story_workflow_has_user_created_at_index():
@@ -302,6 +335,10 @@ def test_story_generation_prompt_requires_natural_hindi_marathi_localization():
     assert "Do not leave Marathi fields in English." in prompt
     assert "complete natural story sentences, not literal translations or fragments" in prompt
     assert "Would a 3-9 year old understand this when read aloud?" in prompt
+    assert "Page emotion must reflect the Scene Plan page's dominant feeling. Do not reuse \"wonder\" on every page." in prompt
+    assert "For the output page emotion field, use only one of these supported values:" in prompt
+    assert "concerned/caring/tender -> kindness" in prompt
+    assert "do not set every page to wonder" in prompt
 
 
 def test_image_plan_prompt_uses_story_json_page_count_as_source_of_truth():
@@ -317,6 +354,8 @@ def test_image_plan_prompt_uses_story_json_page_count_as_source_of_truth():
     assert "continuity_notes must include the character's Visual Bible locks" in prompt
     assert "Side characters must have the same level of continuity detail as the hero." in prompt
     assert "Do not change clothing, colors, hairstyle, face, body shape, age, accessories, or species" in prompt
+    assert "Apply basic scene etiquette" in prompt
+    assert "no outdoor shoes inside temples/prayer rooms/sacred spaces or on beds/bedding" in prompt
     assert "Every visible named character on every page has continuity_notes" in prompt
     assert "Use Scene Plan image_brief and visual_direction as source guidance" in prompt
     assert "Do not ignore scene_plan.pages[].image_brief or scene_plan.pages[].visual_direction" in prompt
@@ -325,20 +364,236 @@ def test_image_plan_prompt_uses_story_json_page_count_as_source_of_truth():
     assert '"allowed_in_scene_text": []' in prompt
     assert "allowed_in_scene_text is the only place to request readable text on story pages" in prompt
     assert "Page composition, visual_focus, environment, and continuity_notes must not mention title area" in prompt
+    assert "Each page must show one clear visual moment" in prompt
+    assert "not a split scene, montage, collage, sequence, or multi-vignette page" in prompt
+    assert "premium finished illustration" in prompt
+    assert "Each character listed in characters must appear exactly once" in prompt
+    assert "Never describe floating heads, detached faces, cropped heads, or partial child/adult cutouts" in prompt
+    assert "no duplicate heads, duplicate faces, floating heads, detached faces" in prompt
+    assert "Do not use split scene, panel, panels, vignette, vignettes, montage, sequence, or collage" in prompt
     assert "scene_plan.cinematography" not in prompt
 
 
 def test_character_and_image_generation_prompts_enforce_named_character_consistency():
     character_prompt = Path("prompts/generic_story/character_extraction_prompt.txt").read_text(encoding="utf-8")
+    visual_bible_prompt = Path("prompts/generic_story/visual_bible_generator_prompt.txt").read_text(encoding="utf-8")
     image_prompt = Path("prompts/generic_story/image_generation_prompt.txt").read_text(encoding="utf-8")
 
     assert "Extract every named, recurring, or story-important visible character" in character_prompt
     assert "Do not collapse named characters into vague labels" in character_prompt
     assert "Side characters must receive the same consistency treatment as the hero." in character_prompt
+    assert "Visual Diversity Seed:" in visual_bible_prompt
+    assert "invent missing visual details exactly once" in visual_bible_prompt
+    assert "Do not reuse the same repeated child look across stories." in visual_bible_prompt
+    assert "Do not default every girl to the same pigtails, pink kurta" in visual_bible_prompt
+    assert "Invented details are locked and reused by cover and all pages." in visual_bible_prompt
+    assert '"visual_diversity_seed": "{visual_diversity_seed}"' in visual_bible_prompt
+    assert '"cast_design_fingerprint": ""' in visual_bible_prompt
+    assert '"design_fingerprint": ""' in visual_bible_prompt
     assert "Character consistency is mandatory for every visible character, not only the hero." in image_prompt
     assert "Do not replace a named character with a lookalike" in image_prompt
     assert "faceless named characters" in image_prompt
     assert "cropped heads" in image_prompt
+    assert "Draw each named character listed in IMAGE PLAN.characters exactly once" in image_prompt
+    assert "No floating heads, detached heads, disembodied faces" in image_prompt
+    assert "Respect basic scene etiquette" in image_prompt
+    assert "do not draw outdoor shoes on feet" in image_prompt
+    assert "This does not change the locked footwear design" in image_prompt
+    assert "finished picture-book quality" in image_prompt
+    assert "not a split scene, comic panel layout, montage, collage, or multiple vignettes" in image_prompt
+
+
+def test_visual_diversity_seed_is_stable_per_workflow_and_varies_by_workflow():
+    workflow_id = uuid4()
+    workflow = SimpleNamespace(
+        id=workflow_id,
+        title="The Neem Tree",
+        age_group="6-9",
+        theme="kindness",
+        genre="realistic",
+        actual_story="A child learns from her grandmother under a neem tree.",
+    )
+    same_workflow = SimpleNamespace(**workflow.__dict__)
+    different_workflow = SimpleNamespace(**{**workflow.__dict__, "id": uuid4()})
+
+    assert GenericStoryWorkflowService._visual_diversity_seed(workflow) == GenericStoryWorkflowService._visual_diversity_seed(same_workflow)
+    assert GenericStoryWorkflowService._visual_diversity_seed(workflow) != GenericStoryWorkflowService._visual_diversity_seed(different_workflow)
+
+
+@pytest.mark.asyncio
+async def test_generate_visual_bible_passes_and_stores_visual_diversity_seed(monkeypatch):
+    service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
+    workflow = SimpleNamespace(
+        id=uuid4(),
+        title="The Neem Tree",
+        actual_story="Saavi talks with Grandma under a neem tree.",
+        age_group="6-9",
+        theme="kindness",
+        genre="realistic",
+        scene_plan_json={"pages": []},
+        character_analysis_json={"chars": [{"name": "Saavi", "type": "human", "role": "hero"}]},
+    )
+    captured_prompt = {}
+
+    async def _generate_json(prompt, *, max_tokens):
+        captured_prompt["text"] = prompt
+        return {
+            "characters": [
+                {
+                    "name": "Saavi",
+                    "role": "hero",
+                    "appearance": {
+                        "age": "seven years old",
+                        "height_build": "short child, sturdy build",
+                        "skin_tone": "warm brown skin",
+                        "face_shape": "soft oval face",
+                        "eye_shape": "wide almond eyes",
+                        "eye_color": "dark brown",
+                        "hair": {"color": "black", "length": "shoulder length", "style": "single side braid"},
+                        "outfit": {"type": "cotton kurta", "primary_color": "leaf green", "secondary_color": "cream leggings", "pattern": "plain fabric"},
+                        "footwear": "brown sandals",
+                        "accessories": ["yellow hair clip always present"],
+                    },
+                    "locks": {
+                        "face_lock": "soft oval face, warm brown skin, wide almond dark brown eyes",
+                        "hair_lock": "black shoulder-length hair in one side braid with yellow hair clip",
+                        "outfit_lock": "leaf green cotton kurta, cream leggings, and brown sandals",
+                        "accessory_lock": "yellow hair clip always present; no random accessories",
+                    },
+                    "forbidden_variations": ["pigtails", "pink dress", "missing yellow hair clip"],
+                }
+            ],
+            "locations": [],
+            "important_objects": [],
+        }
+
+    monkeypatch.setattr(settings, "STORY_MOCK_LLM_RESPONSES", False)
+    service._generate_json = _generate_json
+
+    visual_bible = await service._generate_visual_bible(workflow)
+    seed = GenericStoryWorkflowService._visual_diversity_seed(workflow)
+
+    assert f"Visual Diversity Seed:\n{seed}" in captured_prompt["text"]
+    assert visual_bible["visual_diversity_seed"] == seed
+    assert visual_bible["characters"][0]["design_fingerprint"]
+    assert visual_bible["cast_design_fingerprint"]
+
+
+def test_validate_visual_bible_rejects_missing_character_locks():
+    workflow = SimpleNamespace(
+        actual_story="A child helps in a garden.",
+        theme="kindness",
+        genre="realistic",
+        character_analysis_json={"chars": [{"name": "Mira", "type": "human", "role": "hero"}]},
+        scene_plan_json={},
+    )
+    visual_bible = {
+        "characters": [
+            {
+                "name": "Mira",
+                "appearance": {"skin_tone": "warm brown", "face_shape": "round face"},
+                "locks": {"face_lock": "round face"},
+                "forbidden_variations": ["blue dress"],
+            }
+        ]
+    }
+
+    with pytest.raises(AppException) as exc_info:
+        GenericStoryWorkflowService._validate_visual_bible_character_locks(visual_bible, workflow)
+
+    assert exc_info.value.code == "GENERIC_VISUAL_BIBLE_CHARACTER_LOCKS_MISSING"
+
+
+def test_validate_visual_bible_rejects_duplicate_human_design_fingerprints():
+    workflow = SimpleNamespace(
+        actual_story="Two classmates solve a puzzle.",
+        theme="teamwork",
+        genre="school",
+        character_analysis_json={
+            "chars": [
+                {"name": "Mira", "type": "human", "role": "hero"},
+                {"name": "Riya", "type": "human", "role": "friend"},
+            ]
+        },
+        scene_plan_json={},
+    )
+    visual_bible = {
+        "characters": [
+            _locked_visual_character("Mira", design_fingerprint="same child design"),
+            _locked_visual_character("Riya", design_fingerprint="same child design"),
+        ]
+    }
+
+    with pytest.raises(AppException) as exc_info:
+        GenericStoryWorkflowService._validate_visual_bible_character_locks(visual_bible, workflow)
+
+    assert exc_info.value.code == "GENERIC_VISUAL_BIBLE_CHARACTER_DESIGNS_DUPLICATE"
+
+
+def test_validate_visual_bible_allows_duplicate_fingerprints_when_story_justifies_matching():
+    workflow = SimpleNamespace(
+        actual_story="Twin sisters wear matching school uniforms for the race.",
+        theme="teamwork",
+        genre="school",
+        character_analysis_json={
+            "chars": [
+                {"name": "Mira", "type": "human", "role": "hero"},
+                {"name": "Riya", "type": "human", "role": "friend"},
+            ]
+        },
+        scene_plan_json={},
+    )
+    visual_bible = {
+        "characters": [
+            _locked_visual_character("Mira", design_fingerprint="same twin design"),
+            _locked_visual_character("Riya", design_fingerprint="same twin design"),
+        ]
+    }
+
+    GenericStoryWorkflowService._validate_visual_bible_character_locks(visual_bible, workflow)
+
+
+def test_page_emotion_normalization_preserves_scene_specific_feelings():
+    assert normalize_page_emotion("excited, happy, joyful") == "excitement"
+    assert normalize_page_emotion("concerned, empathetic, worried") == "kindness"
+    assert normalize_page_emotion("relieved, tender, responsible") == "calm"
+    assert normalize_page_emotion("responsible, affectionate, joyful") == "determination"
+    assert normalize_page_emotion("amused, joyful, heartwarming") == "playfulness"
+    assert normalize_page_emotion("overwhelmed joy, surprise, love") == "triumph"
+    assert normalize_page_emotion("content, peaceful, loving, reflective") == "calm"
+
+
+def test_normalize_story_json_uses_scene_plan_emotion_when_story_emotion_is_generic():
+    service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
+    workflow = SimpleNamespace(
+        age_group="6-9",
+        language="en",
+        scene_plan_json={
+            "title": "Zoya and the Birthday Puppy",
+            "summary": "Zoya helps a puppy.",
+            "pages": [
+                {"page": 1, "emotion": "hopeful, longing, understanding"},
+                {"page": 2, "emotion": "excited, happy, joyful"},
+                {"page": 3, "emotion": "concerned, empathetic, worried"},
+                {"page": 4, "emotion": "content, peaceful, loving, reflective"},
+            ],
+        },
+    )
+    raw = {
+        "title": {"en": "Zoya and the Birthday Puppy", "hi": "Hindi", "mr": "Marathi"},
+        "summary": {"en": "Zoya helps a puppy.", "hi": "Hindi", "mr": "Marathi"},
+        "pages": [
+            {"page_number": 1, "emotion": "wonder", "text": {"en": "Page 1.", "hi": "Hindi 1.", "mr": "Marathi 1."}},
+            {"page_number": 2, "emotion": "wonder", "text": {"en": "Page 2.", "hi": "Hindi 2.", "mr": "Marathi 2."}},
+            {"page_number": 3, "emotion": "wonder", "text": {"en": "Page 3.", "hi": "Hindi 3.", "mr": "Marathi 3."}},
+            {"page_number": 4, "emotion": "wonder", "text": {"en": "Page 4.", "hi": "Hindi 4.", "mr": "Marathi 4."}},
+        ],
+        "moral": {"en": "Kindness matters.", "hi": "Hindi", "mr": "Marathi"},
+    }
+
+    normalized = service._normalize_story_json(raw, workflow)
+
+    assert [page["emotion"] for page in normalized["pages"]] == ["confidence", "excitement", "kindness", "calm"]
 
 
 @pytest.mark.asyncio
@@ -613,9 +868,15 @@ def test_render_image_prompt_uses_page_scoped_visual_context():
                     "role": "hero",
                     "anchor": "Mira anchor.",
                     "appearance": {
+                        "age": "eight years old",
+                        "height_build": "small child, slim build",
+                        "skin_tone": "warm medium brown skin",
                         "face_shape": "round face",
+                        "eye_shape": "large almond eyes",
+                        "eye_color": "dark brown",
                         "hair": {"color": "black", "length": "short", "style": "bob"},
                         "outfit": {"type": "dress", "primary_color": "yellow", "pattern": "plain"},
+                        "footwear": "white sneakers",
                         "accessories": ["red bracelet always present"],
                     },
                     "locks": {
@@ -729,9 +990,15 @@ def test_render_cover_prompt_locks_visual_bible_identity_and_cover_continuity():
                     "role": "hero",
                     "anchor": "Mira anchor.",
                     "appearance": {
+                        "age": "eight years old",
+                        "height_build": "small child, slim build",
+                        "skin_tone": "warm medium brown skin",
+                        "eye_shape": "large almond eyes",
+                        "eye_color": "dark brown",
                         "face_shape": "round face",
                         "hair": {"color": "black", "length": "short", "style": "bob"},
                         "outfit": {"type": "dress", "primary_color": "yellow", "pattern": "plain"},
+                        "footwear": "white sneakers",
                         "accessories": ["red bracelet always present"],
                     },
                     "locks": {
@@ -764,14 +1031,25 @@ def test_render_cover_prompt_locks_visual_bible_identity_and_cover_continuity():
     )
 
     assert "same face, hair, outfit, accessories, body scale, and forbidden variations" in prompt
-    assert "not a redesigned marketing version or alternate costume" in prompt
+    assert "same canonical character models used for all interior story pages" in prompt
+    assert "not marketing redesigns, alternate costumes, older/younger versions" in prompt
+    assert "GLOBAL CHARACTER REFERENCE JSON" in prompt
+    assert '"name":"Mira"' in prompt
+    assert '"face_lock":"round face"' in prompt
+    assert '"hair_lock":"short black bob"' in prompt
+    assert '"outfit_lock":"plain yellow dress"' in prompt
+    assert "character consistency is stricter than cover styling" in prompt
     assert (
         "Continuity requirements: Mira keeps round face, short black bob, plain yellow dress, red bracelet, "
         "and no blue dress."
     ) in prompt
     assert "face=round face" in prompt
+    assert "age_body=eight years old, small child, slim build" in prompt
+    assert "skin=warm medium brown skin" in prompt
+    assert "eyes=large almond eyes, dark brown" in prompt
     assert "hair=short black bob" in prompt
     assert "outfit=plain yellow dress" in prompt
+    assert "footwear=white sneakers" in prompt
     assert "accessory=red bracelet always present" in prompt
     assert "forbid=blue dress, long hair" in prompt
     assert "Rohan anchor" not in prompt
@@ -796,7 +1074,11 @@ def test_render_page_prompt_forbids_written_text():
 
 def test_multi_image_page_items_remove_story_text_from_image_context():
     service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
-    service._workflow_visual_bible = lambda workflow_arg: {"characters": [], "locations": [], "important_objects": []}
+    service._workflow_visual_bible = lambda workflow_arg: {
+        "characters": [{"name": "Saavi", "anchor": "Saavi model sheet."}],
+        "locations": [],
+        "important_objects": [],
+    }
     workflow = SimpleNamespace(
         title="The Moon Bell",
         story_json={},
@@ -826,9 +1108,21 @@ def test_multi_image_page_items_remove_story_text_from_image_context():
 
     assert items[0]["story_page"] == {"page_number": 1, "emotion": "kindness"}
     assert "text" not in items[0]["story_page"]
+    assert "CHARACTER MODEL SHEET" not in items[0]["visual_context"]
+    assert "Saavi model sheet" not in items[0]["visual_context"]
     compact_items = service._multi_image_item_payloads(items)
     assert "rendered_prompt" not in compact_items[0]
     assert compact_items[0]["page_image_plan"] == items[0]["page_image_plan"]
+    assert compact_items[0]["visible_character_contract"] == {
+        "visible_names": ["Saavi"],
+        "exact_count_per_name": 1,
+        "rules": [
+            "draw each listed named character once only",
+            "no duplicate heads, duplicate faces, reflections, portraits, photos, or lookalikes",
+            "every visible head must be attached to one coherent body",
+            "no unlisted background people or head-only cutouts",
+        ],
+    }
 
 
 def test_multi_image_prompt_forbids_caption_text_but_allows_planned_in_scene_text():
@@ -836,7 +1130,17 @@ def test_multi_image_prompt_forbids_caption_text_but_allows_planned_in_scene_tex
     prompt = service._render_multi_image_pages_prompt(
         story_title="The Moon Bell",
         age_group="3-6",
-        visual_bible={"style": "warm watercolor"},
+        visual_bible={
+            "style": "warm watercolor",
+            "characters": [
+                {
+                    "name": "Saavi",
+                    "appearance": {"hair": {"style": "two pigtails"}, "outfit": {"type": "pink kurta"}},
+                    "locks": {"hair_lock": "two pigtails", "outfit_lock": "pink kurta"},
+                    "forbidden_variations": ["loose hair", "blue dress"],
+                }
+            ],
+        },
         page_items=[
             {
                 "key": "page_1",
@@ -858,14 +1162,74 @@ def test_multi_image_prompt_forbids_caption_text_but_allows_planned_in_scene_tex
     assert "top/bottom overlay text" in prompt
     assert "blackboard writing, a chair name label" in prompt
     assert "page_image_plan.allowed_in_scene_text" in prompt
-    assert "visual_context as the source of truth" in prompt
-    assert "source_image_prompt as the source of truth" in prompt
+    assert "GLOBAL CHARACTER REFERENCE JSON" in prompt
+    assert '"name":"Saavi"' in prompt
+    assert "Use GLOBAL CHARACTER REFERENCE JSON as the source of truth for character appearance" in prompt
+    assert "Use visual_context as the source of truth for page-scoped style" in prompt
+    assert "Use visible_character_contract as the exact count contract" in prompt
+    assert "Draw each named character listed for an item exactly once" in prompt
+    assert "No floating heads, detached heads, disembodied faces" in prompt
+    assert "no duplicate heads, no duplicate faces, no detached heads" in prompt
+    assert "Respect basic scene etiquette" in prompt
+    assert "do not draw outdoor shoes on feet" in prompt
+    assert "locked footwear remains the character's footwear when footwear is appropriate" in prompt
+    assert "source_image_prompt" not in prompt
+    assert "Classroom scene with blackboard." not in prompt
     assert "The required output is image parts" in prompt
     assert "Do not stop after text markers" in prompt
     assert "Return image outputs, not a text explanation." in prompt
     assert "scoped_visual_bible" not in prompt
     assert "full nested prompt should not be included" not in prompt
     assert "Do not place words in empty wall/sky/background/negative space as a caption" in prompt
+
+
+def test_multi_image_page_prompt_payload_strips_duplicate_source_prompt():
+    payload = GenericStoryWorkflowService._multi_image_item_payloads(
+        [
+            {
+                "key": "page_1",
+                "page_type": "story_page",
+                "page_number": 1,
+                "page_image_plan": {"page": 1, "allowed_in_scene_text": []},
+                "source_image_prompt": "duplicated full page prompt",
+            }
+        ],
+        include_source_image_prompt=False,
+    )
+
+    assert "source_image_prompt" not in payload[0]
+    assert payload[0]["visible_character_contract"]["visible_names"] == []
+    assert payload[0]["visible_character_contract"]["exact_count_per_name"] == 1
+
+
+def test_multi_image_story_page_plan_payload_removes_text_layout_instructions():
+    payload = GenericStoryWorkflowService._story_page_image_plan_for_multi_image(
+        {
+            "page": 1,
+            "title_text": "The Moon Bell",
+            "title_layout": "Large readable title at the top.",
+            "book_cover_prompt": "Cover prompt",
+            "visual_focus": "Mira smiles. Clear space is reserved at the top for title text.",
+            "composition": "Mira sits near the window. Add caption area at the bottom.",
+            "environment": "Cozy room with top text area.",
+            "characters": ["Mira"],
+            "important_objects": ["moon bell"],
+            "continuity_notes": [
+                "Mira keeps her short black bob and plain yellow dress.",
+                "Leave clear space for narration text.",
+            ],
+        }
+    )
+
+    payload_text = json.dumps(payload)
+    assert "title_text" not in payload
+    assert "title_layout" not in payload
+    assert "book_cover_prompt" not in payload
+    assert "Clear space" not in payload_text
+    assert "caption area" not in payload_text
+    assert "top text" not in payload_text
+    assert payload["continuity_notes"] == ["Mira keeps her short black bob and plain yellow dress."]
+    assert payload["allowed_in_scene_text"] == []
 
 
 def test_workflow_multi_image_payload_drops_rendered_prompt_metadata():
@@ -888,6 +1252,32 @@ def test_workflow_multi_image_payload_drops_rendered_prompt_metadata():
 
     assert "rendered_prompt" not in items[0]
     assert items[0]["source_image_prompt"] == "planned page prompt"
+
+
+def test_workflow_multi_image_payload_reads_cover_item_separately():
+    service = GenericStoryBatchService.__new__(GenericStoryBatchService)
+    job = SimpleNamespace(request_keys=["cover", "page_1"])
+    payload = {
+        "cover_item": {
+            "key": "cover",
+            "page_type": "cover",
+            "source_image_prompt": "cover prompt",
+            "rendered_prompt": "full cover prompt",
+        },
+        "items": [
+            {
+                "key": "page_1",
+                "page_type": "story_page",
+                "page_number": 1,
+                "source_image_prompt": "planned page prompt",
+            }
+        ],
+    }
+
+    items = service._workflow_multi_image_items_from_payload(job, payload)
+
+    assert [item["key"] for item in items] == ["cover", "page_1"]
+    assert "rendered_prompt" not in items[0]
 
 
 def test_generic_batch_cover_prompt_uses_current_image_prompt_contract():
@@ -2038,8 +2428,9 @@ async def test_image_generation_cover_is_submitted_in_batch_without_direct_gener
     assert batches.created is not None
     assert batches.created["model"] == settings.GOOGLE_REFERENCE_IMAGE_MODEL.removeprefix("models/")
     assert len(batches.created["src"]) == 2
-    assert [item["key"] for item in created_payloads[0]["items"]] == ["cover", "page_1"]
-    assert created_payloads[0]["items"][0]["page_type"] == "cover"
+    assert [item["key"] for item in created_payloads[0]["items"]] == ["page_1"]
+    assert created_payloads[0]["cover_item"]["key"] == "cover"
+    assert created_payloads[0]["cover_item"]["page_type"] == "cover"
 
 
 def _retry_workflow(**overrides):

@@ -37,6 +37,49 @@ PACE_BY_EMOTION = {
     "calm": "slow",
 }
 
+EMOTION_ALIASES = {
+    "amused": "playfulness",
+    "appreciative": "kindness",
+    "affection": "friendship",
+    "affectionate": "friendship",
+    "care": "kindness",
+    "caring": "kindness",
+    "comfort": "calm",
+    "comforting": "calm",
+    "concern": "kindness",
+    "concerned": "kindness",
+    "content": "calm",
+    "curious": "curiosity",
+    "delight": "joy",
+    "delighted": "joy",
+    "determined": "determination",
+    "empathetic": "kindness",
+    "excited": "excitement",
+    "happy": "joy",
+    "heartwarming": "kindness",
+    "hope": "confidence",
+    "hopeful": "confidence",
+    "joyful": "joy",
+    "laughing": "playfulness",
+    "longing": "wonder",
+    "love": "friendship",
+    "loving": "friendship",
+    "nurturing": "kindness",
+    "overwhelmed_joy": "triumph",
+    "peace": "calm",
+    "peaceful": "calm",
+    "proud": "confidence",
+    "reflective": "calm",
+    "relief": "calm",
+    "relieved": "calm",
+    "responsibility": "determination",
+    "responsible": "determination",
+    "tender": "kindness",
+    "triumphant": "triumph",
+    "understanding": "kindness",
+    "worried": "kindness",
+}
+
 VOICE_STYLE_BY_AGE_GROUP = {
     AGE_GROUP_0_3: "gentle lullaby bedtime storyteller",
     AGE_GROUP_3_6: "warm animated storyteller",
@@ -48,8 +91,26 @@ def normalize_page_emotion(emotion: Any) -> str:
     """Normalize story-writer page emotion to the supported narration set."""
     if not isinstance(emotion, str):
         return DEFAULT_PAGE_EMOTION
-    value = emotion.strip().lower().replace(" ", "_")
-    return value if value in TONE_BY_EMOTION else DEFAULT_PAGE_EMOTION
+    value = emotion.strip().lower().replace("-", "_").replace(" ", "_")
+    if value in TONE_BY_EMOTION:
+        return value
+    if value in EMOTION_ALIASES:
+        return EMOTION_ALIASES[value]
+
+    tokens = [
+        token.strip("()[]{}.,;:!?\"'").replace("-", "_").replace(" ", "_")
+        for token in emotion.lower().replace("/", ",").split(",")
+    ]
+    for token in tokens:
+        if token in TONE_BY_EMOTION:
+            return token
+        if token in EMOTION_ALIASES:
+            return EMOTION_ALIASES[token]
+
+    for alias, normalized in EMOTION_ALIASES.items():
+        if alias.replace("_", " ") in emotion.lower() or alias in value:
+            return normalized
+    return DEFAULT_PAGE_EMOTION
 
 
 def voice_style_for_age_group(age_group: Any) -> str:

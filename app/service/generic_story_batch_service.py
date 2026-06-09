@@ -690,19 +690,27 @@ class GenericStoryBatchService:
         request_payload: dict[str, Any],
     ) -> list[dict[str, Any]]:
         raw_items = request_payload.get("items")
-        if not isinstance(raw_items, list) or not raw_items:
+        cover_item = request_payload.get("cover_item")
+        if not isinstance(raw_items, list):
+            raw_items = []
+        has_cover_item = isinstance(cover_item, dict) and bool(str(cover_item.get("key") or "").strip())
+        if not raw_items and not has_cover_item:
             raise AppException(
                 "Generic workflow multi-image batch has no request items.",
                 code="GENERIC_WORKFLOW_MULTI_IMAGE_ITEMS_MISSING",
             )
         items = []
+        if has_cover_item:
+            normalized_cover_item = dict(cover_item)
+            normalized_cover_item.pop("rendered_prompt", None)
+            items.append(normalized_cover_item)
         for item in raw_items:
             if not isinstance(item, dict) or not str(item.get("key") or "").strip():
                 continue
             normalized_item = dict(item)
             normalized_item.pop("rendered_prompt", None)
             items.append(normalized_item)
-        if len(items) != len(raw_items):
+        if len(items) != len(raw_items) + (1 if has_cover_item else 0):
             raise AppException(
                 "Generic workflow multi-image batch request items are invalid.",
                 code="GENERIC_WORKFLOW_MULTI_IMAGE_ITEMS_INVALID",
@@ -876,10 +884,11 @@ class GenericStoryBatchService:
         item: dict[str, Any],
         image_url: str,
     ) -> None:
+        source_image_prompt = GenericStoryBatchService._workflow_item_source_image_prompt(item)
         if str(item.get("key") or "") == "cover" or item.get("page_type") == "cover":
             story_json["cover_image_url"] = image_url
-            story_json["cover_image_prompt"] = item.get("source_image_prompt")
-            story_json["cover_planned_image_prompt"] = item.get("source_image_prompt")
+            story_json["cover_image_prompt"] = source_image_prompt
+            story_json["cover_planned_image_prompt"] = source_image_prompt
             story_json.pop("cover_image_dummy", None)
             return
 
@@ -890,8 +899,8 @@ class GenericStoryBatchService:
             if int(page.get("page_number") or index) != page_number:
                 continue
             page["image_url"] = image_url
-            page["image_prompt"] = item.get("source_image_prompt")
-            page["planned_image_prompt"] = item.get("source_image_prompt")
+            page["image_prompt"] = source_image_prompt
+            page["planned_image_prompt"] = source_image_prompt
             page.pop("image_dummy", None)
             return
 
@@ -900,6 +909,16 @@ class GenericStoryBatchService:
             code="GENERIC_WORKFLOW_MULTI_IMAGE_STORY_PAGE_MISSING",
             details={"page_number": page_number, "item_key": item.get("key")},
         )
+
+    @staticmethod
+    def _workflow_item_source_image_prompt(item: dict[str, Any]) -> str | None:
+        source_image_prompt = item.get("source_image_prompt")
+        if isinstance(source_image_prompt, str) and source_image_prompt.strip():
+            return source_image_prompt.strip()
+        page_image_plan = item.get("page_image_plan")
+        if isinstance(page_image_plan, dict) and page_image_plan:
+            return json.dumps(page_image_plan, ensure_ascii=False, separators=(",", ":"))
+        return None
 
     @staticmethod
     def _workflow_multi_image_error_message(

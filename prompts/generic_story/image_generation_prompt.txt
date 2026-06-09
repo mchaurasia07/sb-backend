@@ -1,6 +1,6 @@
 # ROLE
 
-Generate one polished children's storybook illustration.
+Generate one premium polished children's storybook illustration with crisp clean linework, expressive character acting, refined color harmony, polished lighting, clear depth, and finished picture-book quality.
 
 # INPUTS
 
@@ -31,17 +31,22 @@ IMAGE PLAN:
 CHARACTER AND CONTINUITY MODEL SHEET:
 {visual_context}
 
+GLOBAL CHARACTER REFERENCE JSON:
+{global_character_reference_json}
+
 # CONTRACT
 
-If PAGE TYPE is "cover", create a finished front book cover from the whole-story direction, title layout, genre signal, and story promise. It must not look like page 1 or any interior page. Visible cover characters must match the Visual Bible model sheet exactly.
+If PAGE TYPE is "cover", create a finished front book cover from the whole-story direction, title layout, genre signal, and story promise. It must not look like page 1 or any interior page. Visible cover characters must match the same canonical character models used for all interior story pages.
 
 If PAGE TYPE is an interior story page, draw the exact SCENE TO DRAW and IMAGE PLAN moment: action, environment, character list, objects, emotion, camera shot, and composition are hard requirements.
 
 Use only characters and objects listed in the image plan. Do not add extra characters, family members, toys, props, locations, text, signs, labels, logos, or background story elements unless explicitly listed.
 
-Keep identities and continuity from the model sheet. Do not redesign characters or change outfit, hairstyle, face shape, age, skin tone, body scale, accessories, fixed objects, or forbidden variations. For covers, use the same story characters, not marketing redesigns, alternate costumes, older/younger versions, or lookalikes.
+Keep identities and continuity from the model sheet and GLOBAL CHARACTER REFERENCE JSON. Do not redesign characters or change outfit, hairstyle, face shape, age, skin tone, body scale, accessories, fixed objects, or forbidden variations. For covers, use the exact same story characters as the interior pages, not marketing redesigns, alternate costumes, older/younger versions, prettier versions, simplified versions, or lookalikes.
 
 Character consistency is mandatory for every visible character, not only the hero.
+
+Respect basic scene etiquette. If the scene is inside a temple, prayer room, sacred space, or a home area where shoes are removed, do not draw outdoor shoes on feet; show bare feet, socks, or footwear placed neatly near the entrance. If a character is on a bed, mattress, sofa used for sleeping, or bedding, do not draw outdoor shoes on the bed or on the character's feet. This does not change the locked footwear design; it only controls whether footwear is worn in that scene.
 
 Before drawing, silently check every character listed in IMAGE PLAN.characters against the CHARACTER AND CONTINUITY MODEL SHEET:
 - same face and facial proportions
@@ -55,11 +60,17 @@ If IMAGE PLAN.continuity_notes contains character locks, follow them exactly.
 
 Side characters, helpers, parents, grandparents, friends, classmates, animals, and antagonists must stay visually consistent across pages.
 
+For covers, character consistency is stricter than cover styling: title layout, cover composition, and decorative framing may change, but face, hair, clothing, footwear, age/body scale, skin tone, and fixed accessories must not change from GLOBAL CHARACTER REFERENCE JSON.
+
 Do not replace a named character with a lookalike, generic child, generic adult, generic animal, or background figure.
 
 Named characters important to the scene should have identifiable faces. Do not hide, blur, crop off, or omit faces unless the image plan explicitly calls for a back view or closeup.
 
 Do not crop off heads, hands, feet, tails, wings, fixed accessories, or signature objects for visible named characters.
+
+Draw each named character listed in IMAGE PLAN.characters exactly once. Do not draw a second head, second face, second body, reflection, portrait, photo, shadow-person, or lookalike version of the same character.
+
+Every visible head must be attached to its correct body. No floating heads, detached heads, disembodied faces, partial duplicate heads, extra child heads, or head-only background cutouts.
 
 Each interior page must look like its own story moment. Do not reuse generic poses, nursery/mat setups, object layouts, or previous-page compositions unless requested.
 
@@ -68,9 +79,11 @@ For interior story pages, never render story prose, narration, captions, subtitl
 Interior story pages may contain readable words only when IMAGE PLAN explicitly requires short in-scene object text, such as blackboard writing, a chair name label, a classroom sign, or a book cover inside the scene. Keep that text physically on the object. Do not place any words in empty sky/wall/negative space as a caption.
 For covers, the only allowed text is the exact cover title.
 
-Composition: one clear focal point, child-friendly clean layout, expressive faces, no clutter.
+Composition: one clear focal point, child-friendly clean layout, expressive faces, no clutter. For interior story pages, use one unified full-page illustration, not a split scene, comic panel layout, montage, collage, or multiple vignettes.
 
-Negative rules: no scary elements, violence, distorted hands, extra fingers, missing limbs, missing faces, faceless named characters, cropped heads, cropped signature accessories, watermark, random outfit changes, character redesigns, lookalike substitutions, story prose on the image, top caption text, bottom caption text, or unwanted text.
+Quality bar: crisp focal subject, clean silhouettes, detailed but uncluttered environment, polished light and shadow, appealing proportions, professional children's picture-book finish.
+
+Negative rules: no scary elements, violence, distorted hands, extra fingers, missing limbs, missing faces, faceless named characters, cropped heads, duplicate heads, duplicate faces, detached heads, disembodied faces, partial duplicate bodies, cropped signature accessories, watermark, random outfit changes, character redesigns, lookalike substitutions, story prose on the image, top caption text, bottom caption text, or unwanted text.
 
 # OUTPUT
 

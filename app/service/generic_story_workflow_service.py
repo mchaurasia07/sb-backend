@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
 import io
 import json
 import logging
 from pathlib import Path
+import re
 from time import perf_counter
 from typing import Any
 from uuid import UUID
@@ -1015,22 +1017,28 @@ class GenericStoryWorkflowService:
     async def _generate_visual_bible(self, workflow: GenericStoryWorkflow) -> dict[str, Any]:
         if settings.STORY_MOCK_LLM_RESPONSES:
             return self._mock_visual_bible(workflow)
+        visual_diversity_seed = self._visual_diversity_seed(workflow)
         prompt = load_and_render_prompt(
             "prompts/generic_story/visual_bible_generator_prompt.txt",
             {
                 "title": workflow.title or "",
                 "actual_story": workflow.actual_story,
+                "age_group": age_group_label(workflow.age_group),
                 "character_analysis_json": _compact_json(workflow.character_analysis_json),
                 "scene_plan_json": _compact_json(workflow.scene_plan_json),
                 "illustration_style": self._workflow_illustration_style(workflow),
+                "visual_diversity_seed": visual_diversity_seed,
             },
         )
         visual_bible = await self._generate_json(prompt, max_tokens=12000)
         visual_bible["style"] = self._workflow_illustration_style(workflow)
         visual_bible["age_group"] = workflow.age_group
+        visual_bible["visual_diversity_seed"] = visual_diversity_seed
         characters = visual_bible.get("characters")
         if not isinstance(characters, list) or not characters:
             raise AppException("Visual bible must include characters.", code="GENERIC_VISUAL_BIBLE_CHARACTERS_MISSING")
+        self._normalize_visual_bible_fingerprints(visual_bible)
+        self._validate_visual_bible_character_locks(visual_bible, workflow)
         return visual_bible
 
     async def _generate_story_json(self, workflow: GenericStoryWorkflow) -> dict[str, Any]:
@@ -1251,7 +1259,8 @@ class GenericStoryWorkflowService:
                 "mode": "generic_story_workflow_multi_image_pages",
                 "provider": "google",
                 "attempt": 1,
-                "items": self._multi_image_item_payloads(batch_items),
+                "items": self._multi_image_item_payloads(page_items),
+                "cover_item": self._multi_image_item_payload(cover_item) if cover_item else None,
                 "prompt": pages_prompt,
                 "aspect_ratio": settings.STORY_PAGE_ASPECT_RATIO,
                 "skip_narration_generation": payload.skip_narration_generation,
@@ -1317,6 +1326,7 @@ class GenericStoryWorkflowService:
             "page_image_plan": cover_plan,
             "story_page": {},
             "visual_context": self._image_visual_context(visual_bible, cover_plan),
+            "global_character_reference": self._multi_image_global_character_reference(visual_bible),
             "source_image_prompt": self._image_plan_summary(cover_plan),
             "rendered_prompt": rendered_prompt,
         }
@@ -1341,6 +1351,7 @@ class GenericStoryWorkflowService:
             page_number = self._image_plan_page_number(page_plan)
             if page_number is None:
                 continue
+            page_plan_payload = self._story_page_image_plan_for_multi_image(page_plan)
             rendered_prompt = self._render_image_prompt(
                 page_type="story_page",
                 story_title=story_title,
@@ -1355,14 +1366,83 @@ class GenericStoryWorkflowService:
                     "page_number": page_number,
                     "filename": f"page_{page_number}.png",
                     "aspect_ratio": settings.STORY_PAGE_ASPECT_RATIO,
-                    "page_image_plan": page_plan,
+                    "page_image_plan": page_plan_payload,
                     "story_page": self._image_story_page_context(story_pages_by_number.get(page_number) or {}),
-                    "visual_context": self._image_visual_context(visual_bible, page_plan),
+                    "visual_context": self._image_visual_context(
+                        visual_bible,
+                        page_plan_payload,
+                        include_characters=False,
+                    ),
                     "source_image_prompt": self._image_plan_summary(page_plan),
                     "rendered_prompt": rendered_prompt,
                 }
             )
         return page_items
+
+    @classmethod
+    def _story_page_image_plan_for_multi_image(cls, page_plan: dict[str, Any]) -> dict[str, Any]:
+        allowed_keys = (
+            "page",
+            "page_number",
+            "story_role",
+            "visual_focus",
+            "camera_shot",
+            "composition",
+            "environment",
+            "emotion",
+            "characters",
+            "important_objects",
+            "allowed_in_scene_text",
+            "continuity_notes",
+        )
+        payload = {key: deepcopy(page_plan[key]) for key in allowed_keys if key in page_plan}
+        payload["allowed_in_scene_text"] = cls._allowed_in_scene_text_payload(payload.get("allowed_in_scene_text"))
+        for key in ("visual_focus", "composition", "environment"):
+            payload[key] = cls._strip_story_page_text_layout_instructions(payload.get(key))
+        continuity_notes = payload.get("continuity_notes")
+        if isinstance(continuity_notes, list):
+            payload["continuity_notes"] = [
+                cleaned
+                for note in continuity_notes
+                if (cleaned := cls._strip_story_page_text_layout_instructions(note))
+            ]
+        return {key: value for key, value in payload.items() if value not in ("", None)}
+
+    @staticmethod
+    def _allowed_in_scene_text_payload(value: Any) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        return [str(item).strip() for item in value if str(item or "").strip()]
+
+    @staticmethod
+    def _strip_story_page_text_layout_instructions(value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+        text = value.strip()
+        if not text:
+            return ""
+        banned_fragments = (
+            "title area",
+            "title text",
+            "caption area",
+            "caption text",
+            "subtitle",
+            "story prose",
+            "narration text",
+            "overlay text",
+            "top text",
+            "bottom text",
+            "floating text",
+            "clear space",
+            "readable title",
+        )
+        sentences = re.split(r"(?<=[.!?])\s+", text)
+        kept = [
+            sentence.strip()
+            for sentence in sentences
+            if sentence.strip() and not any(fragment in sentence.lower() for fragment in banned_fragments)
+        ]
+        return " ".join(kept).strip()
 
     @staticmethod
     def _image_story_page_context(story_page: dict[str, Any]) -> dict[str, Any]:
@@ -1373,11 +1453,26 @@ class GenericStoryWorkflowService:
         return {key: story_page[key] for key in allowed_keys if story_page.get(key) is not None}
 
     @classmethod
-    def _multi_image_item_payloads(cls, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        return [cls._multi_image_item_payload(item) for item in items]
+    def _multi_image_item_payloads(
+        cls,
+        items: list[dict[str, Any]],
+        *,
+        include_source_image_prompt: bool = True,
+    ) -> list[dict[str, Any]]:
+        return [
+            cls._multi_image_item_payload(item, include_source_image_prompt=include_source_image_prompt)
+            for item in items
+        ]
 
-    @staticmethod
-    def _multi_image_item_payload(item: dict[str, Any]) -> dict[str, Any]:
+    @classmethod
+    def _multi_image_item_payload(
+        cls,
+        item: dict[str, Any] | None,
+        *,
+        include_source_image_prompt: bool = True,
+    ) -> dict[str, Any]:
+        if not isinstance(item, dict):
+            return {}
         payload = {
             "key": item.get("key"),
             "item_id": item.get("item_id"),
@@ -1387,10 +1482,30 @@ class GenericStoryWorkflowService:
             "aspect_ratio": item.get("aspect_ratio"),
             "page_image_plan": item.get("page_image_plan") if isinstance(item.get("page_image_plan"), dict) else {},
             "visual_context": item.get("visual_context"),
+            "global_character_reference": item.get("global_character_reference"),
+            "visible_character_contract": cls._visible_character_contract(
+                item.get("page_image_plan") if isinstance(item.get("page_image_plan"), dict) else {}
+            ),
             "story_page": item.get("story_page") if isinstance(item.get("story_page"), dict) else {},
-            "source_image_prompt": item.get("source_image_prompt"),
         }
+        if include_source_image_prompt:
+            payload["source_image_prompt"] = item.get("source_image_prompt")
         return {key: value for key, value in payload.items() if value is not None}
+
+    @staticmethod
+    def _visible_character_contract(page_image_plan: dict[str, Any]) -> dict[str, Any]:
+        characters = page_image_plan.get("characters") if isinstance(page_image_plan.get("characters"), list) else []
+        names = [str(name).strip() for name in characters if str(name or "").strip()]
+        return {
+            "visible_names": names,
+            "exact_count_per_name": 1,
+            "rules": [
+                "draw each listed named character once only",
+                "no duplicate heads, duplicate faces, reflections, portraits, photos, or lookalikes",
+                "every visible head must be attached to one coherent body",
+                "no unlisted background people or head-only cutouts",
+            ],
+        }
 
     def _render_multi_image_pages_prompt(
         self,
@@ -1422,8 +1537,13 @@ class GenericStoryWorkflowService:
                 "target_aspect_ratio": settings.STORY_PAGE_ASPECT_RATIO,
                 "item_count": len(page_items),
                 "item_order": "\n".join(f"- {item['key']}" for item in page_items),
-                "items_json": _compact_json(self._multi_image_item_payloads(page_items)),
+                "items_json": _compact_json(
+                    self._multi_image_item_payloads(page_items, include_source_image_prompt=False)
+                ),
                 "global_visual_context": _compact_json(global_visual_context),
+                "global_character_reference_json": _compact_json(
+                    self._multi_image_global_character_reference(visual_bible)
+                ),
             },
         )
 
@@ -1860,6 +1980,9 @@ class GenericStoryWorkflowService:
                 "title_instruction": self._image_title_instruction(page_type, story_title),
                 "scene_instruction": self._image_scene_instruction(page_type, rendered_plan),
                 "visual_context": self._image_visual_context(visual_bible, page_image_plan),
+                "global_character_reference_json": _compact_json(
+                    self._image_prompt_character_reference(visual_bible, page_image_plan)
+                ),
                 "page_image_plan_json": _compact_json(rendered_plan),
             },
         )
@@ -2086,7 +2209,13 @@ class GenericStoryWorkflowService:
             "Do not let characters, trees, objects, clouds, hands, or decorations overlap the title."
         )
 
-    def _image_visual_context(self, visual_bible: dict[str, Any], page_image_plan: dict[str, Any]) -> str:
+    def _image_visual_context(
+        self,
+        visual_bible: dict[str, Any],
+        page_image_plan: dict[str, Any],
+        *,
+        include_characters: bool = True,
+    ) -> str:
         """Build a compact page-scoped model sheet for image generation."""
         if not isinstance(visual_bible, dict):
             return ""
@@ -2102,10 +2231,14 @@ class GenericStoryWorkflowService:
             for field in ("environment", "visual_focus", "composition", "continuity_notes")
         )
 
-        characters = self._matching_character_visual_bible_items(
-            visual_bible.get("characters"),
-            character_refs,
-            fallback_all=not bool(character_refs),
+        characters = (
+            self._matching_character_visual_bible_items(
+                visual_bible.get("characters"),
+                character_refs,
+                fallback_all=not bool(character_refs),
+            )
+            if include_characters
+            else []
         )
         objects = self._matching_visual_bible_items(visual_bible.get("important_objects"), object_refs, fallback_all=False)
         locations = self._matching_visual_bible_items(
@@ -2143,6 +2276,48 @@ class GenericStoryWorkflowService:
                     lines.append(f"- {name}: {details}".strip())
 
         return "\n".join(lines)
+
+    @classmethod
+    def _multi_image_global_character_reference(cls, visual_bible: dict[str, Any]) -> list[dict[str, Any]]:
+        if not isinstance(visual_bible, dict) or not isinstance(visual_bible.get("characters"), list):
+            return []
+        return cls._compact_character_references(visual_bible["characters"])
+
+    @classmethod
+    def _image_prompt_character_reference(
+        cls,
+        visual_bible: dict[str, Any],
+        page_image_plan: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        if not isinstance(visual_bible, dict):
+            return []
+        character_refs = page_image_plan.get("characters") if isinstance(page_image_plan.get("characters"), list) else []
+        characters = cls._matching_character_visual_bible_items(
+            visual_bible.get("characters"),
+            character_refs,
+            fallback_all=not bool(character_refs),
+        )
+        return cls._compact_character_references(characters)
+
+    @staticmethod
+    def _compact_character_references(characters: Any) -> list[dict[str, Any]]:
+        if not isinstance(characters, list):
+            return []
+        references: list[dict[str, Any]] = []
+        for character in characters:
+            if not isinstance(character, dict):
+                continue
+            reference = {
+                "name": character.get("name"),
+                "role": character.get("role"),
+                "anchor": character.get("anchor"),
+                "appearance": character.get("appearance") if isinstance(character.get("appearance"), dict) else character.get("appearance"),
+                "locks": character.get("locks") if isinstance(character.get("locks"), dict) else {},
+                "forbidden_variations": character.get("forbidden_variations") if isinstance(character.get("forbidden_variations"), list) else [],
+                "size_relative_to_hero": character.get("size_relative_to_hero"),
+            }
+            references.append({key: value for key, value in reference.items() if value not in (None, "", [], {})})
+        return references
 
     @classmethod
     def _matching_visual_bible_items(
@@ -2229,20 +2404,194 @@ class GenericStoryWorkflowService:
         locks = character.get("locks") if isinstance(character.get("locks"), dict) else {}
         hair = appearance.get("hair") if isinstance(appearance.get("hair"), dict) else {}
         outfit = appearance.get("outfit") if isinstance(appearance.get("outfit"), dict) else {}
+        eyes = ", ".join(
+            str(item).strip()
+            for item in (appearance.get("eye_shape"), appearance.get("eye_color"))
+            if str(item or "").strip()
+        )
+        age_body = ", ".join(
+            str(item).strip()
+            for item in (appearance.get("age"), appearance.get("height_build"))
+            if str(item or "").strip()
+        )
         parts = [
             name,
             f"role={role}" if role else "",
             anchor,
             appearance_text,
+            f"age_body={age_body}".strip(),
+            f"skin={appearance.get('skin_tone') or ''}".strip(),
+            f"eyes={eyes}".strip(),
             f"face={locks.get('face_lock') or appearance.get('face_shape') or ''}".strip(),
             f"hair={locks.get('hair_lock') or cls._join_mapping_values(hair)}".strip(),
             f"outfit={locks.get('outfit_lock') or cls._join_mapping_values(outfit)}".strip(),
+            f"footwear={appearance.get('footwear') or ''}".strip(),
             f"accessory={locks.get('accessory_lock') or cls._join_text_list(appearance.get('accessories'), limit=4)}".strip(),
             f"feature={appearance.get('distinctive_feature') or ''}".strip(),
             f"scale={character.get('size_relative_to_hero') or ''}".strip(),
-            f"forbid={cls._join_text_list(character.get('forbidden_variations'), limit=6)}".strip(),
+            f"forbid={cls._join_text_list(character.get('forbidden_variations'), limit=10)}".strip(),
         ]
         return "; ".join(part for part in parts if part and not part.endswith("="))
+
+    @classmethod
+    def _visual_diversity_seed(cls, workflow: GenericStoryWorkflow) -> str:
+        story_hash = hashlib.sha256(str(getattr(workflow, "actual_story", "") or "").encode("utf-8")).hexdigest()[:12]
+        source = "|".join(
+            str(part or "").strip().lower()
+            for part in (
+                getattr(workflow, "id", ""),
+                getattr(workflow, "title", ""),
+                getattr(workflow, "age_group", ""),
+                getattr(workflow, "theme", ""),
+                getattr(workflow, "genre", ""),
+                story_hash,
+            )
+        )
+        return f"vds-{hashlib.sha256(source.encode('utf-8')).hexdigest()[:16]}"
+
+    @classmethod
+    def _normalize_visual_bible_fingerprints(cls, visual_bible: dict[str, Any]) -> None:
+        characters = visual_bible.get("characters")
+        if not isinstance(characters, list):
+            return
+        fingerprints: list[str] = []
+        for character in characters:
+            if not isinstance(character, dict):
+                continue
+            fingerprint = str(character.get("design_fingerprint") or "").strip()
+            if not fingerprint:
+                fingerprint = cls._visual_bible_character_fingerprint(character)
+                character["design_fingerprint"] = fingerprint
+            if fingerprint:
+                fingerprints.append(fingerprint)
+        if not str(visual_bible.get("cast_design_fingerprint") or "").strip():
+            visual_bible["cast_design_fingerprint"] = " | ".join(fingerprints)
+        if not str(visual_bible.get("design_rationale") or "").strip():
+            visual_bible["design_rationale"] = (
+                "Character designs are derived from the story context and visual_diversity_seed, then locked for "
+                "cover and page consistency."
+            )
+
+    @classmethod
+    def _validate_visual_bible_character_locks(
+        cls,
+        visual_bible: dict[str, Any],
+        workflow: GenericStoryWorkflow,
+    ) -> None:
+        characters = visual_bible.get("characters")
+        if not isinstance(characters, list) or not characters:
+            raise AppException("Visual bible must include characters.", code="GENERIC_VISUAL_BIBLE_CHARACTERS_MISSING")
+
+        human_fingerprints: dict[str, str] = {}
+        for character in characters:
+            if not isinstance(character, dict):
+                continue
+            name = str(character.get("name") or "").strip() or "unnamed character"
+            locks = character.get("locks") if isinstance(character.get("locks"), dict) else {}
+            missing_locks = [
+                field
+                for field in ("face_lock", "hair_lock", "outfit_lock", "accessory_lock")
+                if not str(locks.get(field) or "").strip()
+            ]
+            forbidden_variations = character.get("forbidden_variations")
+            if missing_locks or not isinstance(forbidden_variations, list) or not forbidden_variations:
+                raise AppException(
+                    f"Visual bible character {name} is missing locked appearance details.",
+                    code="GENERIC_VISUAL_BIBLE_CHARACTER_LOCKS_MISSING",
+                    details={"character": name, "missing_locks": missing_locks},
+                )
+
+            if not cls._is_recurring_human_visual_character(character, workflow):
+                continue
+            fingerprint = cls._normalize_visual_ref(
+                character.get("design_fingerprint") or cls._visual_bible_character_fingerprint(character)
+            )
+            if not fingerprint:
+                continue
+            matching_name = human_fingerprints.get(fingerprint)
+            if matching_name and not cls._visual_bible_duplicate_fingerprint_allowed(workflow):
+                raise AppException(
+                    f"Visual bible has duplicate character design fingerprints for {matching_name} and {name}.",
+                    code="GENERIC_VISUAL_BIBLE_CHARACTER_DESIGNS_DUPLICATE",
+                    details={"characters": [matching_name, name]},
+                )
+            human_fingerprints[fingerprint] = name
+
+    @classmethod
+    def _visual_bible_character_fingerprint(cls, character: dict[str, Any]) -> str:
+        appearance = character.get("appearance") if isinstance(character.get("appearance"), dict) else {}
+        locks = character.get("locks") if isinstance(character.get("locks"), dict) else {}
+        hair = appearance.get("hair") if isinstance(appearance.get("hair"), dict) else {}
+        outfit = appearance.get("outfit") if isinstance(appearance.get("outfit"), dict) else {}
+        parts = [
+            str(appearance.get("age") or "").strip(),
+            str(appearance.get("height_build") or "").strip(),
+            str(appearance.get("skin_tone") or "").strip(),
+            str(locks.get("face_lock") or appearance.get("face_shape") or "").strip(),
+            str(appearance.get("eye_shape") or "").strip(),
+            str(appearance.get("eye_color") or "").strip(),
+            str(locks.get("hair_lock") or cls._join_mapping_values(hair)).strip(),
+            str(locks.get("outfit_lock") or cls._join_mapping_values(outfit)).strip(),
+            str(appearance.get("footwear") or "").strip(),
+            str(locks.get("accessory_lock") or cls._join_text_list(appearance.get("accessories"), limit=4)).strip(),
+            str(appearance.get("distinctive_feature") or "").strip(),
+        ]
+        return "; ".join(part for part in parts if part)
+
+    @classmethod
+    def _is_recurring_human_visual_character(cls, character: dict[str, Any], workflow: GenericStoryWorkflow) -> bool:
+        name = cls._normalize_visual_ref(character.get("name"))
+        extracted = cls._character_analysis_entry_by_name(getattr(workflow, "character_analysis_json", None), name)
+        if extracted:
+            character_type = str(extracted.get("type") or "").strip().lower()
+            role = str(extracted.get("role") or character.get("role") or "").strip().lower()
+            return character_type == "human" and role != "background"
+        appearance = character.get("appearance") if isinstance(character.get("appearance"), dict) else {}
+        role = str(character.get("role") or "").strip().lower()
+        return role != "background" and bool(appearance.get("skin_tone") or appearance.get("face_shape"))
+
+    @classmethod
+    def _character_analysis_entry_by_name(cls, character_analysis: Any, normalized_name: str) -> dict[str, Any] | None:
+        if not normalized_name:
+            return None
+        analysis = character_analysis if isinstance(character_analysis, dict) else {}
+        for key in ("chars", "characters"):
+            characters = analysis.get(key)
+            if not isinstance(characters, list):
+                continue
+            for character in characters:
+                if isinstance(character, dict) and cls._normalize_visual_ref(character.get("name")) == normalized_name:
+                    return character
+        return None
+
+    @staticmethod
+    def _visual_bible_duplicate_fingerprint_allowed(workflow: GenericStoryWorkflow) -> bool:
+        context = " ".join(
+            str(value or "").lower()
+            for value in (
+                getattr(workflow, "actual_story", ""),
+                getattr(workflow, "theme", ""),
+                getattr(workflow, "genre", ""),
+                json.dumps(getattr(workflow, "character_analysis_json", {}) or {}, ensure_ascii=False),
+                json.dumps(getattr(workflow, "scene_plan_json", {}) or {}, ensure_ascii=False),
+            )
+        )
+        allowed_terms = (
+            "twin",
+            "twins",
+            "sibling",
+            "siblings",
+            "sister",
+            "sisters",
+            "brother",
+            "brothers",
+            "uniform",
+            "school uniform",
+            "matching",
+            "dress code",
+            "festival dress",
+        )
+        return any(term in context for term in allowed_terms)
 
     @staticmethod
     def _join_mapping_values(value: dict[str, Any]) -> str:
@@ -2363,6 +2712,7 @@ class GenericStoryWorkflowService:
 
     def _normalize_story_json(self, raw: dict[str, Any], workflow: GenericStoryWorkflow) -> dict[str, Any]:
         default_language = self._default_story_language(getattr(workflow, "language", None))
+        scene_emotions_by_number = self._scene_plan_emotions_by_number(workflow.scene_plan_json)
         pages = []
         variant_pages: dict[str, list[dict[str, Any]]] = {language: [] for language in SUPPORTED_STORY_LANGUAGES}
         for index, page in enumerate(raw.get("pages") or [], start=1):
@@ -2371,9 +2721,17 @@ class GenericStoryWorkflowService:
             page_texts = self._localized_text_map(page.get("text"), default_language=default_language)
             if not any(page_texts.values()):
                 continue
-            emotion = normalize_page_emotion(page.get("emotion"))
-            narration = build_page_narration(emotion, workflow.age_group)
             page_number = len(pages) + 1
+            raw_page_number = page.get("page_number")
+            try:
+                requested_page_number = int(raw_page_number)
+            except (TypeError, ValueError):
+                requested_page_number = page_number
+            emotion = self._normalize_story_page_emotion(
+                page.get("emotion"),
+                scene_emotions_by_number.get(requested_page_number) or scene_emotions_by_number.get(page_number),
+            )
+            narration = build_page_narration(emotion, workflow.age_group)
             pages.append(
                 {
                     "page_number": page_number,
@@ -2435,6 +2793,33 @@ class GenericStoryWorkflowService:
             "moral": moral_by_language[default_language],
             STORY_LANGUAGE_VARIANTS_KEY: language_variants,
         }
+
+    @classmethod
+    def _normalize_story_page_emotion(cls, raw_emotion: Any, scene_emotion: Any = None) -> str:
+        scene_value = normalize_page_emotion(scene_emotion)
+        if scene_emotion and scene_value != "wonder":
+            return scene_value
+        raw_value = normalize_page_emotion(raw_emotion)
+        if raw_value != "wonder":
+            return raw_value
+        return scene_value if scene_emotion else raw_value
+
+    @classmethod
+    def _scene_plan_emotions_by_number(cls, scene_plan_json: Any) -> dict[int, Any]:
+        scene_plan = scene_plan_json if isinstance(scene_plan_json, dict) else {}
+        pages = scene_plan.get("pages") if isinstance(scene_plan.get("pages"), list) else []
+        emotions: dict[int, Any] = {}
+        for index, page in enumerate(pages, start=1):
+            if not isinstance(page, dict):
+                continue
+            page_number = cls._scene_page_number(page, index)
+            visual_direction = page.get("visual_direction") if isinstance(page.get("visual_direction"), dict) else {}
+            emotions[page_number] = (
+                page.get("emotion")
+                or visual_direction.get("mood")
+                or page.get("emotional_beat")
+            )
+        return emotions
 
     @staticmethod
     def _default_story_language(language: str | None) -> str:
@@ -2957,9 +3342,16 @@ class GenericStoryWorkflowService:
         }
 
     def _mock_visual_bible(self, workflow: GenericStoryWorkflow) -> dict[str, Any]:
+        visual_diversity_seed = self._visual_diversity_seed(workflow)
         return {
             "style": self._workflow_illustration_style(workflow),
             "age_group": workflow.age_group,
+            "visual_diversity_seed": visual_diversity_seed,
+            "cast_design_fingerprint": (
+                "Mira: round warm face, short dark bob, blue tunic with yellow scarf and red shoes | "
+                "Luma: tiny silver owl, amber eyes, green ribbon"
+            ),
+            "design_rationale": "Mock story uses a fixed but seed-tagged child-and-companion cast for consistent tests.",
             "characters": [
                 {
                     "name": "Mira",
@@ -2985,6 +3377,7 @@ class GenericStoryWorkflowService:
                         "accessory_lock": "yellow scarf always present",
                     },
                     "forbidden_variations": ["different scarf color", "different outfit", "long hair"],
+                    "design_fingerprint": "round warm face; short dark bob; blue tunic; yellow scarf; red shoes",
                     "size_relative_to_hero": "hero",
                 },
                 {
@@ -3011,6 +3404,7 @@ class GenericStoryWorkflowService:
                         "accessory_lock": "green ribbon always present",
                     },
                     "forbidden_variations": ["different ribbon color", "different species", "missing ribbon"],
+                    "design_fingerprint": "tiny silver owl; round face; amber eyes; green ribbon",
                     "size_relative_to_hero": "tiny beside Mira",
                 },
             ],

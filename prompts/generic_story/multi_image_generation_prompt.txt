@@ -13,11 +13,25 @@ The required output is image parts. Do not answer with only text, JSON, summarie
 Title: {story_title}
 Age group: {age_group}
 
+The title is metadata for understanding the story only. Do not render the title on story_page images.
+
 ---
 
 # GLOBAL STYLE AND CONSISTENCY RULES
 
 {global_visual_context}
+
+---
+
+# GLOBAL CHARACTER REFERENCE JSON
+
+{global_character_reference_json}
+
+This is the canonical character model sheet for the whole multi-image request.
+Every character name in page_image_plan.characters must be matched to this JSON by exact name.
+Use this JSON as the source of truth for each character's face, hair/fur, skin/body color, eyes, age/body scale, outfit, footwear, fixed accessories, distinctive features, and forbidden variations.
+Do not invent, simplify, restyle, swap, recolor, or age any character from this JSON.
+If the same character appears in multiple items, copy the same character model from this global JSON in every item.
 
 Use one consistent book style across every image in this call.
 
@@ -27,13 +41,17 @@ Character consistency is mandatory:
 - Side characters, helpers, parents, grandparents, friends, classmates, animals, and antagonists must stay visually consistent across all images where they appear.
 - Do not redesign characters between outputs.
 - Do not change clothing unless the item explicitly says the scene requires it.
+- Respect basic scene etiquette. In temples, prayer rooms, sacred spaces, or home areas where shoes are removed, do not draw outdoor shoes on feet; use bare feet, socks, or footwear placed neatly near the entrance. On beds, mattresses, sofas used for sleeping, or bedding, do not draw outdoor shoes on the bed or on the character's feet. This is not a character redesign; the locked footwear remains the character's footwear when footwear is appropriate.
 - Do not replace a named character with a lookalike, generic child, generic adult, generic animal, or background figure.
 - Keep faces fully visible when a character is important to the scene.
 - Named characters important to the scene should have identifiable faces and complete bodies unless the item explicitly requires a closeup or back view.
 - Do not crop off heads, faces, hands, feet, tails, wings, fixed accessories, signature objects, or important objects.
 - Do not add unlisted main characters, side characters, family members, background people, animals, props, signs, or locations.
+- Draw each named character listed for an item exactly once in that item. Do not draw a second head, second face, second body, reflection, portrait, photo, shadow-person, or lookalike version of the same character.
+- Every visible head must be attached to its correct body. No floating heads, detached heads, disembodied faces, partial duplicate heads, extra child heads, or head-only cutouts.
+- Do not use a cropped or floating head to imply a character in the background. If a listed supporting character appears in the background, show one connected body or clear upper body with the locked face, hair, outfit, and accessories.
 
-Before generating each item, silently check page_image_plan.characters and page_image_plan.continuity_notes against visual_context:
+Before generating each item, silently check page_image_plan.characters against GLOBAL CHARACTER REFERENCE JSON, page_image_plan.continuity_notes, and visual_context:
 - same face and facial proportions
 - same hair/fur style and color
 - same skin/body color
@@ -47,8 +65,8 @@ If a character appears in more than one requested item, keep that character's mo
 Safety and quality:
 - Child-safe, warm, family-friendly imagery only.
 - No violence, horror, injury, threatening expressions, distress, watermarks, logos, UI elements, story prose on the image, top caption text, bottom caption text, floating text, unwanted text, character redesigns, lookalike substitutions, missing faces, faceless named characters, cropped heads, cropped signature accessories, or random outfit changes.
-- Natural anatomy, correct hands, correct fingers, no duplicate or missing limbs.
-- Premium polished storybook illustration quality.
+- Natural anatomy, correct hands, correct fingers, no duplicate or missing limbs, no duplicate heads, no duplicate faces, no detached heads, no disembodied faces, no partial duplicate bodies.
+- Premium polished storybook illustration quality: crisp clean linework, expressive faces, appealing character acting, rich but uncluttered backgrounds, polished lighting, clear depth, refined color harmony, high visual clarity, finished picture-book quality.
 
 ---
 
@@ -75,15 +93,18 @@ If you cannot place a marker and an image, prefer returning the image part rathe
 
 {items_json}
 
-Each item includes page_image_plan, source_image_prompt, limited non-prose story_page context, and visual_context.
-Use page_image_plan and source_image_prompt as the source of truth for what to draw.
+Each item includes page_image_plan, limited non-prose story_page context, and visual_context.
+Use page_image_plan as the source of truth for what to draw.
 Use story_page only for page number or emotion context, not as text to render.
-Use visual_context as the source of truth for character appearance, object appearance, location identity, and forbidden variations.
+Use GLOBAL CHARACTER REFERENCE JSON as the source of truth for character appearance and forbidden variations.
+Use visual_context as the source of truth for page-scoped style, object appearance, and location identity.
+Use visible_character_contract as the exact count contract for named characters in that item.
 Use page_image_plan.characters as the exact visible-character allow-list for that item.
 Use page_image_plan.important_objects as the exact important-object allow-list for that item.
 Do not draw characters or objects that are not listed for that item.
 Respect page_image_plan.camera_shot, composition, emotion, environment, and continuity_notes.
 Use page_image_plan.allowed_in_scene_text as the complete allow-list for readable words on story pages.
+If any item field conflicts with the story_page text ban, ignore the title/caption/text instruction and keep the scene wordless except for allowed_in_scene_text.
 
 ---
 
@@ -96,9 +117,12 @@ cover:
 
 story_page:
 - Show one clear story moment from the item only.
+- Use one unified full-page illustration, not a split scene, comic panel layout, montage, collage, or multiple vignettes.
 - Draw only the visible characters listed in page_image_plan.characters.
+- Draw each listed named character once and only once. No duplicate Zoya-like child, parent, helper, pet, or background version of any listed character.
+- Do not create head-only background figures, extra partial heads, or detached/floating faces. Every visible character must have one coherent connected body.
 - Keep every listed character visually consistent with visual_context and page_image_plan.continuity_notes.
-- Include text-safe negative space at bottom or sides.
+- Leave natural uncluttered blank space only if the composition needs it; never fill that space with words.
 - Do not render story prose, narration text, captions, subtitles, title text, speech bubbles, floating text, UI text, or any top/bottom overlay text.
 - Readable text is allowed only when page_image_plan.allowed_in_scene_text explicitly lists short in-scene object text, such as blackboard writing, a chair name label, a classroom sign, or a book cover inside the scene.
 - Any allowed text must stay physically on that object. Do not place words in empty wall/sky/background/negative space as a caption.

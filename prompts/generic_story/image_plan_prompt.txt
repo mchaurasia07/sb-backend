@@ -55,8 +55,12 @@ Pages:
 * Output page values must equal Story JSON Page Numbers exactly, in the same order.
 * Story JSON is the source of truth for page count. Do not use age-band ranges, Scene Plan page count, or adaptation_strategy.selected_page_count if they differ from Story JSON pages.
 * Each page must show the corresponding scene only.
+* Each page must show one clear visual moment, not a split scene, montage, collage, sequence, or multi-vignette page.
+* If the Scene Plan or Story JSON contains several actions on one page, choose the strongest single visual moment and imply the other actions through pose, expression, object state, or background detail.
 * characters is an allow-list for visible characters in that page. Do not include parents, grandparents, siblings, helpers, recurring characters, or background people unless physically visible in that scene.
 * characters must use exact Visual Bible names only. Do not use vague labels such as "family", "friends", "children", "villagers", or "classmates" when named characters are available.
+* Each character listed in characters must appear exactly once in that page plan. Do not plan duplicate depictions, second heads, reflections, portraits, photos, head-only background figures, partial duplicate bodies, or lookalike versions of the same character.
+* If parents/helpers are present but not central, place each one as a single connected background figure or clear upper-body figure with locked face, hair, outfit, footwear, and accessories. Never describe floating heads, detached faces, cropped heads, or partial child/adult cutouts.
 * Preserve character, object, and location continuity.
 * Preserve the Scene Plan page visual_direction: shot_type, composition, focal_subject, lighting, mood, and key_visual_elements.
 * Convert scene_plan.pages[].visual_direction into concrete image-plan camera_shot, composition, environment, visual_focus, and continuity_notes.
@@ -64,10 +68,13 @@ Pages:
 * For every visible character on every page, continuity_notes must include the character's Visual Bible locks: face, hair/fur, skin or body color, outfit, fixed accessories, body scale/age/species, and forbidden variations when present.
 * If a character appears on multiple pages, repeat that character's same lock notes consistently. Do not weaken side-character locks on later pages.
 * Do not change clothing, colors, hairstyle, face, body shape, age, accessories, or species unless the story explicitly requires a change.
+* Apply basic scene etiquette. In temples, prayer rooms, sacred spaces, or homes where shoes are removed, plan characters barefoot, in socks, or with footwear placed neatly near the entrance. On beds, mattresses, sofas used for sleeping, or bedding, do not plan outdoor shoes on feet; place footwear beside the bed/floor if needed. This is a scene-etiquette override, not a character redesign.
 * Important named characters should have faces visible and bodies complete enough to identify them. Do not crop off heads, faces, hands, feet, tails, wings, or signature objects unless the scene specifically requires a closeup.
 * Avoid adding unnamed background characters. If a crowd is required, keep it simple and never let background figures resemble or replace named characters.
 * Show clear emotion, strong focal point, varied framing, child-friendly age-appropriate composition.
+* Each page should feel like a premium finished illustration, not a basic spot drawing: crisp focal subject, polished lighting, detailed but uncluttered environment, expressive faces, clean silhouette, and strong depth.
 * Avoid repeated poses, nursery/mat setups, object layouts, or character groups unless the scene repeats them.
+* Do not use composition, visual_focus, or continuity_notes to request extra partial heads, duplicate faces, head-only cutouts, or duplicate versions of any named character.
 * Story pages must not request title text, top text, captions, subtitles, narration text, story prose, floating text, UI text, or overlay text.
 * allowed_in_scene_text is the only place to request readable text on story pages. Default it to [].
 * Populate allowed_in_scene_text only for short physical object-bound text explicitly needed in the scene, such as "blackboard: HAPPY RAKHI CELEBRATION", "chair labels: Saavi, Myra, Aarav", "classroom sign: Welcome", or "book cover: Neem Care".
@@ -118,6 +125,7 @@ book_cover_prompt: compact final cover direction; include title text, title plac
 visual_focus: single most important illustration moment.
 
 composition: visual layout, for example "Hero in left foreground, treasure map centered, forest path leading into background."
+For story pages, composition must describe a single unified illustration. Do not use split scene, panel, panels, vignette, vignettes, montage, sequence, or collage unless the source story explicitly requests that format.
 
 environment: brief setting description.
 
@@ -149,5 +157,8 @@ For side characters, use the same format and the same strictness as the hero.
 14. When Scene Plan page visual_direction is present, image-plan camera_shot, composition, visual_focus, environment, and continuity_notes must reflect it.
 15. Every page must include allowed_in_scene_text, defaulting to [].
 16. Page composition, visual_focus, environment, and continuity_notes must not mention title area, caption area, top text, subtitles, story prose, narration text, typography, or overlay text unless the text is short object-bound text listed in allowed_in_scene_text.
-17. Do not redesign characters or modify Visual Bible appearance details.
-18. Return STRICT VALID JSON ONLY.
+17. Each listed character appears once only; no duplicate heads, duplicate faces, floating heads, detached faces, head-only background figures, or partial duplicate bodies.
+18. Scene etiquette is respected: no outdoor shoes inside temples/prayer rooms/sacred spaces or on beds/bedding; removed footwear may appear beside the entrance or bed.
+19. Do not redesign characters or modify Visual Bible appearance details.
+20. Story pages must use one unified illustration moment. Do not use split scene, panel, panels, vignette, vignettes, montage, sequence, or collage unless explicitly requested by the source story.
+21. Return STRICT VALID JSON ONLY.

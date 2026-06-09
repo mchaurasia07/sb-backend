@@ -155,6 +155,23 @@ Age 6-9
   * main_action
   * continuity
 
+* Page emotion must reflect the Scene Plan page's dominant feeling. Do not reuse "wonder" on every page.
+* Use scene-specific emotion progression across pages. A story may move through curiosity, excitement, kindness, calm, playfulness, surprise, confidence, triumph, joy, and reflection.
+* For the output page emotion field, use only one of these supported values:
+  * wonder
+  * curiosity
+  * playfulness
+  * excitement
+  * determination
+  * surprise
+  * friendship
+  * kindness
+  * confidence
+  * triumph
+  * joy
+  * calm
+* If the Scene Plan page emotion is a phrase, map it to the closest supported value. Examples: concerned/caring/tender -> kindness; excited/happy -> excitement or joy; responsible -> determination; amused -> playfulness; peaceful/reflective -> calm; overwhelmed joy -> triumph.
+
 * Do not repeat scene_summary, main_action, source_connection, page_turn_hook, or continuity text directly in the story. Use them only as writing guidance.
 
 * Show the story happening rather than summarizing it.
@@ -396,6 +413,9 @@ For every page generate:
 emotion:
 
 * primary emotion of the page
+* must be one supported value from: wonder, curiosity, playfulness, excitement, determination, surprise, friendship, kindness, confidence, triumph, joy, calm
+* must be selected from the page's Scene Plan emotion/mood, not copied from the previous page by default
+* do not set every page to wonder unless every Scene Plan page truly has the same dominant emotion
 
 tone:
 Choose the best fit:

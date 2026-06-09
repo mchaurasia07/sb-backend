@@ -406,6 +406,9 @@ class GenericStoryMultiImageTestService:
                 "item_order": "\n".join(f"- {item.item_id}" for item in items),
                 "items_json": _compact_json(item_payloads),
                 "global_visual_context": _compact_json(self._global_visual_context(visual_bible)),
+                "global_character_reference_json": _compact_json(
+                    GenericStoryWorkflowService._multi_image_global_character_reference(visual_bible)
+                ),
             },
         )
 
