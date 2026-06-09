@@ -147,11 +147,12 @@ async def create_generic_story_workflow(
 async def list_generic_story_workflows(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    current_user: User = Depends(get_current_user),
+    user_id: UUID | None = Query(None),
+    _current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[PaginatedResponse[GenericStoryWorkflowListResponse]]:
     data = await GenericStoryWorkflowService(session).list(
-        current_user.id,
+        user_id=user_id,
         page=page,
         page_size=page_size,
     )

@@ -66,29 +66,37 @@ class GenericStoryWorkflowRepository:
             .limit(1)
         )
 
-    async def list_for_user(
+    async def list(
         self,
-        user_id: UUID,
         *,
+        user_id: UUID | None = None,
         page: int,
         page_size: int,
     ) -> tuple[list[GenericStoryWorkflow], int]:
-        filters = [GenericStoryWorkflow.user_id == user_id]
+        filters = []
+        if user_id is not None:
+            filters.append(GenericStoryWorkflow.user_id == user_id)
+
         total = await self.session.scalar(
             select(func.count()).select_from(GenericStoryWorkflow).where(*filters)
         )
         result = await self.session.execute(
-            self._list_for_user_statement(user_id, page=page, page_size=page_size)
+            self._list_statement(user_id=user_id, page=page, page_size=page_size)
         )
         return list(result.scalars().all()), int(total or 0)
 
     @staticmethod
-    def _list_for_user_statement(user_id: UUID, *, page: int, page_size: int):
+    def _list_statement(*, user_id: UUID | None = None, page: int, page_size: int):
+        filters = []
+        if user_id is not None:
+            filters.append(GenericStoryWorkflow.user_id == user_id)
+
         return (
             select(GenericStoryWorkflow)
             .options(
                 load_only(
                     GenericStoryWorkflow.id,
+                    GenericStoryWorkflow.user_id,
                     GenericStoryWorkflow.workflow_name,
                     GenericStoryWorkflow.status,
                     GenericStoryWorkflow.current_step,
@@ -112,7 +120,7 @@ class GenericStoryWorkflowRepository:
                     GenericStoryWorkflow.updated_at,
                 )
             )
-            .where(GenericStoryWorkflow.user_id == user_id)
+            .where(*filters)
             .order_by(GenericStoryWorkflow.created_at.desc())
             .offset((page - 1) * page_size)
             .limit(page_size)

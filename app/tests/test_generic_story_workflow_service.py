@@ -85,7 +85,7 @@ def test_latest_workflow_lookup_uses_mysql_index_hint():
 
 
 def test_workflow_list_lookup_does_not_select_large_json_columns():
-    statement = GenericStoryWorkflowRepository._list_for_user_statement(uuid4(), page=1, page_size=20)
+    statement = GenericStoryWorkflowRepository._list_statement(user_id=uuid4(), page=1, page_size=20)
     sql = str(statement.compile(dialect=mysql.dialect()))
 
     assert "character_analysis_json" not in sql
@@ -145,6 +145,7 @@ def test_workflow_list_response_omits_large_json_payloads():
     assert "story_json" not in fields
     assert "image_plan_json" not in fields
     assert "input_request" not in fields
+    assert "user_id" in fields
     assert "title" in fields
     assert "status" in fields
 
@@ -1311,7 +1312,7 @@ def test_generic_batch_cover_prompt_uses_current_image_prompt_contract():
 
     assert "{title_instruction}" not in prompt
     assert "{visual_context}" not in prompt
-    assert "Bright cartoon children's illustration" in prompt
+    assert "Premium cinematic cartoon children's storybook illustration" in prompt
     assert 'Render this exact visible title text: "Grandma\'s Rakhi Story"' in prompt
     assert '"title_text":"Grandma\'s Rakhi Story"' in prompt
     assert "small boy in blue kurta" in prompt

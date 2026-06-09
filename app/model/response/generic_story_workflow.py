@@ -39,6 +39,7 @@ class GenericStoryWorkflowResponse(BaseModel):
 
 class GenericStoryWorkflowListResponse(BaseModel):
     id: UUID
+    user_id: UUID
     workflow_name: str
     status: str
     current_step: str | None
