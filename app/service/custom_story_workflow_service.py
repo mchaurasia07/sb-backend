@@ -19,7 +19,12 @@ from app.entity.story import StoryStatus
 from app.entity.story_batch_job import StoryBatchJobStatus, StoryBatchJobType
 from app.entity.story_step import StoryStepName
 from app.entity.story_step import StepStatus
-from app.model.request.story import StoryGenerationRequest
+from app.model.request.story import (
+    StoryGenerationRequest,
+    age_group_for_reader_category,
+    normalize_reader_category,
+    reader_category_for_age_group,
+)
 from app.model.response.common import PaginatedResponse
 from app.model.response.custom_story_workflow import (
     CustomStoryWorkflowResponse,
@@ -164,7 +169,6 @@ class CustomStoryWorkflowService:
         self.story_pages = StoryPageRepository(session)
 
     async def create(self, user_id: UUID, payload: StoryGenerationRequest) -> CustomStoryWorkflowResponse:
-        await StoryInputSafetyService().validate(payload)
         child = await self.children.get_for_user(user_id, payload.child_id)
         if child is None:
             raise NotFoundException("Child profile not found")
@@ -175,7 +179,9 @@ class CustomStoryWorkflowService:
             )
 
         story_service = StoryService(self.session)
-        age_group = story_service._get_age_group_from_dob(child.dob)
+        age_group = age_group_for_reader_category(payload.reader_category)
+        input_request = payload.model_dump(mode="json")
+        input_request["age_group"] = age_group
         workflow = await self.workflows.create(
             user_id=user_id,
             child_id=payload.child_id,
@@ -187,7 +193,7 @@ class CustomStoryWorkflowService:
             context=payload.context,
             event_description=payload.event_description,
             status=CustomStoryWorkflowStatus.PENDING,
-            input_request=payload.model_dump(mode="json"),
+            input_request=input_request,
             **story_service._current_ai_config(),
         )
         await self.session.commit()
@@ -254,6 +260,12 @@ class CustomStoryWorkflowService:
             raise NotFoundException("Custom story workflow not found")
         if self._status_value(workflow.status) == CustomStoryWorkflowStatus.COMPLETED.value:
             return workflow
+        if (
+            workflow.processing_mode == "delayed"
+            and self._status_value(workflow.status) == CustomStoryWorkflowStatus.FAILED.value
+            and await self._failed_delayed_batch_job(workflow) is not None
+        ):
+            return workflow
 
         workflow.status = CustomStoryWorkflowStatus.IN_PROGRESS
         workflow.error_message = None
@@ -264,17 +276,40 @@ class CustomStoryWorkflowService:
             runner = self._story_runner(workflow)
             await runner._ensure_story_ai_config(workflow)
             start_step = await self._first_incomplete_step(workflow)
+            if start_step == self.ORDERED_STEPS[0]:
+                await StoryInputSafetyService().validate(
+                    StoryGenerationRequest.model_validate(self._input_request_for_validation(workflow))
+                )
             for step in self.ORDERED_STEPS[self.ORDERED_STEPS.index(start_step) :]:
+                if self._step_disabled_by_request(workflow, step):
+                    if not await self._step_has_completed_record(workflow, step):
+                        await self._execute_step(runner, workflow, step)
+                        await self.workflows.update(workflow)
+                        await self.session.commit()
+                    continue
+                if (
+                    workflow.processing_mode == "delayed"
+                    and step == CustomStoryWorkflowStep.PUBLISH_STORY
+                    and not await self._delayed_outputs_completed(workflow)
+                ):
+                    failed_job = await self._failed_delayed_batch_job(workflow)
+                    if failed_job is not None:
+                        await self._mark_workflow_failed(
+                            workflow,
+                            failed_job.error_message
+                            or f"{self._status_value(failed_job.job_type)} batch job failed",
+                        )
+                    else:
+                        workflow.status = CustomStoryWorkflowStatus.IN_PROGRESS
+                        workflow.current_step = await self._delayed_waiting_step(workflow)
+                    await self.workflows.update(workflow)
+                    await self.session.commit()
+                    return workflow
                 if await self._step_is_complete(workflow, step):
                     continue
                 await self._execute_step(runner, workflow, step)
                 await self.workflows.update(workflow)
                 await self.session.commit()
-                if workflow.processing_mode == "delayed" and step in {
-                    CustomStoryWorkflowStep.IMAGE_GENERATION,
-                    CustomStoryWorkflowStep.NARRATION_GENERATION,
-                } and self._status_value(workflow.status) == CustomStoryWorkflowStatus.IN_PROGRESS.value and not await self._step_is_complete(workflow, step):
-                    return workflow
 
             workflow.status = CustomStoryWorkflowStatus.COMPLETED
             workflow.current_step = None
@@ -301,6 +336,20 @@ class CustomStoryWorkflowService:
         await self.session.commit()
         flags = self._flags(workflow)
         step_input = self._step_input(workflow, step)
+
+        if self._step_disabled_by_request(workflow, step):
+            output = {"skipped": True, "message": f"{step.value} skipped by request"}
+            if step == CustomStoryWorkflowStep.IMAGE_GENERATION:
+                await runner._create_pages_without_images(workflow, workflow.story_json or {})
+                output = {"images_skipped": True, "skipped": True, "message": "Image generation skipped by request"}
+            elif step == CustomStoryWorkflowStep.NARRATION_GENERATION:
+                output = {
+                    "narration_skipped": True,
+                    "skipped": True,
+                    "message": "Narration generation skipped by request",
+                }
+            await self._record_completed_step(workflow, step, step_input, output)
+            return
 
         if step == CustomStoryWorkflowStep.STORY_PLAN_GENERATION:
             story_plan = await runner._step_generate_plan(workflow, flags)
@@ -366,12 +415,32 @@ class CustomStoryWorkflowService:
                 )
                 return
             if workflow.processing_mode == "delayed":
+                existing_job = await self._active_delayed_batch_job(workflow, step)
+                if existing_job is not None:
+                    await self._record_submitted_batch_step(
+                        workflow,
+                        step,
+                        step_input,
+                        existing_job,
+                        "Existing image batch job is still active; retry reused it instead of submitting a duplicate.",
+                    )
+                    workflow.status = CustomStoryWorkflowStatus.IN_PROGRESS
+                    workflow.current_step = step.value
+                    return
                 batch_runner = self._batch_runner(workflow)
-                await batch_runner._step_submit_images_batch(
+                job = await batch_runner._step_submit_images_batch(
                     workflow,
                     workflow.story_json or {},
                     workflow.image_plan_json or {},
                 )
+                if job is not None:
+                    await self._record_submitted_batch_step(
+                        workflow,
+                        step,
+                        step_input,
+                        job,
+                        "Image batch submitted; reconcile scheduler will process results.",
+                    )
                 workflow.status = CustomStoryWorkflowStatus.IN_PROGRESS
                 workflow.current_step = step.value
                 return
@@ -387,12 +456,35 @@ class CustomStoryWorkflowService:
         if step == CustomStoryWorkflowStep.NARRATION_GENERATION:
             if workflow.processing_mode == "delayed":
                 batch_runner = self._batch_runner(workflow)
+                existing_job = await self._active_delayed_batch_job(workflow, step)
+                if existing_job is not None:
+                    await self._record_submitted_batch_step(
+                        workflow,
+                        step,
+                        step_input,
+                        existing_job,
+                        "Existing narration batch job is still active; retry reused it instead of submitting a duplicate.",
+                    )
+                    workflow.status = CustomStoryWorkflowStatus.IN_PROGRESS
+                    workflow.current_step = step.value
+                    return
                 message = await batch_runner._ensure_audio_batch_submitted(workflow)
-                latest = await self.steps.latest_for_workflow_step(workflow.id, step)
-                if latest is not None:
-                    latest.input_json = step_input
-                    latest.output_json = {"deferred": True, "message": message}
-                    await self.steps.update(latest)
+                latest_job = await self.batch_jobs.latest_for_workflow_type(
+                    workflow.id,
+                    self._job_type_for_step(step),
+                )
+                if latest_job is not None and self._status_value(latest_job.status) in {
+                    StoryBatchJobStatus.SUBMITTED.value,
+                    StoryBatchJobStatus.RUNNING.value,
+                }:
+                    await self._record_submitted_batch_step(workflow, step, step_input, latest_job, message)
+                elif self._story_has_audio(workflow.story_json or {}):
+                    await self._record_completed_step(
+                        workflow,
+                        step,
+                        step_input,
+                        {"narration_generated": True, "message": message},
+                    )
                 workflow.status = CustomStoryWorkflowStatus.IN_PROGRESS
                 workflow.current_step = step.value
                 return
@@ -664,6 +756,7 @@ class CustomStoryWorkflowService:
             job.status = StoryBatchJobStatus.CANCELLED
             job.error_message = str(getattr(provider_job, "error", None) or f"Google batch state {state_name}")
             await self.batch_jobs.update(job)
+            await self._mark_batch_step_failed(workflow, job)
             await self._mark_workflow_failed(workflow, job.error_message)
             await self.session.commit()
             return self._batch_reconcile_result(job, "cancelled", job.error_message)
@@ -672,6 +765,7 @@ class CustomStoryWorkflowService:
             job.status = StoryBatchJobStatus.FAILED
             job.error_message = str(getattr(provider_job, "error", None) or f"Google batch state {state_name}")
             await self.batch_jobs.update(job)
+            await self._mark_batch_step_failed(workflow, job)
             await self._mark_workflow_failed(workflow, job.error_message)
             await self.session.commit()
             return self._batch_reconcile_result(job, "failed", job.error_message)
@@ -716,12 +810,14 @@ class CustomStoryWorkflowService:
         if step is None:
             step = await self.steps.create(workflow.id, CustomStoryWorkflowStep.IMAGE_GENERATION.value)
         step.status = StepStatus.COMPLETED if not failed_keys else StepStatus.FAILED
+        step.started_at = step.started_at or datetime.now(UTC)
         step.error_message = job.error_message
         step.output_json = {
             "mode": "google_batch_reconcile",
             "batch_job_id": str(job.id),
             "completed_keys": sorted(completed_keys),
             "failed_keys": sorted(failed_keys),
+            "response_summary": response_summary,
         }
         step.completed_at = datetime.now(UTC)
         await self.steps.update(step)
@@ -765,12 +861,14 @@ class CustomStoryWorkflowService:
         if step is None:
             step = await self.steps.create(workflow.id, CustomStoryWorkflowStep.NARRATION_GENERATION.value)
         step.status = StepStatus.COMPLETED if not failed_keys else StepStatus.FAILED
+        step.started_at = step.started_at or datetime.now(UTC)
         step.error_message = job.error_message
         step.output_json = {
             "mode": "google_batch_reconcile",
             "batch_job_id": str(job.id),
             "completed_keys": sorted(completed_keys),
             "failed_keys": sorted(failed_keys),
+            "response_summary": response_summary,
         }
         step.completed_at = datetime.now(UTC)
         await self.steps.update(step)
@@ -785,6 +883,67 @@ class CustomStoryWorkflowService:
         workflow.status = CustomStoryWorkflowStatus.FAILED
         workflow.error_message = error_message
         await self.workflows.update(workflow)
+
+    async def _mark_batch_step_failed(self, workflow: CustomStoryWorkflow, job: CustomStoryBatchJob) -> None:
+        step_name = self._step_for_job_type(job.job_type)
+        step = await self.steps.latest_for_workflow_step(workflow.id, step_name)
+        if step is None:
+            step = await self.steps.create(workflow.id, step_name.value)
+        step.status = StepStatus.FAILED
+        step.started_at = step.started_at or datetime.now(UTC)
+        step.completed_at = datetime.now(UTC)
+        step.error_message = job.error_message
+        step.output_json = {
+            "mode": "google_batch_reconcile",
+            "batch_job_id": str(job.id),
+            "provider_state": job.provider_state,
+            "status": self._status_value(job.status),
+            "message": job.error_message,
+        }
+        await self.steps.update(step)
+        workflow.current_step = step_name.value
+
+    async def _active_delayed_batch_job(
+        self,
+        workflow: CustomStoryWorkflow,
+        step_name: CustomStoryWorkflowStep,
+    ) -> CustomStoryBatchJob | None:
+        latest = await self.batch_jobs.latest_for_workflow_type(workflow.id, self._job_type_for_step(step_name))
+        if latest is None:
+            return None
+        if self._status_value(latest.status) in {
+            StoryBatchJobStatus.SUBMITTED.value,
+            StoryBatchJobStatus.RUNNING.value,
+        }:
+            return latest
+        return None
+
+    async def _record_submitted_batch_step(
+        self,
+        workflow: CustomStoryWorkflow,
+        step_name: CustomStoryWorkflowStep,
+        step_input: dict[str, Any] | None,
+        job: CustomStoryBatchJob,
+        message: str,
+    ) -> None:
+        step = await self.steps.latest_for_workflow_step(workflow.id, step_name)
+        if step is None:
+            step = await self.steps.create(workflow.id, step_name.value)
+        step.status = StepStatus.SUBMITTED_BATCH_JOB
+        step.started_at = step.started_at or datetime.now(UTC)
+        step.completed_at = None
+        step.input_json = step_input
+        step.output_json = {
+            "deferred": True,
+            "mode": "google_batch",
+            "batch_job_id": str(job.id),
+            "provider_job_name": job.provider_job_name,
+            "provider_state": job.provider_state,
+            "status": self._status_value(job.status),
+            "message": message,
+        }
+        step.error_message = None
+        await self.steps.update(step)
 
     def _batch_reconcile_result(
         self,
@@ -807,6 +966,86 @@ class CustomStoryWorkflowService:
     def _job_type_for_step(step_name: CustomStoryWorkflowStep):
         return StoryBatchJobType.IMAGE if step_name == CustomStoryWorkflowStep.IMAGE_GENERATION else StoryBatchJobType.AUDIO
 
+    @staticmethod
+    def _step_for_job_type(job_type: StoryBatchJobType) -> CustomStoryWorkflowStep:
+        value = job_type.value if hasattr(job_type, "value") else str(job_type)
+        return (
+            CustomStoryWorkflowStep.IMAGE_GENERATION
+            if value == StoryBatchJobType.IMAGE.value
+            else CustomStoryWorkflowStep.NARRATION_GENERATION
+        )
+
+    async def _step_has_completed_record(
+        self,
+        workflow: CustomStoryWorkflow,
+        step_name: CustomStoryWorkflowStep,
+    ) -> bool:
+        step = await self.steps.latest_for_workflow_step(workflow.id, step_name)
+        return step is not None and self._status_value(step.status) == StepStatus.COMPLETED.value
+
+    async def _delayed_outputs_completed(self, workflow: CustomStoryWorkflow) -> bool:
+        for step in (CustomStoryWorkflowStep.IMAGE_GENERATION, CustomStoryWorkflowStep.NARRATION_GENERATION):
+            if self._step_disabled_by_request(workflow, step):
+                continue
+            if not await self._step_is_complete(workflow, step):
+                return False
+        return True
+
+    async def _failed_delayed_batch_job(self, workflow: CustomStoryWorkflow) -> CustomStoryBatchJob | None:
+        for step in (CustomStoryWorkflowStep.IMAGE_GENERATION, CustomStoryWorkflowStep.NARRATION_GENERATION):
+            if self._step_disabled_by_request(workflow, step):
+                continue
+            latest = await self.batch_jobs.latest_for_workflow_type(workflow.id, self._job_type_for_step(step))
+            if latest is None:
+                continue
+            if self._status_value(latest.status) in {
+                StoryBatchJobStatus.FAILED.value,
+                StoryBatchJobStatus.CANCELLED.value,
+            }:
+                return latest
+        return None
+
+    async def _delayed_waiting_step(self, workflow: CustomStoryWorkflow) -> str | None:
+        for step in (CustomStoryWorkflowStep.IMAGE_GENERATION, CustomStoryWorkflowStep.NARRATION_GENERATION):
+            if self._step_disabled_by_request(workflow, step):
+                continue
+            if not await self._step_is_complete(workflow, step):
+                return step.value
+        return CustomStoryWorkflowStep.PUBLISH_STORY.value
+
+    def _step_disabled_by_request(
+        self,
+        workflow: CustomStoryWorkflow,
+        step: CustomStoryWorkflowStep,
+    ) -> bool:
+        if step in {
+            CustomStoryWorkflowStep.IMAGE_PLAN_GENERATION,
+            CustomStoryWorkflowStep.IMAGE_PLAN_VALIDATION,
+            CustomStoryWorkflowStep.IMAGE_GENERATION,
+        }:
+            return not self._execute_image_enabled(workflow)
+        if step == CustomStoryWorkflowStep.NARRATION_GENERATION:
+            return not self._execute_narration_enabled(workflow)
+        return False
+
+    @staticmethod
+    def _execute_image_enabled(workflow: CustomStoryWorkflow) -> bool:
+        request = workflow.input_request if isinstance(workflow.input_request, dict) else {}
+        if "execute_image" in request:
+            return bool(request.get("execute_image"))
+        return not bool(request.get("skip_image_generation", False))
+
+    @staticmethod
+    def _execute_narration_enabled(workflow: CustomStoryWorkflow) -> bool:
+        request = workflow.input_request if isinstance(workflow.input_request, dict) else {}
+        if "execute_narration" in request:
+            return bool(request.get("execute_narration"))
+        if "execute_narrration" in request:
+            return bool(request.get("execute_narrration"))
+        if "skip_narration_generation" in request:
+            return not bool(request.get("skip_narration_generation"))
+        return True
+
     async def _first_incomplete_step(self, workflow: CustomStoryWorkflow) -> CustomStoryWorkflowStep:
         for step in self.ORDERED_STEPS:
             if not await self._step_is_complete(workflow, step):
@@ -821,19 +1060,28 @@ class CustomStoryWorkflowService:
         if step == CustomStoryWorkflowStep.STORY_GENERATION:
             return isinstance(workflow.story_json, dict) and bool(workflow.story_json.get("pages"))
         if step == CustomStoryWorkflowStep.IMAGE_PLAN_GENERATION:
+            if not self._execute_image_enabled(workflow):
+                return True
             return isinstance(workflow.image_plan_json, dict) and bool(workflow.image_plan_json)
         if step == CustomStoryWorkflowStep.IMAGE_PLAN_VALIDATION:
+            if not self._execute_image_enabled(workflow):
+                return True
             return bool(workflow.image_plan_validated)
         if step == CustomStoryWorkflowStep.IMAGE_GENERATION:
-            flags = self._flags(workflow)
-            if flags.skip_image_generation:
+            if not self._execute_image_enabled(workflow):
                 return True
             if workflow.processing_mode == "delayed":
+                if self._story_has_images(workflow.story_json or {}):
+                    return True
                 latest = await self.batch_jobs.latest_for_workflow_type(workflow.id, self._job_type_for_step(step))
                 return latest is not None and self._status_value(latest.status) == "SUCCEEDED"
             return self._story_has_images(workflow.story_json or {})
         if step == CustomStoryWorkflowStep.NARRATION_GENERATION:
+            if not self._execute_narration_enabled(workflow):
+                return True
             if workflow.processing_mode == "delayed":
+                if self._story_has_audio(workflow.story_json or {}):
+                    return True
                 latest = await self.batch_jobs.latest_for_workflow_type(workflow.id, self._job_type_for_step(step))
                 return latest is not None and self._status_value(latest.status) == "SUCCEEDED"
             return self._story_has_audio(workflow.story_json or {})
@@ -858,7 +1106,7 @@ class CustomStoryWorkflowService:
     def _flags(workflow: CustomStoryWorkflow) -> StoryGenerationFlags:
         request = workflow.input_request if isinstance(workflow.input_request, dict) else {}
         return StoryGenerationFlags(
-            skip_image_generation=bool(request.get("skip_image_generation", False)),
+            skip_image_generation=not CustomStoryWorkflowService._execute_image_enabled(workflow),
             skip_validation=bool(request.get("skip_validation", False)),
         )
 
@@ -883,6 +1131,29 @@ class CustomStoryWorkflowService:
         return None
 
     @staticmethod
+    def _input_request_for_validation(workflow: CustomStoryWorkflow) -> dict[str, Any]:
+        request = dict(workflow.input_request) if isinstance(workflow.input_request, dict) else {}
+        if not request.get("reader_category"):
+            request["reader_category"] = reader_category_for_age_group(workflow.age_group).value
+        if not request.get("age_group"):
+            request["age_group"] = age_group_for_reader_category(request["reader_category"])
+        return request
+
+    @staticmethod
+    def _workflow_reader_category(workflow: CustomStoryWorkflow) -> str | None:
+        request = workflow.input_request if isinstance(workflow.input_request, dict) else {}
+        raw_reader_category = request.get("reader_category")
+        if raw_reader_category:
+            try:
+                return normalize_reader_category(raw_reader_category).value
+            except AttributeError:
+                return str(raw_reader_category)
+        try:
+            return reader_category_for_age_group(workflow.age_group).value
+        except AppException:
+            return None
+
+    @staticmethod
     def _status_value(status: Any) -> str:
         return status.value if hasattr(status, "value") else str(status)
 
@@ -896,6 +1167,7 @@ class CustomStoryWorkflowService:
     def _response(workflow: CustomStoryWorkflow) -> CustomStoryWorkflowResponse:
         return CustomStoryWorkflowResponse(
             workflow_id=workflow.id,
+            request_number=int(getattr(workflow, "request_number", 0) or 0),
             story_id=workflow.story_id,
             child_id=workflow.child_id,
             status=workflow.status.value if hasattr(workflow.status, "value") else str(workflow.status),
@@ -903,6 +1175,8 @@ class CustomStoryWorkflowService:
             error_message=workflow.error_message,
             generation_mode=workflow.generation_mode,
             processing_mode=workflow.processing_mode,
+            reader_category=CustomStoryWorkflowService._workflow_reader_category(workflow),
+            age_group=CustomStoryWorkflowService._status_value(workflow.age_group),
             category=workflow.category,
             learning_goal=workflow.learning_goal,
             context=workflow.context,

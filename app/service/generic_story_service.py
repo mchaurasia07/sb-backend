@@ -1,3 +1,5 @@
+import io
+import wave
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -25,6 +27,8 @@ from app.repository.child_book_repository import ChildBookRepository
 from app.repository.generic_story_repository import GenericStoryRepository
 from app.service.image_optimizer import optimize_display_image
 from app.service.image_storage_provider import get_image_storage_service
+from app.service.story_audio_storage_provider import get_story_audio_storage_service
+from app.utils.word_timestamps import generate_word_timestamps
 
 
 DEFAULT_GENERIC_STORY_LANGUAGE = "en"
@@ -34,6 +38,35 @@ PAGE_IMAGE_CONTENT_TYPES = {
     "image/png": ".png",
     "image/webp": ".webp",
 }
+PAGE_AUDIO_CONTENT_TYPES = {
+    "audio/wav",
+    "audio/wave",
+    "audio/x-wav",
+    "audio/mpeg",
+    "audio/mp3",
+    "audio/mp4",
+    "audio/aac",
+    "audio/m4a",
+    "audio/ogg",
+    "audio/opus",
+    "audio/webm",
+    "audio/flac",
+    "audio/x-m4a",
+    "video/webm",
+}
+PAGE_AUDIO_EXTENSION_CONTENT_TYPES = {
+    ".aac": "audio/aac",
+    ".flac": "audio/flac",
+    ".m4a": "audio/mp4",
+    ".mp3": "audio/mpeg",
+    ".oga": "audio/ogg",
+    ".ogg": "audio/ogg",
+    ".opus": "audio/opus",
+    ".wav": "audio/wav",
+    ".wave": "audio/wav",
+    ".webm": "audio/webm",
+}
+MAX_PAGE_AUDIO_UPLOAD_BYTES = 50 * 1024 * 1024
 
 
 class GenericStoryService:
@@ -250,6 +283,77 @@ class GenericStoryService:
             raise NotFoundException("Generic story not found", "GENERIC_STORY_NOT_FOUND")
         return self._to_response(generic_story, language=normalized_language)
 
+    async def update_page_audio(
+        self,
+        generic_story_id: UUID,
+        page_audio_uploads: dict[str, UploadFile],
+        language: str = DEFAULT_GENERIC_STORY_LANGUAGE,
+    ) -> GenericStoryResponse:
+        normalized_language = language.strip().lower()
+        page_uploads = self._extract_page_audio_uploads(page_audio_uploads)
+        if not page_uploads:
+            raise AppException(
+                "At least one page audio upload is required",
+                code="GENERIC_STORY_PAGE_AUDIO_UPLOAD_REQUIRED",
+            )
+
+        content = await self.generic_stories.get_content_by_story_and_language(
+            generic_story_id=generic_story_id,
+            language=normalized_language,
+        )
+        if content is None:
+            raise NotFoundException("Generic story content not found", "GENERIC_STORY_CONTENT_NOT_FOUND")
+
+        story_json = deepcopy(content.story_json)
+        pages = story_json.get("pages") if isinstance(story_json, dict) else None
+        if not isinstance(pages, list):
+            raise AppException(
+                "Generic story content has no pages array",
+                code="GENERIC_STORY_CONTENT_PAGES_MISSING",
+            )
+
+        pages_by_number = {
+            page_number: page
+            for page in pages
+            if isinstance(page, dict) and (page_number := self._story_page_number(page)) is not None
+        }
+        for page_number in page_uploads:
+            self._require_story_page(pages_by_number, page_number, normalized_language)
+
+        audio_storage = get_story_audio_storage_service()
+        page_audio_urls: dict[int, str] = {}
+        page_audio_metadata: dict[int, dict[str, Any]] = {}
+        for page_number, upload in page_uploads.items():
+            audio_bytes = await self._read_uploaded_page_audio(upload)
+            extension, content_type = self._upload_audio_storage_metadata(upload)
+            page_text = str(pages_by_number[page_number].get("text") or "")
+            duration = self._uploaded_audio_duration_seconds(audio_bytes)
+            page_audio_metadata[page_number] = {
+                "duration": round(duration, 2),
+                "word_timestamps": generate_word_timestamps(page_text, duration),
+            }
+            page_audio_urls[page_number] = await audio_storage.save_story_page_audio(
+                story_id=generic_story_id,
+                language=normalized_language,
+                page_number=page_number,
+                audio_bytes=audio_bytes,
+                extension=extension,
+                content_type=content_type,
+            )
+
+        self._apply_page_audio_urls(
+            story_json,
+            page_audio_urls=page_audio_urls,
+            page_audio_metadata=page_audio_metadata,
+        )
+        content.story_json = story_json
+        await self.generic_stories.update_content(content)
+
+        generic_story = await self.generic_stories.get_by_id(generic_story_id)
+        if generic_story is None:
+            raise NotFoundException("Generic story not found", "GENERIC_STORY_NOT_FOUND")
+        return self._to_response(generic_story, language=normalized_language)
+
     async def delete(self, generic_story_id: UUID) -> None:
         generic_story = await self.generic_stories.get_by_id(generic_story_id)
         if generic_story is None:
@@ -417,6 +521,158 @@ class GenericStoryService:
             if image_url:
                 page["image_url"] = image_url
                 page.pop("image_dummy", None)
+
+    @classmethod
+    def _extract_page_audio_uploads(cls, uploads: dict[str, UploadFile]) -> dict[int, UploadFile]:
+        page_uploads: dict[int, UploadFile] = {}
+        for field_name, upload in uploads.items():
+            page_number = cls._page_audio_upload_number(field_name)
+            if page_number is None:
+                continue
+            if page_number in page_uploads:
+                raise AppException(
+                    f"Duplicate audio upload provided for page {page_number}",
+                    code="GENERIC_STORY_PAGE_AUDIO_DUPLICATE",
+                )
+            page_uploads[page_number] = upload
+        return page_uploads
+
+    @staticmethod
+    def _page_audio_upload_number(field_name: str) -> int | None:
+        normalized = field_name.strip().lower()
+        candidates = []
+        if normalized.startswith("page_audio_"):
+            candidates.append(normalized.removeprefix("page_audio_"))
+        if normalized.startswith("audio_page_"):
+            candidates.append(normalized.removeprefix("audio_page_"))
+        if normalized.startswith("page_"):
+            candidates.append(normalized.removeprefix("page_").removesuffix("_audio"))
+        if normalized.startswith("page"):
+            candidates.append(normalized.removeprefix("page").removesuffix("_audio"))
+
+        for candidate in candidates:
+            if candidate.isdigit():
+                page_number = int(candidate)
+                if page_number > 0:
+                    return page_number
+        return None
+
+    @staticmethod
+    async def _read_uploaded_page_audio(upload: UploadFile) -> bytes:
+        GenericStoryService._validate_audio_upload_type(upload)
+        content = await upload.read()
+        if not content:
+            raise AppException("Audio file is empty", status.HTTP_400_BAD_REQUEST, "EMPTY_AUDIO")
+        if len(content) > MAX_PAGE_AUDIO_UPLOAD_BYTES:
+            raise AppException(
+                "Audio file must be 50 MB or smaller",
+                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                "AUDIO_TOO_LARGE",
+            )
+        return content
+
+    @staticmethod
+    def _uploaded_audio_duration_seconds(audio_bytes: bytes) -> float:
+        duration = GenericStoryService._uploaded_wav_duration_seconds(audio_bytes)
+        if duration is None:
+            duration = GenericStoryService._uploaded_mutagen_duration_seconds(audio_bytes)
+        if duration is None:
+            raise AppException(
+                "Audio duration could not be determined",
+                status.HTTP_400_BAD_REQUEST,
+                "AUDIO_DURATION_UNAVAILABLE",
+            )
+        return duration
+
+    @staticmethod
+    def _uploaded_wav_duration_seconds(audio_bytes: bytes) -> float | None:
+        try:
+            with wave.open(io.BytesIO(audio_bytes), "rb") as wav_file:
+                frame_rate = wav_file.getframerate()
+                frame_count = wav_file.getnframes()
+        except (EOFError, wave.Error):
+            return None
+
+        if frame_rate <= 0 or frame_count <= 0:
+            return None
+        return frame_count / frame_rate
+
+    @staticmethod
+    def _uploaded_mutagen_duration_seconds(audio_bytes: bytes) -> float | None:
+        try:
+            from mutagen import File as MutagenFile
+        except ImportError:
+            return None
+
+        try:
+            audio = MutagenFile(io.BytesIO(audio_bytes))
+        except Exception:
+            return None
+        duration = getattr(getattr(audio, "info", None), "length", None)
+        if isinstance(duration, (int, float)) and duration > 0:
+            return float(duration)
+        return None
+
+    @staticmethod
+    def _validate_audio_upload_type(upload: UploadFile) -> None:
+        content_type = str(upload.content_type or "").lower()
+        if content_type in PAGE_AUDIO_CONTENT_TYPES or content_type.startswith("audio/"):
+            return
+
+        suffix = Path(upload.filename or "").suffix.lower()
+        if suffix:
+            return
+
+        raise AppException(
+            "Audio upload must include an audio content type or filename extension",
+            status.HTTP_400_BAD_REQUEST,
+            "UNSUPPORTED_AUDIO_TYPE",
+        )
+
+    @staticmethod
+    def _upload_audio_storage_metadata(upload: UploadFile) -> tuple[str, str]:
+        suffix = Path(upload.filename or "").suffix.lower()
+        if not suffix:
+            suffix = ".audio"
+        content_type = str(upload.content_type or "").lower()
+        if content_type in PAGE_AUDIO_CONTENT_TYPES or content_type.startswith("audio/") or content_type.startswith("video/"):
+            return suffix, content_type
+        return suffix, PAGE_AUDIO_EXTENSION_CONTENT_TYPES.get(suffix, "application/octet-stream")
+
+    @classmethod
+    def _apply_page_audio_urls(
+        cls,
+        story_json: dict[str, Any],
+        *,
+        page_audio_urls: dict[int, str],
+        page_audio_metadata: dict[int, dict[str, Any]] | None = None,
+    ) -> None:
+        if not page_audio_urls:
+            return
+        pages = story_json.get("pages") if isinstance(story_json, dict) else None
+        if not isinstance(pages, list):
+            return
+
+        metadata_by_page = page_audio_metadata or {}
+        for index, page in enumerate(pages, start=1):
+            if not isinstance(page, dict):
+                continue
+            page_number = cls._story_page_number(page) or index
+            audio_url = page_audio_urls.get(page_number)
+            if not audio_url:
+                continue
+            page["audio_url"] = audio_url
+            page.pop("audio_dummy", None)
+            page.pop("tts_skipped", None)
+            metadata = metadata_by_page.get(page_number)
+            if isinstance(metadata, dict):
+                page.pop("duration", None)
+                page.pop("word_timestamps", None)
+                if isinstance(metadata.get("duration"), (int, float)):
+                    page["duration"] = round(float(metadata["duration"]), 2)
+                timestamps = metadata.get("word_timestamps")
+                if isinstance(timestamps, list):
+                    page["word_timestamps"] = timestamps
 
     @staticmethod
     def _to_response(

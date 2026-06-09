@@ -27,7 +27,9 @@ from app.model.response.generic_story import (
     GenericStoryAudioUploadResponse,
     GenericStoryBatchJobCancelResponse,
     GenericStoryBatchImageSubmitResponse,
+    GenericStoryBatchNarrationSubmitResponse,
     GenericStoryImageUploadResponse,
+    GenericStoryNarrationPromptResponse,
     GenericStoryResponse,
 )
 from app.model.response.generic_story_workflow import (
@@ -360,6 +362,45 @@ async def submit_generic_story_image_batch(
 
 
 @router.post(
+    "/{generic_story_id}/narration/batch",
+    response_model=ApiResponse[GenericStoryBatchNarrationSubmitResponse],
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def submit_generic_story_narration_batch(
+    generic_story_id: UUID,
+    language: str = Query("en", pattern="^(en|hi|mr)$", description="Story content language to narrate"),
+    force: bool = Query(False, description="Regenerate narration even when existing audio metadata is present"),
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[GenericStoryBatchNarrationSubmitResponse]:
+    data = await GenericStoryBatchService(session).submit_narration_batch(
+        user_id=current_user.id,
+        generic_story_id=generic_story_id,
+        language=language,
+        force=force,
+    )
+    return success_response(data, data.message)
+
+
+@router.get(
+    "/{generic_story_id}/narration/prompt",
+    response_model=ApiResponse[GenericStoryNarrationPromptResponse],
+)
+async def get_generic_story_narration_prompt(
+    generic_story_id: UUID,
+    language: str = Query("en", pattern="^(en|hi|mr)$", description="Story content language to preview"),
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[GenericStoryNarrationPromptResponse]:
+    _ = current_user
+    data = await GenericStoryBatchService(session).get_narration_prompts(
+        generic_story_id=generic_story_id,
+        language=language,
+    )
+    return success_response(data, "Generic story narration prompts generated successfully")
+
+
+@router.post(
     "/{generic_story_id}/images/multi-generate-test",
     response_model=ApiResponse[dict],
 )
@@ -531,6 +572,26 @@ async def update_generic_story_page_images(
         public_base_url=str(request.base_url).rstrip("/"),
     )
     return success_response(data, "Generic story page images updated successfully")
+
+
+@router.patch("/{generic_story_id}/content/page-audio", response_model=ApiResponse[GenericStoryResponse])
+async def update_generic_story_page_audio(
+    generic_story_id: UUID,
+    request: Request,
+    language: str = Query("en", min_length=2, max_length=16),
+    _: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[GenericStoryResponse]:
+    page_audio_uploads = await _read_uploads_from_form(
+        request,
+        duplicate_code="GENERIC_STORY_PAGE_AUDIO_DUPLICATE_FIELD",
+    )
+    data = await GenericStoryService(session).update_page_audio(
+        generic_story_id,
+        page_audio_uploads,
+        language=language,
+    )
+    return success_response(data, "Generic story page audio updated successfully")
 
 
 @router.get("/{generic_story_id}", response_model=ApiResponse[GenericStoryResponse])

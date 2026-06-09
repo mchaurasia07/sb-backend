@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 class CustomStoryWorkflowResponse(BaseModel):
     workflow_id: UUID
+    request_number: int
     story_id: UUID | None
     child_id: UUID
     status: str
@@ -14,6 +15,8 @@ class CustomStoryWorkflowResponse(BaseModel):
     error_message: str | None = None
     generation_mode: str
     processing_mode: str
+    reader_category: str | None = None
+    age_group: str | None = None
     category: str | None = None
     learning_goal: str | None = None
     context: str | None = None

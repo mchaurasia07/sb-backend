@@ -1,0 +1,12 @@
+$kind: http-request
+url: "{{base_url}}{{api_prefix}}/stories/workflows/{{workflow_id}}/retry"
+method: POST
+scripts:
+  - type: afterResponse
+    code: |-
+      const json = pm.response.json();
+      const data = json.data || {};
+      if (data.workflow_id) pm.collectionVariables.set('workflow_id', data.workflow_id);
+      if (data.story_id) pm.collectionVariables.set('story_id', data.story_id);
+    language: text/javascript
+order: 6000

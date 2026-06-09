@@ -1,0 +1,19 @@
+$kind: collection
+description: Custom story workflow V2 endpoints. Create starts execution immediately; retry resumes the same workflow from the first incomplete step.
+variables:
+  base_url: http://localhost:8000
+  api_prefix: /api/v1
+  access_token: ""
+  child_id: ""
+  workflow_id: ""
+  story_id: ""
+  page: "1"
+  page_size: "20"
+  status: IN_PROGRESS
+  limit: "50"
+auth:
+  - id: 78181b77-9386-4230-be6a-cb1a3592d755
+    type: bearer
+    name: bearer auth
+    credentials:
+      token: "{{access_token}}"

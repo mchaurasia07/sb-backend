@@ -1,0 +1,23 @@
+$kind: http-request
+url: "{{base_url}}{{api_prefix}}/stories/workflows?page={{page}}&page_size={{page_size}}"
+method: GET
+queryParams:
+  - key: page
+    value: "{{page}}"
+  - key: page_size
+    value: "{{page_size}}"
+  - key: child_id
+    value: "{{child_id}}"
+    disabled: true
+  - key: status
+    value: "{{status}}"
+    disabled: true
+scripts:
+  - type: afterResponse
+    code: |-
+      const json = pm.response.json();
+      const first = json.data && json.data.items && json.data.items[0];
+      if (first && first.workflow_id) pm.collectionVariables.set('workflow_id', first.workflow_id);
+      if (first && first.story_id) pm.collectionVariables.set('story_id', first.story_id);
+    language: text/javascript
+order: 3000

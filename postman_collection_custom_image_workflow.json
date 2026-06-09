@@ -1,0 +1,436 @@
+{
+  "info": {
+    "name": "Custom Image Workflow API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Postman collection for Custom Image Workflow API endpoints. This covers story generation workflows with image creation, management, and execution."
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "access_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "workflow_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "generic_story_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "page",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "page_size",
+      "value": "20",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Workflows",
+      "item": [
+        {
+          "name": "Create Workflow",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.id) {",
+                  "    pm.collectionVariables.set('workflow_id', json.data.id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Adventure in the Enchanted Forest\",\n  \"actual_story\": \"Once upon a time, a young princess named Emma discovered a hidden magical forest beyond the castle walls. The forest was filled with talking animals, glowing trees, and mysterious creatures that guarded ancient secrets. Emma embarked on a thrilling adventure to uncover the magic and save the kingdom from darkness. Along the way, she made friends with a wise owl, a brave fox, and a mischievous rabbit. Together, they faced challenges, solved riddles, and discovered that the real magic was the friendship they had found.\",\n  \"age_group\": \"5-8\",\n  \"language\": \"en\",\n  \"theme\": \"Adventure\",\n  \"genre\": \"Fantasy\",\n  \"learning_goal\": \"Courage and friendship\",\n  \"illustration_type\": \"watercolor\",\n  \"status\": \"active\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/generic-stories/workflows",
+              "protocol": "http",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "generic-stories",
+                "workflows"
+              ]
+            },
+            "description": "Create a new custom image workflow for story generation"
+          },
+          "response": []
+        },
+        {
+          "name": "List Workflows",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/generic-stories/workflows?page={{page}}&page_size={{page_size}}",
+              "protocol": "http",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "generic-stories",
+                "workflows"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "{{page}}"
+                },
+                {
+                  "key": "page_size",
+                  "value": "{{page_size}}"
+                }
+              ]
+            },
+            "description": "List all custom image workflows with pagination"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Workflow",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/generic-stories/workflows/{{workflow_id}}",
+              "protocol": "http",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "generic-stories",
+                "workflows",
+                "{{workflow_id}}"
+              ]
+            },
+            "description": "Get details of a specific workflow"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Workflow Steps",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/generic-stories/workflows/{{workflow_id}}/steps?step_name=IMAGE_GENERATION",
+              "protocol": "http",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "generic-stories",
+                "workflows",
+                "{{workflow_id}}",
+                "steps"
+              ],
+              "query": [
+                {
+                  "key": "step_name",
+                  "value": "IMAGE_GENERATION",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Get all steps of a workflow. Optional: filter by step_name (e.g., IMAGE_GENERATION, TEXT_GENERATION, etc.)"
+          },
+          "response": []
+        },
+        {
+          "name": "Execute Workflow",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.generic_story_id) {",
+                  "    pm.collectionVariables.set('generic_story_id', json.data.generic_story_id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"step_name\": \"ALL\",\n  \"skip_image_generation\": false,\n  \"skip_narration_generation\": true,\n  \"publish_status\": \"active\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/generic-stories/workflows/{{workflow_id}}/execute",
+              "protocol": "http",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "generic-stories",
+                "workflows",
+                "{{workflow_id}}",
+                "execute"
+              ]
+            },
+            "description": "Execute the workflow. Set step_name to 'ALL' to run all steps, or specify a specific step. Control image and narration generation via flags."
+          },
+          "response": []
+        },
+        {
+          "name": "Execute Workflow - Only Images",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"step_name\": \"IMAGE_GENERATION\",\n  \"skip_image_generation\": false,\n  \"skip_narration_generation\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/generic-stories/workflows/{{workflow_id}}/execute",
+              "protocol": "http",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "generic-stories",
+                "workflows",
+                "{{workflow_id}}",
+                "execute"
+              ]
+            },
+            "description": "Execute only the IMAGE_GENERATION step of the workflow"
+          },
+          "response": []
+        },
+        {
+          "name": "Retry Workflow",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"skip_image_generation\": false,\n  \"skip_narration_generation\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/generic-stories/workflows/{{workflow_id}}/retry",
+              "protocol": "http",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "generic-stories",
+                "workflows",
+                "{{workflow_id}}",
+                "retry"
+              ]
+            },
+            "description": "Retry a failed workflow from where it stopped"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Workflow",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/generic-stories/workflows/{{workflow_id}}",
+              "protocol": "http",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "generic-stories",
+                "workflows",
+                "{{workflow_id}}"
+              ]
+            },
+            "description": "Delete a workflow and its associated data"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Image Management",
+      "item": [
+        {
+          "name": "Upload Workflow Images",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "cover_image",
+                  "type": "file",
+                  "src": [],
+                  "disabled": false
+                },
+                {
+                  "key": "page_1_image",
+                  "type": "file",
+                  "src": [],
+                  "disabled": true
+                },
+                {
+                  "key": "page_2_image",
+                  "type": "file",
+                  "src": [],
+                  "disabled": true
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/generic-stories/workflows/{{workflow_id}}/stories/{{generic_story_id}}/images",
+              "protocol": "http",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "generic-stories",
+                "workflows",
+                "{{workflow_id}}",
+                "stories",
+                "{{generic_story_id}}",
+                "images"
+              ]
+            },
+            "description": "Upload custom images for a story workflow. Supports cover_image and page_X_image fields. Images must be JPEG, PNG, or WEBP format."
+          },
+          "response": []
+        },
+        {
+          "name": "Reduce Image for Preview",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "image",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/generic-stories/images/reduce?max_dimension=1600",
+              "protocol": "http",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "generic-stories",
+                "images",
+                "reduce"
+              ],
+              "query": [
+                {
+                  "key": "max_dimension",
+                  "value": "1600"
+                }
+              ]
+            },
+            "description": "Optimize an image for preview/display by reducing its size. Returns optimized image with specified max_dimension (default 1600px, range 320-4096px). Max file size: 5MB"
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

@@ -104,6 +104,7 @@ class GoogleTTSProvider:
         *,
         pace: str = "medium",
         language: str = "en",
+        voice: str | None = None,
         voice_style: str = "storybook narrator",
         tone: str = "warm, magical, gentle",
         emotion: str = "wonder",
@@ -114,7 +115,7 @@ class GoogleTTSProvider:
             {
                 "language": self.LANGUAGE_NAME_MAP.get(normalized_language, language),
                 "language_code": self.LANGUAGE_CODE_MAP.get(normalized_language, language),
-                "voice": self.voice,
+                "voice": voice or self.voice,
                 "voice_style": voice_style,
                 "tone": tone,
                 "pace": pace,

@@ -1,0 +1,29 @@
+$kind: http-request
+url: "{{base_url}}{{api_prefix}}/stories/workflows"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "child_id": "{{child_id}}",
+      "mode": "INPUT_DRIVEN",
+      "category": "adventure",
+      "learning_goal": "kindness and courage",
+      "context": "Create a warm bedtime story where the child helps a friend solve a small problem.",
+      "processing_mode": "delayed",
+      "execute_image": true,
+      "execute_narration": true,
+      "skip_image_generation": false,
+      "skip_validation": false
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      const json = pm.response.json();
+      const data = json.data || {};
+      if (data.workflow_id) pm.collectionVariables.set('workflow_id', data.workflow_id);
+      if (data.story_id) pm.collectionVariables.set('story_id', data.story_id);
+    language: text/javascript
+order: 1000

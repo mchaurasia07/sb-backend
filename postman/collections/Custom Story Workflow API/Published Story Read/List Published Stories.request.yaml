@@ -1,0 +1,12 @@
+$kind: http-request
+url: "{{base_url}}{{api_prefix}}/stories?page={{page}}&page_size={{page_size}}"
+method: GET
+queryParams:
+  - key: page
+    value: "{{page}}"
+  - key: page_size
+    value: "{{page_size}}"
+  - key: child_id
+    value: "{{child_id}}"
+    disabled: true
+order: 4000

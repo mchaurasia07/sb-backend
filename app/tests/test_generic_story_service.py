@@ -1,3 +1,5 @@
+import io
+import wave
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from uuid import uuid4
@@ -162,6 +164,35 @@ class _FakeImageStorage:
         return f"https://cdn.example.test/stories/{story_id}/reduced/{filename}"
 
 
+class _FakeAudioStorage:
+    def __init__(self):
+        self.saved_audio = []
+
+    async def save_story_page_audio(
+        self,
+        *,
+        story_id,
+        language,
+        page_number,
+        audio_bytes,
+        extension=".wav",
+        content_type="audio/wav",
+    ):
+        self.saved_audio.append((story_id, language, page_number, audio_bytes, extension, content_type))
+        return f"https://cdn.example.test/audio/stories/{story_id}/{language}/page_{page_number}{extension}"
+
+
+def _wav_bytes(duration_seconds: float = 1.0, sample_rate: int = 8000) -> bytes:
+    frame_count = int(duration_seconds * sample_rate)
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(sample_rate)
+        wav_file.writeframes(b"\x00\x00" * frame_count)
+    return buffer.getvalue()
+
+
 @pytest.mark.asyncio
 async def test_update_generic_story_page_images_updates_all_languages_without_text_changes(monkeypatch):
     story = _generic_story()
@@ -199,6 +230,158 @@ async def test_update_generic_story_page_images_updates_all_languages_without_te
     assert story.contents[1].story_json["pages"][0]["image_url"] == image_url
     assert service.generic_stories.updated_contents == story.contents
     assert response.story_json["pages"][0]["image_url"] == image_url
+
+
+@pytest.mark.asyncio
+async def test_update_generic_story_page_audio_updates_requested_language_only(monkeypatch):
+    story = _generic_story()
+    story.contents[0].story_json["pages"][0]["audio_url"] = "old-en-1"
+    story.contents[0].story_json["pages"][1]["audio_url"] = "old-en-2"
+    story.contents.append(
+        SimpleNamespace(
+            language="hi",
+            story_json={
+                "title": "Chaand ki Ghanti",
+                "pages": [
+                    {
+                        "page_number": 1,
+                        "text": "Hindi page 1.",
+                        "audio_url": "old-hi-1",
+                        "audio_dummy": True,
+                    },
+                    {
+                        "page_number": 2,
+                        "text": "Hindi page 2.",
+                        "audio_url": "old-hi-2",
+                        "tts_skipped": True,
+                    },
+                ],
+            },
+        )
+    )
+    page_1_audio = _wav_bytes(duration_seconds=2.0)
+    page_2_audio = _wav_bytes(duration_seconds=4.0)
+    storage = _FakeAudioStorage()
+    monkeypatch.setattr("app.service.generic_story_service.get_story_audio_storage_service", lambda: storage)
+    service = GenericStoryService.__new__(GenericStoryService)
+    service.generic_stories = _FakeGenericStoryRepository(story)
+
+    response = await service.update_page_audio(
+        story.id,
+        {
+            "page_audio_1": _FakeUpload(page_1_audio, "page-1.wav", "audio/wav"),
+            "audio_page_2": _FakeUpload(page_2_audio, "page-2.wav", "audio/wav"),
+        },
+        language="HI",
+    )
+
+    page_1_url = f"https://cdn.example.test/audio/stories/{story.id}/hi/page_1.wav"
+    page_2_url = f"https://cdn.example.test/audio/stories/{story.id}/hi/page_2.wav"
+    hi_pages = story.contents[1].story_json["pages"]
+    assert storage.saved_audio == [
+        (story.id, "hi", 1, page_1_audio, ".wav", "audio/wav"),
+        (story.id, "hi", 2, page_2_audio, ".wav", "audio/wav"),
+    ]
+    assert story.contents[0].story_json["pages"][0]["audio_url"] == "old-en-1"
+    assert story.contents[0].story_json["pages"][1]["audio_url"] == "old-en-2"
+    assert hi_pages[0]["audio_url"] == page_1_url
+    assert hi_pages[0]["duration"] == 2.0
+    assert hi_pages[0]["word_timestamps"] == [{"word": "Hindi page 1.", "start": 0.0, "end": 2.0}]
+    assert "audio_dummy" not in hi_pages[0]
+    assert hi_pages[1]["audio_url"] == page_2_url
+    assert hi_pages[1]["duration"] == 4.0
+    assert hi_pages[1]["word_timestamps"] == [{"word": "Hindi page 2.", "start": 0.0, "end": 4.0}]
+    assert "tts_skipped" not in hi_pages[1]
+    assert service.generic_stories.updated_content is story.contents[1]
+    assert response.language == "hi"
+    assert response.story_json["pages"][0]["audio_url"] == page_1_url
+
+
+def test_extract_page_audio_uploads_accepts_aliases_and_rejects_duplicates():
+    uploads = {
+        "page_audio_1": object(),
+        "audio_page_2": object(),
+        "page_3_audio": object(),
+        "page4_audio": object(),
+        "ignored": object(),
+    }
+
+    page_uploads = GenericStoryService._extract_page_audio_uploads(uploads)
+
+    assert sorted(page_uploads) == [1, 2, 3, 4]
+    with pytest.raises(AppException) as exc_info:
+        GenericStoryService._extract_page_audio_uploads(
+            {
+                "page_audio_1": object(),
+                "page1_audio": object(),
+            }
+        )
+    assert exc_info.value.code == "GENERIC_STORY_PAGE_AUDIO_DUPLICATE"
+
+
+@pytest.mark.asyncio
+async def test_update_generic_story_page_audio_accepts_non_wav_upload(monkeypatch):
+    story = _generic_story()
+    storage = _FakeAudioStorage()
+    monkeypatch.setattr("app.service.generic_story_service.get_story_audio_storage_service", lambda: storage)
+    monkeypatch.setattr(
+        GenericStoryService,
+        "_uploaded_audio_duration_seconds",
+        staticmethod(lambda audio_bytes: 3.5),
+    )
+    service = GenericStoryService.__new__(GenericStoryService)
+    service.generic_stories = _FakeGenericStoryRepository(story)
+
+    response = await service.update_page_audio(
+        story.id,
+        {"page_audio_1": _FakeUpload(b"mp3-bytes", "page-1.mp3", "audio/mpeg")},
+        language="en",
+    )
+
+    audio_url = f"https://cdn.example.test/audio/stories/{story.id}/en/page_1.mp3"
+    assert storage.saved_audio == [(story.id, "en", 1, b"mp3-bytes", ".mp3", "audio/mpeg")]
+    assert response.story_json["pages"][0]["audio_url"] == audio_url
+    assert response.story_json["pages"][0]["duration"] == 3.5
+    assert response.story_json["pages"][0]["word_timestamps"] == [
+        {"word": "Mira heard the old bell.", "start": 0.0, "end": 3.5}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_update_generic_story_page_audio_rejects_when_duration_unavailable(monkeypatch):
+    story = _generic_story()
+    story.contents[0].story_json["pages"][0]["audio_url"] = "old-en-1"
+    story.contents[0].story_json["pages"][0]["duration"] = 9.9
+    story.contents[0].story_json["pages"][0]["word_timestamps"] = [{"word": "old", "start": 0.0, "end": 9.9}]
+    storage = _FakeAudioStorage()
+    monkeypatch.setattr("app.service.generic_story_service.get_story_audio_storage_service", lambda: storage)
+    monkeypatch.setattr(
+        GenericStoryService,
+        "_uploaded_audio_duration_seconds",
+        staticmethod(
+            lambda audio_bytes: (_ for _ in ()).throw(
+                AppException(
+                    "Audio duration could not be determined",
+                    code="AUDIO_DURATION_UNAVAILABLE",
+                )
+            )
+        ),
+    )
+    service = GenericStoryService.__new__(GenericStoryService)
+    service.generic_stories = _FakeGenericStoryRepository(story)
+
+    with pytest.raises(AppException) as exc_info:
+        await service.update_page_audio(
+            story.id,
+            {"page_audio_1": _FakeUpload(b"bad-audio", "page-1.webm", "audio/webm")},
+            language="en",
+        )
+
+    assert exc_info.value.code == "AUDIO_DURATION_UNAVAILABLE"
+    assert storage.saved_audio == []
+    assert story.contents[0].story_json["pages"][0]["audio_url"] == "old-en-1"
+    assert story.contents[0].story_json["pages"][0]["duration"] == 9.9
+    assert story.contents[0].story_json["pages"][0]["word_timestamps"] == [{"word": "old", "start": 0.0, "end": 9.9}]
 
 
 @pytest.mark.asyncio

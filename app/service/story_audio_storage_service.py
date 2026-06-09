@@ -17,11 +17,15 @@ class LocalStoryAudioStorageService:
         language: str,
         page_number: int,
         audio_bytes: bytes,
+        extension: str = ".wav",
+        content_type: str = "audio/wav",
     ) -> str:
+        _ = content_type
+        extension = self._safe_audio_extension(extension)
         story_dir = settings.audio_root_path / "stories" / str(story_id) / language
         story_dir.mkdir(parents=True, exist_ok=True)
 
-        file_path = story_dir / f"page_{page_number}.wav"
+        file_path = story_dir / f"page_{page_number}{extension}"
         try:
             await asyncio.to_thread(file_path.write_bytes, audio_bytes)
         except OSError as exc:
@@ -31,7 +35,17 @@ class LocalStoryAudioStorageService:
                 "AUDIO_STORAGE_ERROR",
             ) from exc
 
-        return f"{settings.AUDIO_URL_PREFIX}/stories/{story_id}/{language}/page_{page_number}.wav"
+        return f"{settings.AUDIO_URL_PREFIX}/stories/{story_id}/{language}/page_{page_number}{extension}"
+
+    @staticmethod
+    def _safe_audio_extension(extension: str) -> str:
+        suffix = (extension or "").strip().lower()
+        if not suffix:
+            return ".wav"
+        if not suffix.startswith("."):
+            suffix = f".{suffix}"
+        safe = "".join(character for character in suffix if character.isalnum() or character == ".")
+        return safe if safe and safe != "." else ".wav"
 
     async def delete_story_directory(self, story_id: UUID) -> None:
         directory = (settings.audio_root_path / "stories" / str(story_id)).resolve()
@@ -59,12 +73,15 @@ class CloudflareR2StoryAudioStorageService:
         language: str,
         page_number: int,
         audio_bytes: bytes,
+        extension: str = ".wav",
+        content_type: str = "audio/wav",
     ) -> str:
         if not audio_bytes:
             raise AppException("Audio file is empty", status.HTTP_400_BAD_REQUEST, "EMPTY_AUDIO")
 
-        key = self._key("stories", str(story_id), language, f"page_{page_number}.wav")
-        await self._put_object(key, audio_bytes, "audio/wav")
+        extension = LocalStoryAudioStorageService._safe_audio_extension(extension)
+        key = self._key("stories", str(story_id), language, f"page_{page_number}{extension}")
+        await self._put_object(key, audio_bytes, content_type or "application/octet-stream")
         return self.public_url(key)
 
     async def delete_story_directory(self, story_id: UUID) -> None:

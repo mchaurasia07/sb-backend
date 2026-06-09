@@ -86,7 +86,15 @@ def upgrade() -> None:
         ),
         sa.Column(
             "status",
-            sa.Enum("PENDING", "IN_PROGRESS", "COMPLETED", "FAILED", name="stepstatus", native_enum=False),
+            sa.Enum(
+                "PENDING",
+                "IN_PROGRESS",
+                "SUBMITTED_BATCH_JOB",
+                "COMPLETED",
+                "FAILED",
+                name="stepstatus",
+                native_enum=False,
+            ),
             nullable=False,
         ),
         sa.Column("input_json", sa.JSON(), nullable=True),

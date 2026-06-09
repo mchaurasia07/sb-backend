@@ -2799,7 +2799,7 @@
               }
             ],
             "url": {
-              "raw": "{{base_url}}/api/v1/stories/generate",
+              "raw": "{{base_url}}/api/v1/stories/workflows",
               "host": [
                 "{{base_url}}"
               ],
@@ -2807,7 +2807,7 @@
                 "api",
                 "v1",
                 "stories",
-                "generate"
+                "workflows"
               ],
               "query": [],
               "variable": []
@@ -2815,7 +2815,7 @@
             "description": "Generate a new story (asynchronous with polling).\n\nReturns immediately with story_id and status=PENDING.\nClient polls GET /stories/{story_id} to check generation progress.\n\nWorkflow steps executed in background:\n1. Story Plan Generation\n2. Story Plan Validation (3 retries)\n3. Story Text Generation\n4. Image Plan Generation\n5. Image Plan Validation (optional)\n6. Image Generation\n7. Narration Generation",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"child_id\": \"{{child_id}}\",\n  \"mode\": \"INPUT_DRIVEN\",\n  \"category\": \"string\",\n  \"learning_goal\": \"string\",\n  \"context\": \"string\",\n  \"event_description\": \"string\",\n  \"skip_image_generation\": false,\n  \"skip_validation\": false,\n  \"processing_mode\": \"instant\"\n}",
+              "raw": "{\n  \"child_id\": \"{{child_id}}\",\n  \"mode\": \"INPUT_DRIVEN\",\n  \"reader_category\": \"Early Reader\",\n  \"category\": \"string\",\n  \"learning_goal\": \"string\",\n  \"context\": \"string\",\n  \"event_description\": \"string\",\n  \"execute_image\": true,\n  \"execute_narration\": true,\n  \"execute_workflow\": false,\n  \"skip_image_generation\": false,\n  \"skip_validation\": false,\n  \"processing_mode\": \"delayed\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

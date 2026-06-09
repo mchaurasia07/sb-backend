@@ -19,10 +19,16 @@ class CustomStoryWorkflowRepository:
         self.session = session
 
     async def create(self, **kwargs) -> CustomStoryWorkflow:
+        if kwargs.get("request_number") is None:
+            kwargs["request_number"] = await self.next_request_number()
         workflow = CustomStoryWorkflow(**kwargs)
         self.session.add(workflow)
         await self.session.flush()
         return workflow
+
+    async def next_request_number(self) -> int:
+        latest = await self.session.scalar(select(func.max(CustomStoryWorkflow.request_number)))
+        return int(latest or 0) + 1
 
     async def get_by_id(self, workflow_id: UUID) -> CustomStoryWorkflow | None:
         result = await self.session.execute(

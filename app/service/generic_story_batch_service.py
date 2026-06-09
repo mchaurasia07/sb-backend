@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+from copy import deepcopy
 from dataclasses import dataclass
 from io import BytesIO
 from typing import Any
@@ -24,14 +25,23 @@ from app.entity.generic_story_batch_job import GenericStoryBatchJob
 from app.entity.generic_story_workflow import GenericStoryWorkflow, GenericStoryWorkflowStatus, GenericStoryWorkflowStep
 from app.entity.story_batch_job import StoryBatchJobStatus, StoryBatchJobType
 from app.model.request.generic_story_workflow import GenericStoryWorkflowExecuteRequest
-from app.model.response.generic_story import GenericStoryBatchImageSubmitResponse
+from app.model.response.generic_story import (
+    GenericStoryBatchImageSubmitResponse,
+    GenericStoryBatchNarrationSubmitResponse,
+    GenericStoryNarrationPromptPageResponse,
+    GenericStoryNarrationPromptResponse,
+)
 from app.repository.generic_story_batch_job_repository import GenericStoryBatchJobRepository
 from app.repository.generic_story_repository import GenericStoryRepository
 from app.repository.generic_story_workflow_repository import GenericStoryWorkflowRepository
 from app.service.ai.google_provider import GoogleProvider
 from app.service.generic_story_workflow_service import GenericStoryWorkflowService
 from app.service.image_storage_provider import get_image_storage_service
+from app.service.story_audio_storage_provider import get_story_audio_storage_service
+from app.service.story_narration_profile import build_page_narration
 from app.service.story_service import StoryService
+from app.utils.google_tts_utils import GoogleTTSProvider
+from app.utils.word_timestamps import generate_word_timestamps
 
 logger = logging.getLogger(__name__)
 
@@ -48,12 +58,27 @@ class GenericBatchImageItem:
     file_name: str
 
 
+@dataclass(frozen=True)
+class GenericBatchAudioItem:
+    key: str
+    page_number: int
+    text: str
+    prompt: str
+    pace: str
+    voice_style: str
+    tone: str
+    emotion: str
+
+
 class GenericStoryBatchService:
-    """Submits and reconciles generic-story image batches only."""
+    """Submits and reconciles generic-story media batches."""
 
     SUCCEEDED_STATES = {"JOB_STATE_SUCCEEDED", "SUCCEEDED"}
     CANCELLED_STATES = {"JOB_STATE_CANCELLED", "CANCELLED"}
     FAILED_STATES = {"JOB_STATE_FAILED", "JOB_STATE_EXPIRED", "FAILED"}
+    GENERIC_NARRATION_MODE = "generic_story_narration"
+    GENERIC_NARRATION_VOICE = "Kore"
+    LANGUAGE_CODE_MAP = {"en": "en-IN", "hi": "hi-IN", "mr": "mr-IN"}
     OPENAI_IMAGE_BATCH_ENDPOINT = "/v1/responses"
     OPENAI_SUCCEEDED_STATES = {"completed"}
     OPENAI_CANCELLED_STATES = {"cancelled"}
@@ -66,6 +91,8 @@ class GenericStoryBatchService:
         self.workflows = GenericStoryWorkflowRepository(session)
         self.batch_jobs = GenericStoryBatchJobRepository(session)
         self.image_storage = get_image_storage_service()
+        self.audio_storage = get_story_audio_storage_service()
+        self.tts_provider = GoogleTTSProvider()
         self.google_client = genai.Client(api_key=settings.GOOGLE_API_KEY)
         self.openai_client = AsyncOpenAI(
             api_key=settings.OPENAI_API_KEY,
@@ -235,6 +262,152 @@ class GenericStoryBatchService:
             message="Generic story image batch submitted; reconcile scheduler will process results",
         )
 
+    async def submit_narration_batch(
+        self,
+        *,
+        user_id: UUID,
+        generic_story_id: UUID,
+        language: str = "en",
+        force: bool = False,
+    ) -> GenericStoryBatchNarrationSubmitResponse:
+        language = self._normalize_narration_language(language)
+        language_code = self.LANGUAGE_CODE_MAP[language]
+        generic_story = await self.generic_stories.get_by_id(generic_story_id)
+        if generic_story is None:
+            raise NotFoundException("Generic story not found", "GENERIC_STORY_NOT_FOUND")
+
+        content = await self.generic_stories.get_content_by_story_and_language(
+            generic_story_id=generic_story_id,
+            language=language,
+        )
+        if content is None or not isinstance(content.story_json, dict):
+            raise NotFoundException(
+                f"Generic story content not found for language '{language}'",
+                "GENERIC_STORY_CONTENT_NOT_FOUND",
+            )
+
+        latest = await self.batch_jobs.latest_for_story_type(
+            generic_story_id,
+            StoryBatchJobType.AUDIO,
+            provider="google",
+        )
+        if (
+            latest
+            and latest.status in {StoryBatchJobStatus.SUBMITTED, StoryBatchJobStatus.RUNNING}
+            and self._job_request_language(latest) == language
+        ):
+            workflow = await self.workflows.get_by_id(latest.workflow_id)
+            if workflow is None:
+                workflow = await self._generic_narration_workflow(user_id, generic_story, content.story_json, language)
+            return self._narration_submit_response(
+                workflow=workflow,
+                job=latest,
+                submitted_count=len(latest.request_keys or []),
+                language=language,
+                language_code=language_code,
+                message=f"Narration batch already exists for {language} with status {latest.status.value}",
+            )
+
+        workflow = await self._generic_narration_workflow(user_id, generic_story, content.story_json, language)
+        story_json = deepcopy(content.story_json)
+        items = self._build_audio_items(story_json, language=language, age_group=generic_story.age_group)
+        if not items:
+            raise AppException(
+                "Generic story narration batch has no pages with text to narrate",
+                code="EMPTY_GENERIC_NARRATION_BATCH",
+                details={"language": language},
+            )
+
+        missing = items if force else self._missing_audio_items(story_json, items)
+        if not missing:
+            workflow.story_json = story_json
+            workflow.status = GenericStoryWorkflowStatus.COMPLETED.value
+            workflow.current_step = None
+            workflow.error_message = None
+            await self.workflows.update(workflow)
+            content.story_json = story_json
+            await self.generic_stories.update_content(content)
+            await self.session.commit()
+            return GenericStoryBatchNarrationSubmitResponse(
+                generic_story_id=generic_story_id,
+                workflow_id=workflow.id,
+                job_type=StoryBatchJobType.AUDIO.value,
+                status=StoryBatchJobStatus.SUCCEEDED.value,
+                expected_item_count=len(items),
+                submitted_item_count=0,
+                message=f"All generic story narration audio already exists for {language}",
+                language=language,
+                language_code=language_code,
+            )
+
+        workflow.status = GenericStoryWorkflowStatus.IN_PROGRESS.value
+        workflow.current_step = GenericStoryWorkflowStep.NARRATION_GENERATION.value
+        workflow.error_message = None
+        workflow.story_json = story_json
+        await self.workflows.update(workflow)
+
+        job = await self._submit_audio_batch_job_only(
+            workflow,
+            generic_story_id,
+            missing,
+            language=language,
+            language_code=language_code,
+            attempt=1,
+            force=force,
+        )
+        await self.session.commit()
+        return self._narration_submit_response(
+            workflow=workflow,
+            job=job,
+            submitted_count=len(missing),
+            language=language,
+            language_code=language_code,
+            message="Generic story narration batch submitted; reconcile scheduler will process results",
+        )
+
+    async def get_narration_prompts(
+        self,
+        *,
+        generic_story_id: UUID,
+        language: str = "en",
+    ) -> GenericStoryNarrationPromptResponse:
+        language = self._normalize_narration_language(language)
+        generic_story = await self.generic_stories.get_by_id(generic_story_id)
+        if generic_story is None:
+            raise NotFoundException("Generic story not found", "GENERIC_STORY_NOT_FOUND")
+
+        content = await self.generic_stories.get_content_by_story_and_language(
+            generic_story_id=generic_story_id,
+            language=language,
+        )
+        if content is None or not isinstance(content.story_json, dict):
+            raise NotFoundException(
+                f"Generic story content not found for language '{language}'",
+                "GENERIC_STORY_CONTENT_NOT_FOUND",
+            )
+
+        story_json = deepcopy(content.story_json)
+        items = self._build_audio_items(story_json, language=language, age_group=generic_story.age_group)
+        return GenericStoryNarrationPromptResponse(
+            generic_story_id=generic_story_id,
+            language=language,
+            language_code=self.LANGUAGE_CODE_MAP[language],
+            voice=self.GENERIC_NARRATION_VOICE,
+            page_count=len(items),
+            pages=[
+                GenericStoryNarrationPromptPageResponse(
+                    page_number=item.page_number,
+                    text=item.text,
+                    prompt=item.prompt,
+                    pace=item.pace,
+                    voice_style=item.voice_style,
+                    tone=item.tone,
+                    emotion=item.emotion,
+                )
+                for item in items
+            ],
+        )
+
     async def reconcile_batch_jobs(self, *, limit: int = 50) -> dict[str, Any]:
         jobs = await self.batch_jobs.list_reconcilable(limit=limit)
         results: list[dict[str, Any]] = []
@@ -306,6 +479,9 @@ class GenericStoryBatchService:
             if self._job_request_mode(job) == self.WORKFLOW_MULTI_IMAGE_MODE:
                 await self._process_reconciled_workflow_multi_image_job(job, provider_job)
                 return self._reconcile_result(job, "processed", "Generic story workflow multi-image job processed")
+            if job.job_type == StoryBatchJobType.AUDIO:
+                await self._process_reconciled_audio_job(job, provider_job)
+                return self._reconcile_result(job, "processed", "Generic story narration audio job processed")
             await self._process_reconciled_image_job(job, provider_job)
             return self._reconcile_result(job, "processed", "Generic story image job processed")
 
@@ -319,6 +495,8 @@ class GenericStoryBatchService:
                 current_step=(
                     GenericStoryWorkflowStep.IMAGE_GENERATION.value
                     if self._job_request_mode(job) == self.WORKFLOW_MULTI_IMAGE_MODE
+                    else GenericStoryWorkflowStep.NARRATION_GENERATION.value
+                    if job.job_type == StoryBatchJobType.AUDIO
                     else None
                 ),
             )
@@ -335,6 +513,8 @@ class GenericStoryBatchService:
                 current_step=(
                     GenericStoryWorkflowStep.IMAGE_GENERATION.value
                     if self._job_request_mode(job) == self.WORKFLOW_MULTI_IMAGE_MODE
+                    else GenericStoryWorkflowStep.NARRATION_GENERATION.value
+                    if job.job_type == StoryBatchJobType.AUDIO
                     else None
                 ),
             )
@@ -413,6 +593,90 @@ class GenericStoryBatchService:
             job.missing_keys = [item.key for item in items]
             await self.batch_jobs.update(job)
             await self._mark_workflow_failed(workflow.id, str(exc))
+            await self.session.commit()
+            raise
+
+    async def _submit_audio_batch_job_only(
+        self,
+        workflow: GenericStoryWorkflow,
+        generic_story_id: UUID,
+        items: list[GenericBatchAudioItem],
+        *,
+        language: str,
+        language_code: str,
+        attempt: int,
+        force: bool = False,
+    ) -> GenericStoryBatchJob:
+        requests = [self._build_audio_inlined_request(item) for item in items]
+        model = settings.GOOGLE_TTS_MODEL.removeprefix("models/")
+        job = await self.batch_jobs.create(
+            generic_story_id=generic_story_id,
+            workflow_id=workflow.id,
+            job_type=StoryBatchJobType.AUDIO,
+            attempt=attempt,
+            expected_item_count=len(items),
+            request_keys=[item.key for item in items],
+            provider_model=model,
+            provider="google",
+            request_payload={
+                "mode": self.GENERIC_NARRATION_MODE,
+                "provider": "google",
+                "attempt": attempt,
+                "force": force,
+                "language": language,
+                "language_code": language_code,
+                "voice": self.GENERIC_NARRATION_VOICE,
+                "items": [
+                    {
+                        "key": item.key,
+                        "page_number": item.page_number,
+                        "text": item.text,
+                        "text_chars": len(item.text),
+                        "prompt": item.prompt,
+                        "pace": item.pace,
+                        "voice_style": item.voice_style,
+                        "tone": item.tone,
+                        "emotion": item.emotion,
+                    }
+                    for item in items
+                ],
+            },
+        )
+        await self.session.flush()
+
+        try:
+            provider_job = await self.google_client.aio.batches.create(
+                model=model,
+                src=requests,
+                config={
+                    "display_name": f"generic-story-{generic_story_id}-{language}-narration-attempt-{attempt}"
+                },
+            )
+            job.provider_job_name = provider_job.name
+            job.provider_state = self._job_state_name(provider_job)
+            await self.batch_jobs.update(job)
+            self._log_event(
+                "narration_batch_submitted",
+                provider="google",
+                batch_job_id=job.id,
+                generic_story_id=generic_story_id,
+                workflow_id=workflow.id,
+                language=language,
+                provider_job_name=job.provider_job_name,
+                provider_state=job.provider_state,
+                item_count=len(items),
+            )
+            return job
+        except Exception as exc:
+            job.status = StoryBatchJobStatus.FAILED
+            job.error_message = str(exc)
+            job.missing_keys = [item.key for item in items]
+            await self.batch_jobs.update(job)
+            await self._mark_workflow_failed(
+                workflow.id,
+                str(exc),
+                current_step=GenericStoryWorkflowStep.NARRATION_GENERATION.value,
+            )
             await self.session.commit()
             raise
 
@@ -622,6 +886,65 @@ class GenericStoryBatchService:
                 story_json,
                 workflow=workflow,
             )
+        await self.workflows.update(workflow)
+        await self.session.commit()
+
+    async def _process_reconciled_audio_job(
+        self,
+        job: GenericStoryBatchJob,
+        provider_job: types.BatchJob,
+    ) -> None:
+        generic_story = await self.generic_stories.get_by_id(job.generic_story_id)
+        if generic_story is None:
+            raise NotFoundException("Generic story not found", "GENERIC_STORY_NOT_FOUND")
+        workflow = await self.workflows.get_by_id(job.workflow_id)
+        if workflow is None:
+            raise NotFoundException("Generic story workflow not found", "GENERIC_STORY_WORKFLOW_NOT_FOUND")
+
+        language = self._job_request_language(job) or self._normalize_narration_language(workflow.language)
+        content = await self.generic_stories.get_content_by_story_and_language(
+            generic_story_id=job.generic_story_id,
+            language=language,
+        )
+        if content is None or not isinstance(content.story_json, dict):
+            raise NotFoundException(
+                f"Generic story content not found for language '{language}'",
+                "GENERIC_STORY_CONTENT_NOT_FOUND",
+            )
+
+        story_json = deepcopy(content.story_json)
+        items = self._build_audio_items(story_json, language=language, age_group=generic_story.age_group)
+        request_keys = set(job.request_keys or [])
+        if request_keys:
+            items = [item for item in items if item.key in request_keys]
+
+        completed_keys, failed_keys, response_summary = await self._process_audio_batch_responses(
+            generic_story_id=job.generic_story_id,
+            story_json=story_json,
+            items=items,
+            provider_job=provider_job,
+            language=language,
+        )
+
+        job.status = StoryBatchJobStatus.SUCCEEDED if not failed_keys else StoryBatchJobStatus.FAILED
+        job.completed_item_count = len(completed_keys)
+        job.failed_item_count = len(failed_keys)
+        job.missing_keys = sorted({item.key for item in items} - completed_keys)
+        job.response_payload = response_summary
+        job.error_message = f"Missing audio keys: {', '.join(sorted(failed_keys))}" if failed_keys else None
+        await self.batch_jobs.update(job)
+
+        workflow.story_json = story_json
+        if failed_keys:
+            workflow.status = GenericStoryWorkflowStatus.FAILED.value
+            workflow.current_step = GenericStoryWorkflowStep.NARRATION_GENERATION.value
+            workflow.error_message = job.error_message
+        else:
+            workflow.status = GenericStoryWorkflowStatus.COMPLETED.value
+            workflow.current_step = None
+            workflow.error_message = None
+            content.story_json = story_json
+            await self.generic_stories.update_content(content)
         await self.workflows.update(workflow)
         await self.session.commit()
 
@@ -1139,6 +1462,218 @@ class GenericStoryBatchService:
             raise AppException("Generic story content has no story JSON", code="GENERIC_STORY_CONTENT_MISSING")
         return dict(content.story_json)
 
+    async def _generic_narration_workflow(
+        self,
+        user_id: UUID,
+        generic_story,
+        story_json: dict[str, Any],
+        language: str,
+    ) -> GenericStoryWorkflow:
+        actual_story = "\n".join(
+            str(page.get("text") or "").strip()
+            for page in story_json.get("pages") or []
+            if isinstance(page, dict) and str(page.get("text") or "").strip()
+        )
+        workflow = await self.workflows.create(
+            user_id=user_id,
+            generic_story_id=generic_story.id,
+            workflow_name="generic_story_narration",
+            actual_story=actual_story or generic_story.title,
+            age_group=generic_story.age_group,
+            language=language,
+            requested_pages=None,
+            status=GenericStoryWorkflowStatus.PENDING.value,
+            current_step=None,
+            input_request={
+                "mode": self.GENERIC_NARRATION_MODE,
+                "generic_story_id": str(generic_story.id),
+                "language": language,
+            },
+            story_json=deepcopy(story_json),
+            title=generic_story.title,
+            summary=generic_story.summary,
+            theme=generic_story.theme,
+            genre=generic_story.genre,
+            moral=generic_story.moral,
+            learning_goal=generic_story.learning_goal,
+            cover_image=generic_story.cover_image,
+            ai_provider="google",
+            text_model=settings.GOOGLE_TEXT_MODEL,
+            image_model=settings.GOOGLE_IMAGE_MODEL,
+        )
+        return workflow
+
+    def _build_audio_items(
+        self,
+        story_json: dict[str, Any],
+        *,
+        language: str,
+        age_group: str | None = None,
+    ) -> list[GenericBatchAudioItem]:
+        pages = story_json.get("pages", [])
+        narration_age_group = age_group or story_json.get("age_group")
+        moral = story_json.get("moral") if isinstance(story_json.get("moral"), dict) else {}
+        default_speech_narration = (
+            moral.get("speech_narration", {}) if isinstance(moral.get("speech_narration"), dict) else {}
+        )
+        items: list[GenericBatchAudioItem] = []
+        for index, page in enumerate(pages):
+            if not isinstance(page, dict):
+                continue
+            page_number = int(page.get("page_number") or index + 1)
+            text = str(page.get("text") or "").strip()
+            if not text:
+                continue
+            narration = page.get("narration") if isinstance(page.get("narration"), dict) else {}
+            speech = page.get("speech_narration") or default_speech_narration or {}
+            emotion = page.get("emotion") or narration.get("emotion") or speech.get("emotion", "wonder")
+            derived_narration = build_page_narration(emotion, narration_age_group)
+            narration = {
+                "tone": narration.get("tone") or derived_narration["tone"],
+                "pace": narration.get("pace") or derived_narration["pace"],
+                "voice_style": narration.get("voice_style") or derived_narration["voice_style"],
+            }
+            page["emotion"] = emotion
+            page["narration"] = narration
+            prompt = self.tts_provider.build_prompt(
+                text,
+                pace=narration["pace"],
+                language=language,
+                voice=self.GENERIC_NARRATION_VOICE,
+                voice_style=narration["voice_style"],
+                tone=narration["tone"],
+                emotion=emotion,
+            )
+            items.append(
+                GenericBatchAudioItem(
+                    key=f"page-{page_number}",
+                    page_number=page_number,
+                    text=text,
+                    prompt=prompt,
+                    pace=narration["pace"],
+                    voice_style=narration["voice_style"],
+                    tone=narration["tone"],
+                    emotion=str(emotion),
+                )
+            )
+        return items
+
+    @staticmethod
+    def _missing_audio_items(
+        story_json: dict[str, Any],
+        items: list[GenericBatchAudioItem],
+    ) -> list[GenericBatchAudioItem]:
+        pages_by_number = {
+            int(page.get("page_number") or idx + 1): page
+            for idx, page in enumerate(story_json.get("pages") or [])
+            if isinstance(page, dict)
+        }
+        missing: list[GenericBatchAudioItem] = []
+        for item in items:
+            page = pages_by_number.get(item.page_number) or {}
+            if not page.get("audio_url") or not page.get("duration") or not page.get("word_timestamps"):
+                missing.append(item)
+        return missing
+
+    async def _process_audio_batch_responses(
+        self,
+        *,
+        generic_story_id: UUID,
+        story_json: dict[str, Any],
+        items: list[GenericBatchAudioItem],
+        provider_job: types.BatchJob,
+        language: str,
+    ) -> tuple[set[str], set[str], dict[str, Any]]:
+        responses = list((provider_job.dest.inlined_responses if provider_job.dest else None) or [])
+        by_key = self._responses_by_key(responses)
+        if not by_key and responses:
+            by_key = {item.key: response for item, response in zip(items, responses, strict=False)}
+
+        completed_keys: set[str] = set()
+        failed_keys: set[str] = set()
+        response_summary: dict[str, Any] = {"language": language, "items": []}
+        for item in items:
+            inlined_response = by_key.get(item.key)
+            if inlined_response is None or inlined_response.response is None:
+                failed_keys.add(item.key)
+                response_summary["items"].append({"key": item.key, "status": "missing_response"})
+                continue
+            if inlined_response.error:
+                failed_keys.add(item.key)
+                response_summary["items"].append(
+                    {"key": item.key, "status": "error", "error": self._model_dump_safe(inlined_response.error)}
+                )
+                continue
+            try:
+                pcm_bytes = self._extract_audio_from_response(inlined_response.response)
+                wav_bytes = self.tts_provider._pcm_to_wav(pcm_bytes)
+                duration = self.tts_provider._pcm_duration_seconds(pcm_bytes)
+                audio_url = await self.audio_storage.save_story_page_audio(
+                    story_id=generic_story_id,
+                    language=language,
+                    page_number=item.page_number,
+                    audio_bytes=wav_bytes,
+                )
+                self._set_story_json_page_audio(story_json, item, audio_url, duration)
+                completed_keys.add(item.key)
+                response_summary["items"].append(
+                    {"key": item.key, "status": "completed", "audio_url": audio_url, "duration": round(duration, 2)}
+                )
+            except Exception as exc:
+                failed_keys.add(item.key)
+                response_summary["items"].append({"key": item.key, "status": "save_failed", "error": str(exc)})
+        return completed_keys, failed_keys, response_summary
+
+    def _build_audio_inlined_request(self, item: GenericBatchAudioItem) -> types.InlinedRequest:
+        return types.InlinedRequest(
+            contents=[types.Content(role="user", parts=[types.Part(text=item.prompt)])],
+            metadata={"key": item.key},
+            config=types.GenerateContentConfig(
+                response_modalities=["AUDIO"],
+                speech_config=types.SpeechConfig(
+                    voice_config=types.VoiceConfig(
+                        prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                            voice_name=self.GENERIC_NARRATION_VOICE,
+                        )
+                    )
+                ),
+            ),
+        )
+
+    @staticmethod
+    def _extract_audio_from_response(response: types.GenerateContentResponse) -> bytes:
+        for part in response.parts or []:
+            inline_data = part.inline_data
+            if inline_data and inline_data.data:
+                data = inline_data.data
+                if isinstance(data, bytes):
+                    return data
+                return base64.b64decode(data)
+        raise AppException("Gemini TTS batch response returned no audio data", code="EMPTY_TTS_RESPONSE")
+
+    def _set_story_json_page_audio(
+        self,
+        story_json: dict[str, Any],
+        item: GenericBatchAudioItem,
+        audio_url: str,
+        duration: float,
+    ) -> None:
+        for index, page in enumerate(story_json.get("pages") or []):
+            if not isinstance(page, dict):
+                continue
+            page_number = int(page.get("page_number") or index + 1)
+            if page_number != item.page_number:
+                continue
+            page.pop("audio_dummy", None)
+            page["tts_prompt"] = item.prompt
+            page["tts_skipped"] = False
+            page["tts_model"] = settings.GOOGLE_TTS_MODEL
+            page["tts_voice"] = self.GENERIC_NARRATION_VOICE
+            page["audio_url"] = audio_url
+            page["duration"] = round(duration, 2)
+            page["word_timestamps"] = generate_word_timestamps(item.text, duration)
+            return
+
     def _build_image_items(
         self,
         workflow: GenericStoryWorkflow,
@@ -1480,6 +2015,24 @@ class GenericStoryBatchService:
         return str(request_payload.get("mode") or "")
 
     @staticmethod
+    def _job_request_language(job: GenericStoryBatchJob) -> str | None:
+        request_payload = job.request_payload if isinstance(job.request_payload, dict) else {}
+        language = str(request_payload.get("language") or "").strip().lower()
+        return language or None
+
+    @classmethod
+    def _normalize_narration_language(cls, language: str) -> str:
+        normalized = str(language or "").strip().lower()
+        if normalized not in cls.LANGUAGE_CODE_MAP:
+            raise AppException(
+                "Unsupported generic story narration language",
+                status.HTTP_400_BAD_REQUEST,
+                "UNSUPPORTED_NARRATION_LANGUAGE",
+                details={"supported_languages": sorted(cls.LANGUAGE_CODE_MAP)},
+            )
+        return normalized
+
+    @staticmethod
     def _job_state_name(job: types.BatchJob) -> str:
         state = getattr(job, "state", None)
         return getattr(state, "name", None) or str(state or "")
@@ -1570,4 +2123,29 @@ class GenericStoryBatchService:
             expected_item_count=job.expected_item_count,
             submitted_item_count=submitted_count,
             message=message,
+        )
+
+    @staticmethod
+    def _narration_submit_response(
+        *,
+        workflow: GenericStoryWorkflow,
+        job: GenericStoryBatchJob,
+        submitted_count: int,
+        language: str,
+        language_code: str,
+        message: str,
+    ) -> GenericStoryBatchNarrationSubmitResponse:
+        return GenericStoryBatchNarrationSubmitResponse(
+            generic_story_id=job.generic_story_id,
+            workflow_id=workflow.id,
+            batch_job_id=job.id,
+            job_type=job.job_type.value,
+            status=job.status.value,
+            provider_job_name=job.provider_job_name,
+            provider_state=job.provider_state,
+            expected_item_count=job.expected_item_count,
+            submitted_item_count=submitted_count,
+            message=message,
+            language=language,
+            language_code=language_code,
         )

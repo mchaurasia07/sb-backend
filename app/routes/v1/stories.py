@@ -90,8 +90,10 @@ async def create_custom_story_workflow(
 ) -> ApiResponse[CustomStoryWorkflowResponse]:
     """Create a custom story workflow and start it in the background."""
     data = await CustomStoryWorkflowService(session).create(current_user.id, payload)
-    background_tasks.add_task(execute_custom_story_workflow_background, data.workflow_id)
-    return success_response(data, "Custom story workflow started successfully")
+    if payload.execute_workflow:
+        background_tasks.add_task(execute_custom_story_workflow_background, data.workflow_id)
+        return success_response(data, "Custom story workflow started successfully")
+    return success_response(data, "Custom story workflow saved successfully; execution skipped")
 
 
 @router.get("/workflows", response_model=ApiResponse[PaginatedResponse[CustomStoryWorkflowResponse]])

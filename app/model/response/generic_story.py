@@ -80,6 +80,30 @@ class GenericStoryBatchImageSubmitResponse(BaseModel):
     message: str
 
 
+class GenericStoryBatchNarrationSubmitResponse(GenericStoryBatchImageSubmitResponse):
+    language: str
+    language_code: str
+
+
+class GenericStoryNarrationPromptPageResponse(BaseModel):
+    page_number: int
+    text: str
+    prompt: str
+    pace: str
+    voice_style: str
+    tone: str
+    emotion: str
+
+
+class GenericStoryNarrationPromptResponse(BaseModel):
+    generic_story_id: UUID
+    language: str
+    language_code: str
+    voice: str
+    page_count: int
+    pages: list[GenericStoryNarrationPromptPageResponse]
+
+
 class GenericStoryBatchJobCancelResponse(BaseModel):
     generic_story_id: UUID
     workflow_id: UUID

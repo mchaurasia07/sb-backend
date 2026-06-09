@@ -20,4 +20,4 @@ Performance direction:
 Story text to speak:
 <<<NARRATION_TEXT
 {narration_text}
-NARRATION_TEXT
+NARRATION_TEXT>>>

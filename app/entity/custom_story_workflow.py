@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import UUID
 
-from sqlalchemy import Boolean, DateTime, Enum as SAEnum, ForeignKey, Index, JSON, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Enum as SAEnum, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.age_groups import AgeGroup
@@ -42,6 +42,7 @@ class CustomStoryWorkflow(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Index("ix_custom_story_workflows_status", "status"),
         Index("ix_custom_story_workflows_created_at", "created_at"),
         Index("ix_custom_story_workflows_user_created_at", "user_id", "created_at"),
+        UniqueConstraint("request_number", name="uq_custom_story_workflows_request_number"),
     )
 
     user_id: Mapped[UUID] = mapped_column(HyphenatedUUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
@@ -51,6 +52,7 @@ class CustomStoryWorkflow(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     story_id: Mapped[UUID | None] = mapped_column(
         HyphenatedUUID(), ForeignKey("stories.id", ondelete="SET NULL"), nullable=True
     )
+    request_number: Mapped[int] = mapped_column(Integer, nullable=False)
 
     generation_mode: Mapped[str] = mapped_column(String(32), nullable=False)
     processing_mode: Mapped[str] = mapped_column(String(32), nullable=False, default="instant")

@@ -1,0 +1,348 @@
+{
+  "info": {
+    "name": "Custom Story Workflow API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Custom story workflow V2 endpoints. Create starts execution immediately; retry resumes the same workflow from the first incomplete step."
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "api_prefix",
+      "value": "/api/v1",
+      "type": "string"
+    },
+    {
+      "key": "access_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "child_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "workflow_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "story_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "page",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "page_size",
+      "value": "20",
+      "type": "string"
+    },
+    {
+      "key": "status",
+      "value": "IN_PROGRESS",
+      "type": "string"
+    },
+    {
+      "key": "limit",
+      "value": "50",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Custom Story Workflows",
+      "item": [
+        {
+          "name": "Create Workflow - Input Driven Instant",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "const data = json.data || {};",
+                  "if (data.workflow_id) pm.collectionVariables.set('workflow_id', data.workflow_id);",
+                  "if (data.story_id) pm.collectionVariables.set('story_id', data.story_id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"child_id\": \"{{child_id}}\",\n  \"mode\": \"INPUT_DRIVEN\",\n  \"category\": \"adventure\",\n  \"learning_goal\": \"kindness and courage\",\n  \"context\": \"Create a warm bedtime story where the child helps a friend solve a small problem.\",\n  \"processing_mode\": \"delayed\",\n  \"execute_image\": true,\n  \"execute_narration\": true,\n  \"skip_image_generation\": false,\n  \"skip_validation\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}{{api_prefix}}/stories/workflows"
+          }
+        },
+        {
+          "name": "Create Workflow - Event Driven Delayed",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "const data = json.data || {};",
+                  "if (data.workflow_id) pm.collectionVariables.set('workflow_id', data.workflow_id);",
+                  "if (data.story_id) pm.collectionVariables.set('story_id', data.story_id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"child_id\": \"{{child_id}}\",\n  \"mode\": \"EVENT_DRIVEN\",\n  \"event_description\": \"The child visited a park, shared toys with another child, and learned that sharing makes playtime happier.\",\n  \"processing_mode\": \"delayed\",\n  \"execute_image\": true,\n  \"execute_narration\": true,\n  \"skip_image_generation\": false,\n  \"skip_validation\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}{{api_prefix}}/stories/workflows"
+          }
+        },
+        {
+          "name": "List Workflows",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "const first = json.data && json.data.items && json.data.items[0];",
+                  "if (first && first.workflow_id) pm.collectionVariables.set('workflow_id', first.workflow_id);",
+                  "if (first && first.story_id) pm.collectionVariables.set('story_id', first.story_id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}{{api_prefix}}/stories/workflows?page={{page}}&page_size={{page_size}}",
+              "host": [
+                "{{base_url}}{{api_prefix}}"
+              ],
+              "path": [
+                "stories",
+                "workflows"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "{{page}}"
+                },
+                {
+                  "key": "page_size",
+                  "value": "{{page_size}}"
+                },
+                {
+                  "key": "child_id",
+                  "value": "{{child_id}}",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "{{status}}",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Workflow",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "const data = json.data || {};",
+                  "if (data.workflow_id) pm.collectionVariables.set('workflow_id', data.workflow_id);",
+                  "if (data.story_id) pm.collectionVariables.set('story_id', data.story_id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}{{api_prefix}}/stories/workflows/{{workflow_id}}"
+          }
+        },
+        {
+          "name": "Get Workflow Steps",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}{{api_prefix}}/stories/workflows/{{workflow_id}}/steps"
+          }
+        },
+        {
+          "name": "Retry Workflow",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "const data = json.data || {};",
+                  "if (data.workflow_id) pm.collectionVariables.set('workflow_id', data.workflow_id);",
+                  "if (data.story_id) pm.collectionVariables.set('story_id', data.story_id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{base_url}}{{api_prefix}}/stories/workflows/{{workflow_id}}/retry"
+          }
+        },
+        {
+          "name": "Delete Workflow",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{base_url}}{{api_prefix}}/stories/workflows/{{workflow_id}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Batch Reconcile",
+      "item": [
+        {
+          "name": "Reconcile Story Batch Jobs",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}{{api_prefix}}/stories/batch-jobs/reconcile?limit={{limit}}",
+              "host": [
+                "{{base_url}}{{api_prefix}}"
+              ],
+              "path": [
+                "stories",
+                "batch-jobs",
+                "reconcile"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "{{limit}}"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Published Story Read",
+      "item": [
+        {
+          "name": "Get Published Story",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}{{api_prefix}}/stories/{{story_id}}"
+          }
+        },
+        {
+          "name": "Get Published Story Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}{{api_prefix}}/stories/{{story_id}}/status"
+          }
+        },
+        {
+          "name": "Get Published Story Steps",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}{{api_prefix}}/stories/{{story_id}}/steps"
+          }
+        },
+        {
+          "name": "List Published Stories",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}{{api_prefix}}/stories?page={{page}}&page_size={{page_size}}",
+              "host": [
+                "{{base_url}}{{api_prefix}}"
+              ],
+              "path": [
+                "stories"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "{{page}}"
+                },
+                {
+                  "key": "page_size",
+                  "value": "{{page_size}}"
+                },
+                {
+                  "key": "child_id",
+                  "value": "{{child_id}}",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
