@@ -65,6 +65,12 @@ class CustomStoryWorkflow(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     learning_goal: Mapped[str | None] = mapped_column(String(500), nullable=True)
     context: Mapped[str | None] = mapped_column(Text, nullable=True)
     event_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reader_category: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    use_child_character: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
+    execute_image: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
+    execute_narration: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
+    skip_validation: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
+    execute_workflow: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
 
     status: Mapped[CustomStoryWorkflowStatus] = mapped_column(
         SAEnum(CustomStoryWorkflowStatus, native_enum=False),
@@ -74,7 +80,6 @@ class CustomStoryWorkflow(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     current_step: Mapped[str | None] = mapped_column(String(64), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    input_request: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     story_plan_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     story_plan_validated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
     story_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
@@ -102,6 +107,8 @@ class CustomStoryWorkflowStepRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Index("ix_custom_story_workflow_steps_workflow_id", "workflow_id"),
         Index("ix_custom_story_workflow_steps_step_name", "step_name"),
         Index("ix_custom_story_workflow_steps_status", "status"),
+        Index("ix_custom_story_workflow_steps_workflow_created_at", "workflow_id", "created_at"),
+        Index("ix_custom_story_workflow_steps_workflow_step_created_at", "workflow_id", "step_name", "created_at"),
     )
 
     workflow_id: Mapped[UUID] = mapped_column(
@@ -145,6 +152,8 @@ class CustomStoryBatchJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Index("ix_custom_story_batch_jobs_story_id", "story_id"),
         Index("ix_custom_story_batch_jobs_status", "status"),
         Index("ix_custom_story_batch_jobs_provider_job_name", "provider_job_name"),
+        Index("ix_custom_story_batch_jobs_workflow_created_at", "workflow_id", "created_at"),
+        Index("ix_custom_story_batch_jobs_workflow_type_created_at", "workflow_id", "job_type", "created_at"),
         UniqueConstraint("provider_job_name", name="uq_custom_story_batch_jobs_provider_job_name"),
     )
 

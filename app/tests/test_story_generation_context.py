@@ -103,6 +103,57 @@ def test_build_story_generation_context_reduces_story_plan_to_narrative_fields()
     }
 
 
+def test_story_generation_context_softens_medical_harm_language():
+    story_plan = {
+        "title": "The Sparkling Park",
+        "summary": "Pollution is making people sick near the park.",
+        "theme": "Adventure, Environmental Awareness",
+        "learning_goal": "Environmental Awareness",
+        "moral_theme": "Caring for nature helps everyone.",
+        "setting": "a community park",
+        "tone": "hopeful",
+        "central_problem": "People fall ill because the park has become an unhealthy health risk.",
+        "hero_want": "Amayra wants the park to feel bright again.",
+        "emotional_need": "Amayra needs to feel capable of helping.",
+        "stakes": "Animals get sick and families stop playing there.",
+        "climax_choice": "Amayra invites neighbors to clean the stream together.",
+        "resolution_payoff": "The park feels clean and cheerful again.",
+        "moral_explanation": "Small helpful actions can grow when people work together.",
+        "content_anchors": {},
+        "visual_bible": {},
+        "pages": [
+            {
+                "page_number": 1,
+                "story_role": "introduction",
+                "scene_description": "People getting sick makes the park feel sad.",
+                "characters_present": ["Amayra"],
+                "emotional_beat": "concern",
+                "learning_goal_integration": "Amayra notices what needs care.",
+                "growth_step": "Amayra looks closely before acting.",
+                "domain_detail": "litter near a stream",
+                "page_turn_hook": "She spots a cleanup sign.",
+                "continuity_requirements": [],
+            }
+        ],
+    }
+
+    reduced = StoryService._build_story_generation_context(story_plan)
+    combined = " ".join(
+        [
+            reduced["summary"],
+            reduced["central_problem"],
+            reduced["stakes"],
+            reduced["pages"][0]["scene_description"],
+        ]
+    ).lower()
+
+    assert "fall ill" not in combined
+    assert "sick" not in combined
+    assert "health risk" not in combined
+    assert "unclean" in combined
+    assert "hard to enjoy" in combined or "cannot enjoy" in combined
+
+
 def test_story_plan_template_renders_all_current_placeholders():
     template = load_prompt("prompts/story/story_plan_prompt.txt")
     story = SimpleNamespace(age_group=AgeGroup.EARLY_READER)

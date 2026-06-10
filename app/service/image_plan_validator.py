@@ -107,8 +107,10 @@ class ImagePlanValidator:
         if not isinstance(hero, dict):
             errors.append("visual_bible.hero must be an object.")
         else:
-            for field in ("appearance", "outfit", "signature_item"):
+            for field in ("name", "appearance", "outfit", "signature_item"):
                 self._validate_required_string(hero, field, "visual_bible.hero", errors)
+            self._validate_detailed_string(hero, "appearance", "visual_bible.hero", errors)
+            self._validate_detailed_string(hero, "outfit", "visual_bible.hero", errors, min_words=4)
 
         companion = visual_bible.get("companion")
         if companion is not None:
@@ -128,6 +130,15 @@ class ImagePlanValidator:
         for idx, character in enumerate(recurring):
             if not isinstance(character, dict):
                 errors.append(f"visual_bible.recurring_characters[{idx}] must be an object.")
+                continue
+            for field in ("name", "role", "appearance"):
+                self._validate_required_string(character, field, f"visual_bible.recurring_characters[{idx}]", errors)
+            self._validate_detailed_string(
+                character,
+                "appearance",
+                f"visual_bible.recurring_characters[{idx}]",
+                errors,
+            )
 
     def _validate_cover(self, cover: Any, errors: list[str]) -> None:
         if not isinstance(cover, dict):
@@ -153,6 +164,22 @@ class ImagePlanValidator:
         value = obj.get(field)
         if not isinstance(value, str) or not value.strip():
             errors.append(f"{label}.{field} must be a non-empty string.")
+
+    def _validate_detailed_string(
+        self,
+        obj: dict[str, Any],
+        field: str,
+        label: str,
+        errors: list[str],
+        *,
+        min_words: int = 6,
+    ) -> None:
+        value = obj.get(field)
+        if not isinstance(value, str) or not value.strip():
+            return
+        words = [word for word in value.replace(",", " ").split() if word.strip()]
+        if len(words) < min_words:
+            errors.append(f"{label}.{field} must include enough locked visual detail for image consistency.")
 
     def _validate_string_array(
         self,

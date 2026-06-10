@@ -506,7 +506,8 @@ class StoryServiceBatchService:
         *,
         attempt: int,
     ) -> StoryBatchJob:
-        reference_images = await self._load_reference_image_blobs(story)
+        use_child_reference = StoryService._use_child_character(story)
+        reference_images = await self._load_reference_image_blobs(story) if use_child_reference else None
         requests = [
             self._build_image_inlined_request(item, reference_images=reference_images)
             for item in items
@@ -521,6 +522,8 @@ class StoryServiceBatchService:
             provider_model=model,
             request_payload={
                 "mode": "image",
+                "cast_mode": StoryService._cast_mode(story),
+                "uses_character_reference": use_child_reference,
                 "attempt": attempt,
                 "items": [self._image_item_payload(item) for item in items],
             },
@@ -569,7 +572,8 @@ class StoryServiceBatchService:
         items: list[BatchImageItem],
         attempt: int,
     ) -> tuple[set[str], set[str], dict[str, Any]]:
-        reference_images = await self._load_reference_image_blobs(story)
+        use_child_reference = StoryService._use_child_character(story)
+        reference_images = await self._load_reference_image_blobs(story) if use_child_reference else None
         requests = [
             self._build_image_inlined_request(item, reference_images=reference_images)
             for item in items
@@ -584,6 +588,8 @@ class StoryServiceBatchService:
             provider_model=model,
             request_payload={
                 "mode": "image",
+                "cast_mode": StoryService._cast_mode(story),
+                "uses_character_reference": use_child_reference,
                 "attempt": attempt,
                 "items": [self._image_item_payload(item) for item in items],
             },
@@ -1336,14 +1342,15 @@ class StoryServiceBatchService:
     ) -> list[BatchImageItem]:
         image_generation_template = load_prompt("prompts/story/image_generation_prompt.txt")
         visual_bible = image_plan.get("visual_bible", {})
-        child = await self.children.get_for_user(story.user_id, story.child_id)
-        if child is None:
-            raise NotFoundException("Child profile not found during batch image generation")
-        if not child.avatar_image_url:
-            raise AppException("Child profile photo is required for story image generation", code="NO_PHOTO")
-        if not child.character_image_url:
-            raise AppException("Generated character image is required for story image generation", code="NO_CHARACTER_IMAGE")
-        character_context = StoryService._build_character_reference_context(child)
+        if StoryService._use_child_character(story):
+            child = await self.children.get_for_user(story.user_id, story.child_id)
+            if child is None:
+                raise NotFoundException("Child profile not found during batch image generation")
+            if not child.character_image_url:
+                raise AppException("Generated character image is required for story image generation", code="NO_CHARACTER_IMAGE")
+            character_context = StoryService._build_character_reference_context(child)
+        else:
+            character_context = StoryService._build_imagined_cast_context(story, story_plan={"visual_bible": visual_bible})
         pages = story_json.get("pages", [])
 
         items: list[BatchImageItem] = []
@@ -1542,20 +1549,22 @@ class StoryServiceBatchService:
         self,
         item: BatchImageItem,
         *,
-        reference_images: tuple[types.Part, dict[str, str]],
+        reference_images: tuple[types.Part, dict[str, str]] | None,
     ) -> types.InlinedRequest:
-        character_part, character_context = reference_images
-        prompt = self._story_reference_image_prompt(
-            item.rendered_prompt,
+        prompt = (
+            self._story_reference_image_prompt(item.rendered_prompt)
+            if reference_images is not None
+            else self._story_text_only_image_prompt(item.rendered_prompt)
         )
+        parts = [types.Part(text=prompt)]
+        if reference_images is not None:
+            character_part, _character_context = reference_images
+            parts.append(character_part)
         return types.InlinedRequest(
             contents=[
                 types.Content(
                     role="user",
-                    parts=[
-                        types.Part(text=prompt),
-                        character_part,
-                    ],
+                    parts=parts,
                 )
             ],
             metadata={"key": item.key},
@@ -1563,6 +1572,19 @@ class StoryServiceBatchService:
                 response_modalities=["IMAGE", "TEXT"],
                 image_config=types.ImageConfig(aspect_ratio=item.aspect_ratio),
             ),
+        )
+
+    @staticmethod
+    def _story_text_only_image_prompt(prompt: str) -> str:
+        return (
+            "Generate one polished children's storybook illustration from text only. No character reference image "
+            "is attached. Use the Visual Bible inside the rendered prompt as the complete model sheet for every "
+            "character. Character consistency is more important than decorative scene details. Preserve each "
+            "character's locked face or head shape, hair or fur, eyes, skin or body color, outfit, shoes, "
+            "accessories, size, distinctive features, color palette, and the single storybook style across the "
+            "cover, every page, and the back cover. Do not redesign characters between pages. Use the same "
+            "reusable character models implied by the Visual Bible in each scene:\n\n"
+            f"{prompt}"
         )
 
     @staticmethod

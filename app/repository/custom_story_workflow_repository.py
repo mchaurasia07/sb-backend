@@ -84,7 +84,7 @@ class CustomStoryWorkflowRepository:
         return list(result.scalars().all()), int(total or 0)
 
     async def update(self, workflow: CustomStoryWorkflow) -> CustomStoryWorkflow:
-        for field_name in ("input_request", "story_plan_json", "story_json", "image_plan_json"):
+        for field_name in ("story_plan_json", "story_json", "image_plan_json"):
             if getattr(workflow, field_name, None) is not None:
                 flag_modified(workflow, field_name)
         await self.session.flush()
@@ -113,14 +113,21 @@ class CustomStoryWorkflowStepRepository:
 
     async def latest_for_story_step(self, story_id: UUID, step_name) -> CustomStoryWorkflowStepRecord | None:
         value = step_name.value if hasattr(step_name, "value") else str(step_name)
-        result = await self.session.execute(
-            select(CustomStoryWorkflowStepRecord)
+        id_result = await self.session.execute(
+            select(CustomStoryWorkflowStepRecord.id)
             .where(
                 CustomStoryWorkflowStepRecord.workflow_id == story_id,
                 CustomStoryWorkflowStepRecord.step_name == CustomStoryWorkflowStep(value),
             )
             .order_by(CustomStoryWorkflowStepRecord.created_at.desc())
             .limit(1)
+        )
+        step_id = id_result.scalar_one_or_none()
+        if step_id is None:
+            return None
+
+        result = await self.session.execute(
+            select(CustomStoryWorkflowStepRecord).where(CustomStoryWorkflowStepRecord.id == step_id)
         )
         return result.scalar_one_or_none()
 
@@ -130,12 +137,20 @@ class CustomStoryWorkflowStepRepository:
         return await self.latest_for_story_step(workflow_id, step_name)
 
     async def list_by_workflow(self, workflow_id: UUID) -> list[CustomStoryWorkflowStepRecord]:
-        result = await self.session.execute(
-            select(CustomStoryWorkflowStepRecord)
+        id_result = await self.session.execute(
+            select(CustomStoryWorkflowStepRecord.id)
             .where(CustomStoryWorkflowStepRecord.workflow_id == workflow_id)
             .order_by(CustomStoryWorkflowStepRecord.created_at.asc())
         )
-        return list(result.scalars().all())
+        step_ids = list(id_result.scalars().all())
+        if not step_ids:
+            return []
+
+        result = await self.session.execute(
+            select(CustomStoryWorkflowStepRecord).where(CustomStoryWorkflowStepRecord.id.in_(step_ids))
+        )
+        steps_by_id = {str(step.id): step for step in result.scalars().all()}
+        return [steps_by_id[str(step_id)] for step_id in step_ids if str(step_id) in steps_by_id]
 
     async def update(self, step: CustomStoryWorkflowStepRecord) -> CustomStoryWorkflowStepRecord:
         for field_name in ("input_json", "output_json"):
@@ -181,11 +196,18 @@ class CustomStoryBatchJobRepository:
     async def latest_for_workflow_type(
         self, workflow_id: UUID, job_type: StoryBatchJobType
     ) -> CustomStoryBatchJob | None:
-        result = await self.session.execute(
-            select(CustomStoryBatchJob)
+        id_result = await self.session.execute(
+            select(CustomStoryBatchJob.id)
             .where(CustomStoryBatchJob.workflow_id == workflow_id, CustomStoryBatchJob.job_type == job_type)
             .order_by(CustomStoryBatchJob.created_at.desc())
             .limit(1)
+        )
+        job_id = id_result.scalar_one_or_none()
+        if job_id is None:
+            return None
+
+        result = await self.session.execute(
+            select(CustomStoryBatchJob).where(CustomStoryBatchJob.id == job_id)
         )
         return result.scalar_one_or_none()
 
@@ -199,16 +221,24 @@ class CustomStoryBatchJobRepository:
         return list(result.scalars().all())
 
     async def list_by_workflow(self, workflow_id: UUID) -> list[CustomStoryBatchJob]:
-        result = await self.session.execute(
-            select(CustomStoryBatchJob)
+        id_result = await self.session.execute(
+            select(CustomStoryBatchJob.id)
             .where(CustomStoryBatchJob.workflow_id == workflow_id)
             .order_by(CustomStoryBatchJob.created_at.asc())
         )
-        return list(result.scalars().all())
+        job_ids = list(id_result.scalars().all())
+        if not job_ids:
+            return []
+
+        result = await self.session.execute(
+            select(CustomStoryBatchJob).where(CustomStoryBatchJob.id.in_(job_ids))
+        )
+        jobs_by_id = {str(job.id): job for job in result.scalars().all()}
+        return [jobs_by_id[str(job_id)] for job_id in job_ids if str(job_id) in jobs_by_id]
 
     async def list_reconcilable(self, limit: int = 50) -> list[CustomStoryBatchJob]:
-        result = await self.session.execute(
-            select(CustomStoryBatchJob)
+        id_result = await self.session.execute(
+            select(CustomStoryBatchJob.id)
             .where(
                 CustomStoryBatchJob.status.in_([StoryBatchJobStatus.SUBMITTED, StoryBatchJobStatus.RUNNING]),
                 CustomStoryBatchJob.provider_job_name.is_not(None),
@@ -216,7 +246,15 @@ class CustomStoryBatchJobRepository:
             .order_by(CustomStoryBatchJob.updated_at.asc())
             .limit(limit)
         )
-        return list(result.scalars().all())
+        job_ids = list(id_result.scalars().all())
+        if not job_ids:
+            return []
+
+        result = await self.session.execute(
+            select(CustomStoryBatchJob).where(CustomStoryBatchJob.id.in_(job_ids))
+        )
+        jobs_by_id = {str(job.id): job for job in result.scalars().all()}
+        return [jobs_by_id[str(job_id)] for job_id in job_ids if str(job_id) in jobs_by_id]
 
     async def update(self, job: CustomStoryBatchJob) -> CustomStoryBatchJob:
         for field_name in ("request_keys", "missing_keys", "request_payload", "response_payload"):

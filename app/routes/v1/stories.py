@@ -1,7 +1,7 @@
 import logging
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session, AsyncSessionLocal
@@ -81,18 +81,21 @@ async def execute_story_batch_workflow_background(
             logger.exception("[BATCH_BACKGROUND] Exception: %s", str(e))
 
 
-@router.post("/workflows", response_model=ApiResponse[CustomStoryWorkflowResponse], status_code=status.HTTP_202_ACCEPTED)
+@router.post("/workflows", response_model=ApiResponse[CustomStoryWorkflowResponse], status_code=status.HTTP_201_CREATED)
 async def create_custom_story_workflow(
     payload: StoryGenerationRequest,
     background_tasks: BackgroundTasks,
+    response: Response,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[CustomStoryWorkflowResponse]:
     """Create a custom story workflow and start it in the background."""
     data = await CustomStoryWorkflowService(session).create(current_user.id, payload)
     if payload.execute_workflow:
+        response.status_code = status.HTTP_202_ACCEPTED
         background_tasks.add_task(execute_custom_story_workflow_background, data.workflow_id)
         return success_response(data, "Custom story workflow started successfully")
+    response.status_code = status.HTTP_201_CREATED
     return success_response(data, "Custom story workflow saved successfully; execution skipped")
 
 

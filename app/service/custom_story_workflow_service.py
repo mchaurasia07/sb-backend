@@ -172,28 +172,31 @@ class CustomStoryWorkflowService:
         child = await self.children.get_for_user(user_id, payload.child_id)
         if child is None:
             raise NotFoundException("Child profile not found")
-        if not child.character_image_url:
+        if payload.use_child_character and not child.character_image_url:
             raise AppException(
-                "Child must have a generated character image before story generation",
+                "Child must have a generated character image when used as the story hero",
                 code="NO_CHARACTER_IMAGE",
             )
 
         story_service = StoryService(self.session)
         age_group = age_group_for_reader_category(payload.reader_category)
-        input_request = payload.model_dump(mode="json")
-        input_request["age_group"] = age_group
         workflow = await self.workflows.create(
             user_id=user_id,
             child_id=payload.child_id,
-            generation_mode=payload.mode,
-            processing_mode=payload.processing_mode,
+            generation_mode="INPUT_DRIVEN",
+            processing_mode="delayed",
             age_group=age_group,
             category=payload.category,
             learning_goal=payload.learning_goal,
             context=payload.context,
-            event_description=payload.event_description,
+            event_description=None,
+            reader_category=payload.reader_category.value,
+            use_child_character=payload.use_child_character,
+            execute_image=bool(payload.execute_image),
+            execute_narration=payload.execute_narration,
+            skip_validation=payload.skip_validation,
+            execute_workflow=payload.execute_workflow,
             status=CustomStoryWorkflowStatus.PENDING,
-            input_request=input_request,
             **story_service._current_ai_config(),
         )
         await self.session.commit()
@@ -267,6 +270,7 @@ class CustomStoryWorkflowService:
         ):
             return workflow
 
+        workflow.processing_mode = "delayed"
         workflow.status = CustomStoryWorkflowStatus.IN_PROGRESS
         workflow.error_message = None
         await self.workflows.update(workflow)
@@ -414,43 +418,34 @@ class CustomStoryWorkflowService:
                     {"images_skipped": True, "message": "Image generation skipped by request"},
                 )
                 return
-            if workflow.processing_mode == "delayed":
-                existing_job = await self._active_delayed_batch_job(workflow, step)
-                if existing_job is not None:
-                    await self._record_submitted_batch_step(
-                        workflow,
-                        step,
-                        step_input,
-                        existing_job,
-                        "Existing image batch job is still active; retry reused it instead of submitting a duplicate.",
-                    )
-                    workflow.status = CustomStoryWorkflowStatus.IN_PROGRESS
-                    workflow.current_step = step.value
-                    return
-                batch_runner = self._batch_runner(workflow)
-                job = await batch_runner._step_submit_images_batch(
+            existing_job = await self._active_delayed_batch_job(workflow, step)
+            if existing_job is not None:
+                await self._record_submitted_batch_step(
                     workflow,
-                    workflow.story_json or {},
-                    workflow.image_plan_json or {},
+                    step,
+                    step_input,
+                    existing_job,
+                    "Existing image batch job is still active; retry reused it instead of submitting a duplicate.",
                 )
-                if job is not None:
-                    await self._record_submitted_batch_step(
-                        workflow,
-                        step,
-                        step_input,
-                        job,
-                        "Image batch submitted; reconcile scheduler will process results.",
-                    )
                 workflow.status = CustomStoryWorkflowStatus.IN_PROGRESS
                 workflow.current_step = step.value
                 return
-            await runner._step_generate_images(
+            batch_runner = self._batch_runner(workflow)
+            job = await batch_runner._step_submit_images_batch(
                 workflow,
                 workflow.story_json or {},
                 workflow.image_plan_json or {},
-                flags,
             )
-            await self._annotate_latest_step(workflow, step, step_input, workflow.story_json or {})
+            if job is not None:
+                await self._record_submitted_batch_step(
+                    workflow,
+                    step,
+                    step_input,
+                    job,
+                    "Image batch submitted; reconcile scheduler will process results.",
+                )
+            workflow.status = CustomStoryWorkflowStatus.IN_PROGRESS
+            workflow.current_step = step.value
             return
 
         if step == CustomStoryWorkflowStep.NARRATION_GENERATION:
@@ -553,7 +548,7 @@ class CustomStoryWorkflowService:
             learning_goal=workflow.learning_goal,
             context=workflow.context,
             event_description=workflow.event_description,
-            input_request=workflow.input_request,
+            input_request=self._request_snapshot_from_columns(workflow),
             ai_provider=workflow.ai_provider,
             text_model=workflow.text_model,
             image_model=workflow.image_model,
@@ -704,20 +699,24 @@ class CustomStoryWorkflowService:
         results: list[dict[str, Any]] = []
         processed_count = 0
         for job in jobs:
+            job_result = {
+                "workflow_id": job.workflow_id,
+                "story_id": job.story_id,
+                "batch_job_id": job.id,
+                "job_type": self._status_value(job.job_type),
+                "status": self._status_value(job.status),
+                "provider_state": job.provider_state,
+            }
             try:
                 result = await self._reconcile_batch_job(job)
                 if result["action"] not in {"still_running", "skipped"}:
                     processed_count += 1
                 results.append(result)
             except Exception as exc:
+                await self.session.rollback()
                 results.append(
                     {
-                        "workflow_id": job.workflow_id,
-                        "story_id": job.story_id,
-                        "batch_job_id": job.id,
-                        "job_type": self._status_value(job.job_type),
-                        "status": self._status_value(job.status),
-                        "provider_state": job.provider_state,
+                        **job_result,
                         "action": "error",
                         "message": str(exc),
                     }
@@ -1030,21 +1029,11 @@ class CustomStoryWorkflowService:
 
     @staticmethod
     def _execute_image_enabled(workflow: CustomStoryWorkflow) -> bool:
-        request = workflow.input_request if isinstance(workflow.input_request, dict) else {}
-        if "execute_image" in request:
-            return bool(request.get("execute_image"))
-        return not bool(request.get("skip_image_generation", False))
+        return bool(getattr(workflow, "execute_image", True))
 
     @staticmethod
     def _execute_narration_enabled(workflow: CustomStoryWorkflow) -> bool:
-        request = workflow.input_request if isinstance(workflow.input_request, dict) else {}
-        if "execute_narration" in request:
-            return bool(request.get("execute_narration"))
-        if "execute_narrration" in request:
-            return bool(request.get("execute_narrration"))
-        if "skip_narration_generation" in request:
-            return not bool(request.get("skip_narration_generation"))
-        return True
+        return bool(getattr(workflow, "execute_narration", True))
 
     async def _first_incomplete_step(self, workflow: CustomStoryWorkflow) -> CustomStoryWorkflowStep:
         for step in self.ORDERED_STEPS:
@@ -1104,16 +1093,15 @@ class CustomStoryWorkflowService:
 
     @staticmethod
     def _flags(workflow: CustomStoryWorkflow) -> StoryGenerationFlags:
-        request = workflow.input_request if isinstance(workflow.input_request, dict) else {}
         return StoryGenerationFlags(
             skip_image_generation=not CustomStoryWorkflowService._execute_image_enabled(workflow),
-            skip_validation=bool(request.get("skip_validation", False)),
+            skip_validation=bool(getattr(workflow, "skip_validation", False)),
         )
 
     @staticmethod
     def _step_input(workflow: CustomStoryWorkflow, step: CustomStoryWorkflowStep) -> dict[str, Any] | None:
         if step == CustomStoryWorkflowStep.STORY_PLAN_GENERATION:
-            return workflow.input_request
+            return CustomStoryWorkflowService._request_snapshot_from_columns(workflow)
         if step == CustomStoryWorkflowStep.STORY_PLAN_VALIDATION:
             return {"story_plan": workflow.story_plan_json}
         if step == CustomStoryWorkflowStep.STORY_GENERATION:
@@ -1123,26 +1111,71 @@ class CustomStoryWorkflowService:
         if step == CustomStoryWorkflowStep.IMAGE_PLAN_VALIDATION:
             return {"image_plan": workflow.image_plan_json, "story_json": workflow.story_json}
         if step == CustomStoryWorkflowStep.IMAGE_GENERATION:
-            return {"image_plan": workflow.image_plan_json, "story_json": workflow.story_json}
+            return {
+                "image_plan_summary": CustomStoryWorkflowService._image_plan_summary(workflow.image_plan_json),
+                "story_json_summary": CustomStoryWorkflowService._story_json_summary(workflow.story_json),
+            }
         if step == CustomStoryWorkflowStep.NARRATION_GENERATION:
-            return {"story_json": workflow.story_json}
+            return {"story_json_summary": CustomStoryWorkflowService._story_json_summary(workflow.story_json)}
         if step == CustomStoryWorkflowStep.PUBLISH_STORY:
-            return {"story_json": workflow.story_json}
+            return {"story_json_summary": CustomStoryWorkflowService._story_json_summary(workflow.story_json)}
         return None
 
     @staticmethod
+    def _image_plan_summary(image_plan: dict[str, Any] | None) -> dict[str, Any]:
+        if not isinstance(image_plan, dict):
+            return {}
+        pages = image_plan.get("pages") if isinstance(image_plan.get("pages"), list) else []
+        return {
+            "has_cover": isinstance(image_plan.get("cover"), dict),
+            "page_count": len(pages),
+            "has_back_cover": isinstance(image_plan.get("back_cover"), dict),
+            "has_visual_bible": isinstance(image_plan.get("visual_bible"), dict),
+        }
+
+    @staticmethod
+    def _story_json_summary(story_json: dict[str, Any] | None) -> dict[str, Any]:
+        if not isinstance(story_json, dict):
+            return {}
+        pages = story_json.get("pages") if isinstance(story_json.get("pages"), list) else []
+        return {
+            "title": story_json.get("title"),
+            "page_count": len(pages),
+            "has_cover_image": bool(story_json.get("cover_image_url")),
+            "has_back_cover_image": bool(story_json.get("back_cover_image_url")),
+            "image_page_count": sum(1 for page in pages if isinstance(page, dict) and page.get("image_url")),
+            "audio_page_count": sum(1 for page in pages if isinstance(page, dict) and page.get("audio_url")),
+        }
+
+    @staticmethod
     def _input_request_for_validation(workflow: CustomStoryWorkflow) -> dict[str, Any]:
-        request = dict(workflow.input_request) if isinstance(workflow.input_request, dict) else {}
-        if not request.get("reader_category"):
-            request["reader_category"] = reader_category_for_age_group(workflow.age_group).value
-        if not request.get("age_group"):
-            request["age_group"] = age_group_for_reader_category(request["reader_category"])
-        return request
+        return CustomStoryWorkflowService._request_snapshot_from_columns(workflow)
+
+    @staticmethod
+    def _request_snapshot_from_columns(workflow: CustomStoryWorkflow) -> dict[str, Any]:
+        reader_category = CustomStoryWorkflowService._workflow_reader_category(workflow)
+        age_group = CustomStoryWorkflowService._status_value(workflow.age_group)
+        use_child_character = bool(getattr(workflow, "use_child_character", False))
+        execute_image = bool(getattr(workflow, "execute_image", True))
+        return {
+            "child_id": str(workflow.child_id),
+            "reader_category": reader_category,
+            "age_group": age_group,
+            "category": workflow.category,
+            "learning_goal": workflow.learning_goal,
+            "context": workflow.context,
+            "use_child_character": use_child_character,
+            "cast_mode": StoryService.CAST_MODE_CHILD_HERO if use_child_character else StoryService.CAST_MODE_IMAGINED,
+            "execute_image": execute_image,
+            "skip_image_generation": not execute_image,
+            "execute_narration": bool(getattr(workflow, "execute_narration", True)),
+            "skip_validation": bool(getattr(workflow, "skip_validation", False)),
+            "execute_workflow": bool(getattr(workflow, "execute_workflow", False)),
+        }
 
     @staticmethod
     def _workflow_reader_category(workflow: CustomStoryWorkflow) -> str | None:
-        request = workflow.input_request if isinstance(workflow.input_request, dict) else {}
-        raw_reader_category = request.get("reader_category")
+        raw_reader_category = getattr(workflow, "reader_category", None)
         if raw_reader_category:
             try:
                 return normalize_reader_category(raw_reader_category).value
@@ -1181,10 +1214,14 @@ class CustomStoryWorkflowService:
             learning_goal=workflow.learning_goal,
             context=workflow.context,
             event_description=workflow.event_description,
+            use_child_character=bool(getattr(workflow, "use_child_character", False)),
+            execute_image=bool(getattr(workflow, "execute_image", True)),
+            execute_narration=bool(getattr(workflow, "execute_narration", True)),
+            skip_validation=bool(getattr(workflow, "skip_validation", False)),
+            execute_workflow=bool(getattr(workflow, "execute_workflow", False)),
             title=workflow.title,
             summary=workflow.summary,
             moral=workflow.moral,
-            input_request=workflow.input_request,
             created_at=workflow.created_at,
             updated_at=workflow.updated_at,
         )

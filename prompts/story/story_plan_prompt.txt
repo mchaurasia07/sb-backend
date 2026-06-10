@@ -51,13 +51,26 @@ Character Profile:
 Custom Character:
 {custom_character}
 
+Cast Mode:
+{cast_mode}
+
+Cast Mode Instructions:
+{cast_mode_instructions}
+
+Character Reference Mode:
+{character_reference_mode}
+
 --------------------------------------------------
 STORY DESIGN RULES
 --------------------------------------------------
 
-The child is always the hero.
+If Cast Mode is CHILD_HERO, the child is always the hero.
 
-The child solves the main problem using:
+If Cast Mode is IMAGINED_CAST, create a named child hero from the story inputs.
+Do not use the child profile as a story character. The AI-created hero must be
+specific, emotionally engaging, and visually lockable.
+
+The hero solves the main problem using:
 
 - the learning goal
 - personal effort
@@ -100,6 +113,29 @@ Climax
 
 Ending
 → Emotional payoff
+
+--------------------------------------------------
+CHILD-SAFE CONFLICT LANGUAGE
+--------------------------------------------------
+
+Keep conflicts meaningful, but phrase them in gentle child-safe language.
+
+For environment, cleanup, safety, or community-care stories, preserve the real
+issue without clinical, frightening, or severe consequence wording.
+
+Use softer storybook equivalents:
+
+- the park feels messy and forgotten
+- the stream cannot sparkle under the litter
+- animals avoid the noisy, cluttered corner
+- families cannot enjoy playing there yet
+- the air feels dusty and dull
+- the town wants its clean, cheerful spaces back
+- the hero helps make the place cleaner, brighter, and kinder to nature
+
+The stakes should be emotional, environmental, and practical.
+Show care, responsibility, teamwork, and restoration without making the problem
+feel frightening or extreme.
 
 --------------------------------------------------
 AGE ADAPTATION
@@ -230,6 +266,10 @@ All recurring characters must have stable visual descriptions.
 
 Create entries only for characters that actually appear.
 
+For IMAGINED_CAST, the Visual Bible is the ONLY character consistency source
+used for image generation. Make it rich enough to generate consistent cover,
+page, and back-cover images without a reference image.
+
 Visual Bible must include:
 
 - hero
@@ -238,7 +278,9 @@ Visual Bible must include:
 - mother (if present)
 - recurring characters
 
-The hero appearance must use Character Profile information.
+For CHILD_HERO, the hero appearance must use Character Profile information.
+
+For IMAGINED_CAST, invent the hero appearance exactly once and lock it.
 
 Preserve:
 
@@ -262,6 +304,8 @@ For every recurring character, include stable details for:
 - outfit, shoes, and accessories when human
 - size/height relative to the hero
 - one distinctive visual feature
+- stable color palette
+- one repeated silhouette or shape cue
 
 --------------------------------------------------
 STORY OUTFIT RULE

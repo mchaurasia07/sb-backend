@@ -110,3 +110,13 @@ def test_story_reference_image_prompt_uses_rendered_prompt_identity_lock():
     assert "Character Identity Lock inside the rendered prompt" in prompt
     assert "Scene prompt with Character Identity Lock." in prompt
     assert "only attached image" in prompt
+
+
+def test_story_text_only_image_prompt_uses_visual_bible_as_model_sheet():
+    prompt = StoryServiceBatchService._story_text_only_image_prompt(
+        "Rendered prompt with Visual Bible character locks.",
+    )
+
+    assert "No character reference image is attached" in prompt
+    assert "Visual Bible inside the rendered prompt as the complete model sheet" in prompt
+    assert "Rendered prompt with Visual Bible character locks." in prompt

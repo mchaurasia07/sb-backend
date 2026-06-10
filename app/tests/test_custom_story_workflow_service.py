@@ -4,8 +4,10 @@ from uuid import uuid4
 
 import pytest
 from fastapi import BackgroundTasks
+from starlette.responses import Response
 from pydantic import ValidationError
 
+from app.core.exceptions import AppException
 from app.entity.custom_story_workflow import CustomStoryWorkflowStatus, CustomStoryWorkflowStep
 from app.entity.story_batch_job import StoryBatchJobStatus, StoryBatchJobType
 from app.entity.story_step import StepStatus
@@ -30,17 +32,15 @@ def _workflow(**overrides):
         "learning_goal": "listening",
         "context": "moon bell",
         "event_description": None,
+        "reader_category": "Early Reader",
+        "use_child_character": False,
+        "execute_image": True,
+        "execute_narration": True,
+        "skip_validation": False,
+        "execute_workflow": False,
         "status": CustomStoryWorkflowStatus.PENDING,
         "current_step": None,
         "error_message": None,
-        "input_request": {
-            "mode": "INPUT_DRIVEN",
-            "category": "adventure",
-            "execute_image": True,
-            "execute_narration": True,
-            "skip_image_generation": False,
-            "skip_validation": False,
-        },
         "story_plan_json": None,
         "story_plan_validated": False,
         "story_json": None,
@@ -144,23 +144,37 @@ def test_custom_story_workflow_step_order_includes_publish_last():
 def test_story_generation_request_defaults_to_delayed_and_execute_flags():
     payload = StoryGenerationRequest(
         child_id=uuid4(),
-        mode="INPUT_DRIVEN",
         reader_category="Early Reader",
         category="adventure",
     )
 
-    assert payload.processing_mode == "delayed"
     assert payload.reader_category == ReaderCategory.EARLY_READER
     assert payload.execute_image is True
     assert payload.execute_narration is True
     assert payload.skip_image_generation is False
-    assert payload.execute_workflow is True
+    assert payload.execute_workflow is False
+    assert payload.use_child_character is False
+
+
+def test_story_generation_request_ignores_legacy_mode_and_processing_mode_fields():
+    payload = StoryGenerationRequest.model_validate(
+        {
+            "child_id": str(uuid4()),
+            "mode": "EVENT_DRIVEN",
+            "processing_mode": "instant",
+            "reader_category": "Early Reader",
+            "category": "adventure",
+        }
+    )
+
+    assert not hasattr(payload, "mode")
+    assert not hasattr(payload, "processing_mode")
+    assert payload.category == "adventure"
 
 
 def test_story_generation_request_can_disable_workflow_execution_for_ui_testing():
     payload = StoryGenerationRequest(
         child_id=uuid4(),
-        mode="INPUT_DRIVEN",
         reader_category="Early Reader",
         category="adventure",
         execute_workflow=False,
@@ -172,7 +186,6 @@ def test_story_generation_request_can_disable_workflow_execution_for_ui_testing(
 def test_story_generation_request_reader_category_alias_derives_age_group():
     payload = StoryGenerationRequest(
         child_id=uuid4(),
-        mode="INPUT_DRIVEN",
         reader_category="GROWING_READER",
         category="adventure",
     )
@@ -184,7 +197,6 @@ def test_story_generation_request_reader_category_alias_derives_age_group():
 def test_story_generation_request_execute_image_updates_legacy_skip_flag():
     payload = StoryGenerationRequest(
         child_id=uuid4(),
-        mode="INPUT_DRIVEN",
         reader_category="Early Reader",
         category="adventure",
         execute_image=False,
@@ -198,7 +210,6 @@ def test_story_generation_request_rejects_delayed_with_all_media_disabled():
     with pytest.raises(ValidationError):
         StoryGenerationRequest(
             child_id=uuid4(),
-            mode="INPUT_DRIVEN",
             reader_category="Early Reader",
             category="adventure",
             execute_image=False,
@@ -223,7 +234,6 @@ async def test_first_incomplete_step_uses_persisted_outputs():
 async def test_create_persists_workflow_before_safety_llm(monkeypatch):
     payload = StoryGenerationRequest(
         child_id=uuid4(),
-        mode="INPUT_DRIVEN",
         reader_category="Growing Reader",
         category="adventure",
         learning_goal="kindness",
@@ -250,8 +260,13 @@ async def test_create_persists_workflow_before_safety_llm(monkeypatch):
             generation_mode=kwargs["generation_mode"],
             processing_mode=kwargs["processing_mode"],
             age_group=SimpleNamespace(value=kwargs["age_group"]),
+            reader_category=kwargs["reader_category"],
+            use_child_character=kwargs["use_child_character"],
+            execute_image=kwargs["execute_image"],
+            execute_narration=kwargs["execute_narration"],
+            skip_validation=kwargs["skip_validation"],
+            execute_workflow=kwargs["execute_workflow"],
             status=kwargs["status"],
-            input_request=kwargs["input_request"],
             ai_provider=kwargs["ai_provider"],
             text_model=kwargs["text_model"],
             image_model=kwargs["image_model"],
@@ -273,11 +288,87 @@ async def test_create_persists_workflow_before_safety_llm(monkeypatch):
     assert created["committed"] is True
     assert created["request_number"] == 1
     assert created["age_group"] == "6-9"
-    assert created["input_request"]["reader_category"] == "Growing Reader"
-    assert created["input_request"]["age_group"] == "6-9"
-    assert created["input_request"]["context"] == "A gentle story about helping."
+    assert created["reader_category"] == "Growing Reader"
+    assert created["use_child_character"] is False
+    assert created["execute_image"] is False
+    assert created["execute_narration"] is True
+    assert created["skip_validation"] is False
+    assert created["execute_workflow"] is False
+    assert created["context"] == "A gentle story about helping."
     assert response.reader_category == "Growing Reader"
     assert response.age_group == "6-9"
+
+
+@pytest.mark.asyncio
+async def test_create_allows_imagined_cast_without_child_character_image():
+    payload = StoryGenerationRequest(
+        child_id=uuid4(),
+        reader_category="Early Reader",
+        category="adventure",
+    )
+    service = CustomStoryWorkflowService.__new__(CustomStoryWorkflowService)
+    created = {}
+
+    async def _get_child(user_id, child_id):
+        return SimpleNamespace(id=child_id, dob=date(2019, 1, 1), character_image_url=None)
+
+    async def _create_workflow(**kwargs):
+        kwargs.setdefault("request_number", 1)
+        created.update(kwargs)
+        return _workflow(
+            id=uuid4(),
+            user_id=kwargs["user_id"],
+            child_id=kwargs["child_id"],
+            request_number=kwargs["request_number"],
+            generation_mode=kwargs["generation_mode"],
+            processing_mode=kwargs["processing_mode"],
+            age_group=SimpleNamespace(value=kwargs["age_group"]),
+            reader_category=kwargs["reader_category"],
+            use_child_character=kwargs["use_child_character"],
+            execute_image=kwargs["execute_image"],
+            execute_narration=kwargs["execute_narration"],
+            skip_validation=kwargs["skip_validation"],
+            execute_workflow=kwargs["execute_workflow"],
+            status=kwargs["status"],
+            ai_provider=kwargs["ai_provider"],
+            text_model=kwargs["text_model"],
+            image_model=kwargs["image_model"],
+            reference_image_model=kwargs["reference_image_model"],
+        )
+
+    async def _commit():
+        return None
+
+    service.children = SimpleNamespace(get_for_user=_get_child)
+    service.workflows = SimpleNamespace(create=_create_workflow)
+    service.session = SimpleNamespace(commit=_commit)
+
+    response = await service.create(uuid4(), payload)
+
+    assert response.workflow_id
+    assert created["processing_mode"] == "delayed"
+    assert created["use_child_character"] is False
+
+
+@pytest.mark.asyncio
+async def test_create_requires_character_image_when_child_hero_requested():
+    payload = StoryGenerationRequest(
+        child_id=uuid4(),
+        reader_category="Early Reader",
+        category="adventure",
+        use_child_character=True,
+    )
+    service = CustomStoryWorkflowService.__new__(CustomStoryWorkflowService)
+
+    async def _get_child(user_id, child_id):
+        return SimpleNamespace(id=child_id, dob=date(2019, 1, 1), character_image_url=None)
+
+    service.children = SimpleNamespace(get_for_user=_get_child)
+
+    with pytest.raises(AppException) as exc_info:
+        await service.create(uuid4(), payload)
+
+    assert exc_info.value.code == "NO_CHARACTER_IMAGE"
 
 
 @pytest.mark.asyncio
@@ -320,10 +411,14 @@ def _custom_workflow_response(workflow_id):
         learning_goal=None,
         context=None,
         event_description=None,
+        use_child_character=False,
+        execute_image=True,
+        execute_narration=True,
+        skip_validation=False,
+        execute_workflow=False,
         title=None,
         summary=None,
         moral=None,
-        input_request={"execute_workflow": False},
         created_at=now,
         updated_at=now,
     )
@@ -335,7 +430,6 @@ async def test_create_custom_story_workflow_skips_background_when_execution_disa
     workflow_id = uuid4()
     payload = StoryGenerationRequest(
         child_id=uuid4(),
-        mode="INPUT_DRIVEN",
         reader_category="Early Reader",
         category="adventure",
         execute_workflow=False,
@@ -353,32 +447,35 @@ async def test_create_custom_story_workflow_skips_background_when_execution_disa
 
     monkeypatch.setattr(story_routes, "CustomStoryWorkflowService", _FakeCustomStoryWorkflowService)
     background_tasks = BackgroundTasks()
+    route_response = Response()
 
     response = await story_routes.create_custom_story_workflow(
         payload,
         background_tasks,
+        route_response,
         SimpleNamespace(id=user_id),
         object(),
     )
 
     assert response.data == response_data
     assert response.message == "Custom story workflow saved successfully; execution skipped"
+    assert route_response.status_code == 201
     assert background_tasks.tasks == []
     assert calls["create"] == (user_id, payload)
 
 
 @pytest.mark.asyncio
-async def test_create_custom_story_workflow_queues_background_by_default(monkeypatch):
+async def test_create_custom_story_workflow_queues_background_when_requested(monkeypatch):
     user_id = uuid4()
     workflow_id = uuid4()
     payload = StoryGenerationRequest(
         child_id=uuid4(),
-        mode="INPUT_DRIVEN",
         reader_category="Early Reader",
         category="adventure",
+        execute_workflow=True,
     )
     response_data = _custom_workflow_response(workflow_id)
-    response_data.input_request = {"execute_workflow": True}
+    response_data.execute_workflow = True
 
     class _FakeCustomStoryWorkflowService:
         def __init__(self, session):
@@ -391,16 +488,19 @@ async def test_create_custom_story_workflow_queues_background_by_default(monkeyp
 
     monkeypatch.setattr(story_routes, "CustomStoryWorkflowService", _FakeCustomStoryWorkflowService)
     background_tasks = BackgroundTasks()
+    route_response = Response()
 
     response = await story_routes.create_custom_story_workflow(
         payload,
         background_tasks,
+        route_response,
         SimpleNamespace(id=user_id),
         object(),
     )
 
     assert response.data == response_data
     assert response.message == "Custom story workflow started successfully"
+    assert route_response.status_code == 202
     assert len(background_tasks.tasks) == 1
     assert background_tasks.tasks[0].func is story_routes.execute_custom_story_workflow_background
     assert background_tasks.tasks[0].args == (workflow_id,)
@@ -409,7 +509,8 @@ async def test_create_custom_story_workflow_queues_background_by_default(monkeyp
 @pytest.mark.asyncio
 async def test_skipped_image_generation_creates_completed_step_record():
     workflow = _workflow(
-        input_request={"skip_image_generation": True, "skip_validation": False},
+        execute_image=False,
+        skip_validation=False,
         story_json={"pages": [{"page_number": 1, "text": "Mira listened."}]},
     )
     created_steps = []
@@ -687,12 +788,9 @@ async def test_delayed_narration_generation_records_submitted_batch_job():
 @pytest.mark.asyncio
 async def test_disabled_narration_generation_creates_skipped_completed_step():
     workflow = _workflow(
-        input_request={
-            "execute_image": True,
-            "execute_narration": False,
-            "skip_image_generation": False,
-            "skip_validation": False,
-        },
+        execute_image=True,
+        execute_narration=False,
+        skip_validation=False,
         story_json={"pages": [{"page_number": 1, "text": "Mira listened."}]},
     )
     service = CustomStoryWorkflowService.__new__(CustomStoryWorkflowService)

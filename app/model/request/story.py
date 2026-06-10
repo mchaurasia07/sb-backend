@@ -1,5 +1,4 @@
 from enum import Enum
-from typing import Literal
 from uuid import UUID
 
 from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
@@ -65,21 +64,21 @@ def reader_category_for_age_group(value) -> ReaderCategory:
 
 
 class StoryGenerationRequest(BaseModel):
-    """Request to generate a story (supports input-driven and event-driven modes)."""
+    """Request to generate an input-driven custom story."""
 
-    child_id: UUID = Field(description="Child profile ID for character image reference")
-    mode: Literal["INPUT_DRIVEN", "EVENT_DRIVEN"] = Field(description="Generation mode")
+    child_id: UUID = Field(description="Child profile ID for library ownership")
     reader_category: ReaderCategory = Field(
         description="Reading band used to derive age_group: Infant Toddler, Early Reader, or Growing Reader",
+    )
+    use_child_character: bool = Field(
+        False,
+        description="Use the selected child's generated character as the story hero. When false, AI creates the cast.",
     )
 
     # Input-driven mode fields
     category: str | None = Field(None, max_length=100, description="Story category (e.g., 'adventure')")
     learning_goal: str | None = Field(None, max_length=500, description="Educational objective")
     context: str | None = Field(None, max_length=2000, description="Additional context or preferences")
-
-    # Event-driven mode fields
-    event_description: str | None = Field(None, max_length=2000, description="User's event description to convert to story")
 
     # Testing flags
     skip_image_generation: bool = Field(False, description="Skip image generation for testing")
@@ -93,16 +92,12 @@ class StoryGenerationRequest(BaseModel):
         description="Generate page narration audio",
     )
     skip_validation: bool = Field(False, description="Skip validation steps for testing")
-    processing_mode: Literal["instant", "delayed"] = Field(
-        "delayed",
-        description="Use instant for current workflow or delayed for Google Batch image/audio processing",
-    )
     execute_workflow: bool = Field(
-        True,
-        description="Start background workflow execution after saving. Set false to create a workflow row for API/UI testing only.",
+        False,
+        description="Start background workflow execution after saving. Defaults to false so create only saves the workflow.",
     )
 
-    @field_validator("category", "learning_goal", "context", "event_description", mode="before")
+    @field_validator("category", "learning_goal", "context", mode="before")
     @classmethod
     def normalize_text(cls, value):
         if value is None:
@@ -112,36 +107,20 @@ class StoryGenerationRequest(BaseModel):
         normalized = " ".join(value.split())
         return normalized or None
 
-    @field_validator("processing_mode", mode="before")
-    @classmethod
-    def normalize_processing_mode(cls, value):
-        if value is None:
-            return "delayed"
-        if not isinstance(value, str):
-            return value
-        normalized = value.strip().lower()
-        if normalized in {"batch", "delayed_batch", "delayed"}:
-            return "delayed"
-        if normalized in {"sync", "normal", "standard", "instant"}:
-            return "instant"
-        return normalized
-
     @field_validator("reader_category", mode="before")
     @classmethod
     def normalize_reader_category_value(cls, value):
         return normalize_reader_category(value)
 
     @model_validator(mode="after")
-    def validate_mode_inputs(self):
+    def validate_story_inputs(self):
         if self.execute_image is None:
             self.execute_image = not self.skip_image_generation
         else:
             self.skip_image_generation = not self.execute_image
 
-        if self.mode == "INPUT_DRIVEN" and not (self.category or self.learning_goal or self.context):
-            raise ValueError("INPUT_DRIVEN stories require category, learning_goal, or context")
-        if self.mode == "EVENT_DRIVEN" and not self.event_description:
-            raise ValueError("EVENT_DRIVEN stories require event_description")
-        if self.processing_mode == "delayed" and not self.execute_image and not self.execute_narration:
+        if not (self.category or self.learning_goal or self.context):
+            raise ValueError("Custom stories require category, learning_goal, or context")
+        if not self.execute_image and not self.execute_narration:
             raise ValueError("Delayed custom stories require image or narration execution")
         return self

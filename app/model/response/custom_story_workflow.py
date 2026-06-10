@@ -21,10 +21,14 @@ class CustomStoryWorkflowResponse(BaseModel):
     learning_goal: str | None = None
     context: str | None = None
     event_description: str | None = None
+    use_child_character: bool = False
+    execute_image: bool = True
+    execute_narration: bool = True
+    skip_validation: bool = False
+    execute_workflow: bool = True
     title: str | None = None
     summary: str | None = None
     moral: str | None = None
-    input_request: dict[str, Any] | None = None
     created_at: datetime
     updated_at: datetime
 

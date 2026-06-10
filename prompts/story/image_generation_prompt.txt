@@ -34,11 +34,14 @@ The illustration must preserve the same child character, recurring characters, o
 
 {target_aspect_ratio}
 
+## Character Reference Mode
+
+{character_reference_mode}
+
 ## Master Character Reference Image
 
-Provided as a reference image.
-
-This is the PRIMARY source of truth for facial identity only:
+If a reference image is attached, it is the PRIMARY source of truth for facial
+identity only:
 
 * face
 * hairstyle
@@ -46,6 +49,9 @@ This is the PRIMARY source of truth for facial identity only:
 
 It may be a head-and-shoulders portrait. Do not treat the portrait clothing,
 portrait crop, or portrait background as story requirements.
+
+If no reference image is attached, use the Visual Bible and Character Identity
+Lock as the only character consistency source.
 
 ---
 
@@ -77,8 +83,8 @@ camera angle, or environment.
 
 # PRIORITY ORDER
 
-1. Master Character Reference Image for face, hairstyle, hairline, and likeness
-2. Character Identity Lock for written face, hair, eye, nose, mouth, and age lock
+1. Attached Master Character Reference Image when present
+2. Character Identity Lock / Visual Bible character locks
 3. Visual Bible for locked story outfit, body scale, recurring characters, and style
 4. Current Page Data for action, emotion, environment, and composition
 
@@ -88,11 +94,17 @@ If conflicts occur, always preserve the higher-priority source.
 
 # IDENTITY LOCK
 
-The Master Character Reference Image is the visual source of truth.
+Cast Mode:
+{cast_mode}
+
+Cast Mode Instructions:
+{cast_mode_instructions}
+
+When a Master Character Reference Image is attached, it is the visual source of
+truth for the hero child's face and age appearance.
 
 The hero child name is "{child_name}". When the page refers to the hero, treat
-that named child as the same child shown in the Master Character Reference Image
-and the same hero defined in the Visual Bible.
+that named child as the same hero defined in the Visual Bible.
 
 Preserve exactly:
 
@@ -107,12 +119,18 @@ Preserve exactly:
 * skin tone
 * age appearance
 
-Do not preserve from the portrait:
+For CHILD_HERO, also preserve the attached reference portrait's face, hairstyle,
+hairline, and likeness. Do not preserve from the portrait:
 
 * portrait clothing
 * portrait crop
 * white studio background
 * head-and-shoulders framing
+
+For IMAGINED_CAST, no portrait is attached. The Visual Bible is the complete
+model sheet. Preserve every character's locked appearance, outfit, colors,
+facial/head details, body scale, distinctive features, and story style exactly
+across cover, all pages, and back cover.
 
 Use the Visual Bible for:
 
@@ -127,11 +145,13 @@ Do not redesign the child.
 
 Do not create a generic animated character.
 
-The child must remain recognizably the same child across every illustration.
+The hero must remain recognizably the same character across every illustration.
 
-Treat the hero as one reusable 3D character model. The final image should look
-like the Master Character Reference Image has been posed in the current scene,
-not like a newly redesigned child with similar features.
+Treat the hero as one reusable 3D character model. For CHILD_HERO, the final
+image should look like the Master Character Reference Image has been posed in
+the current scene, not like a newly redesigned child with similar features. For
+IMAGINED_CAST, the final image should look like the same Visual Bible character
+model has been posed in each scene.
 
 ---
 
@@ -180,8 +200,8 @@ across:
 
 Do not introduce outfit changes.
 
-If the Master Character Reference Image shows different clothing, ignore the
-portrait clothing and keep the Visual Bible outfit.
+If an attached Master Character Reference Image shows different clothing, ignore
+the portrait clothing and keep the Visual Bible outfit.
 
 ---
 
@@ -371,4 +391,4 @@ Do not generate:
 
 # FINAL INSTRUCTION
 
-Generate ONE premium cinematic children's storybook illustration that faithfully depicts the Current Page Data while preserving complete consistency with the Master Character Reference Image and Visual Bible. If Page Type is cover, render the exact Story Title visibly and correctly on the cover.
+Generate ONE premium cinematic children's storybook illustration that faithfully depicts the Current Page Data while preserving complete consistency with the attached Master Character Reference Image when present and always with the Visual Bible. If Page Type is cover, render the exact Story Title visibly and correctly on the cover.

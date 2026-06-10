@@ -35,11 +35,20 @@ Child Age:
 Age Guidance:
 {child_age_visual_guidance}
 
+Cast Mode:
+{cast_mode}
+
+Cast Mode Instructions:
+{cast_mode_instructions}
+
+Character Reference Mode:
+{character_reference_mode}
+
 ---
 
 ## SOURCE PRIORITY
 
-1. Character Identity Lock
+1. Character Identity Lock / Visual Bible Character Locks
 
    * visual identity
    * facial features
@@ -141,9 +150,15 @@ The child profile may describe a face-focused master portrait. Use it to lock
 facial identity, hairstyle, skin tone, age appearance, and distinctive facial
 features only.
 
-Treat Character Identity Lock as the COMMON identity lock for the cover, every
-page, and the back cover. Every image_prompt must preserve this lock without
-rewriting it or changing the character.
+For CHILD_HERO, treat Character Identity Lock as the COMMON identity lock for
+the cover, every page, and the back cover. Every image_prompt must preserve this
+lock without rewriting it or changing the character.
+
+For IMAGINED_CAST, no character reference image will be attached during image
+generation. The Visual Bible must be the complete model sheet. Every image_prompt
+must repeat enough locked character detail to preserve face/head shape, hair or
+fur, eyes, skin/body color, outfit, shoes, accessories, size, distinctive
+features, color palette, and style across cover, all pages, and back cover.
 
 Do not treat portrait clothing, portrait crop, white background, or
 head-and-shoulders framing as story requirements.

@@ -218,6 +218,8 @@ class StoryGenerationFlags:
 class StoryService:
     """Orchestrates the story generation workflow."""
 
+    CAST_MODE_CHILD_HERO = "CHILD_HERO"
+    CAST_MODE_IMAGINED = "IMAGINED_CAST"
     MAX_RETRIES = 3
     PLAN_MAX_TOKENS = 14000
     STORY_MAX_TOKENS_BY_AGE = {
@@ -366,12 +368,12 @@ class StoryService:
         story = await self.stories.create(
             user_id=user_id,
             child_id=child_id,
-            generation_mode=payload.mode,
+            generation_mode="INPUT_DRIVEN",
             age_group=age_group,
             category=payload.category,
             learning_goal=payload.learning_goal,
             context=payload.context,
-            event_description=payload.event_description,
+            event_description=None,
             input_request=payload.model_dump(mode="json"),
             **self._current_ai_config(),
         )
@@ -765,8 +767,7 @@ class StoryService:
         # Generate better hobby suggestions based on age group
         hobby = self._get_hobby_for_age_group(story.age_group)
 
-        # Extract detailed character metadata for consistent visual anchor
-        character_context = self._build_character_reference_context(child)
+        character_context = self._build_story_cast_context(story, child)
 
         prompt = self._render_story_plan_prompt(
             template,
@@ -945,7 +946,7 @@ class StoryService:
         source_inputs = _story_source_inputs(story)
         theme = source_inputs["category"]
         hobby = self._get_hobby_for_age_group(story.age_group)
-        character_context = self._build_character_reference_context(child)
+        character_context = self._build_story_cast_context(story, child)
 
         error_feedback = "\n".join([f"- {err}" for err in errors])
         enhanced_prompt = self._render_story_plan_prompt(
@@ -1006,12 +1007,30 @@ class StoryService:
         await self.session.commit()
 
         try:
-            result = await self.ai_provider.generate_text(
-                prompt,
-                max_tokens=self._story_max_tokens(story.age_group),
-                temperature=0.7,
-                response_format={"type": "json_object"},
-            )
+            try:
+                result = await self.ai_provider.generate_text(
+                    prompt,
+                    max_tokens=self._story_max_tokens(story.age_group),
+                    temperature=0.7,
+                    response_format={"type": "json_object"},
+                )
+            except AppException as exc:
+                if not self._is_google_prompt_safety_block(exc):
+                    raise
+                fallback_prompt = self._story_generation_fallback_prompt(prompt_plan)
+                step.prompt = fallback_prompt
+                await self.story_steps.update(step)
+                await self.session.commit()
+                logger.warning(
+                    "Story %s: Google blocked story generation prompt; retrying once with compact gentle prompt.",
+                    story.id,
+                )
+                result = await self.ai_provider.generate_text(
+                    fallback_prompt,
+                    max_tokens=self._story_max_tokens(story.age_group),
+                    temperature=0.45,
+                    response_format={"type": "json_object"},
+                )
 
             try:
                 raw_story_json = json.loads(result.text)
@@ -1039,6 +1058,23 @@ class StoryService:
             await self.session.commit()
             raise
 
+    @staticmethod
+    def _is_google_prompt_safety_block(exc: AppException) -> bool:
+        message = str(getattr(exc, "message", exc))
+        return exc.code == "EMPTY_RESPONSE" and "PROHIBITED_CONTENT" in message
+
+    @staticmethod
+    def _story_generation_fallback_prompt(prompt_plan: dict[str, Any]) -> str:
+        return (
+            "You are a warm children's picture-book writer.\n"
+            "Write the story from the sanitized plan below. Keep the same title, hero, page count, setting, "
+            "learning goal, and ending. Use gentle, practical community-care wording. Keep the concern meaningful "
+            "but calm, hopeful, and restorative. Do not use intense consequence language.\n\n"
+            "Return only valid JSON in this exact shape:\n"
+            '{"title":"","summary":"","pages":[{"page_number":1,"emotion":"","text":""}],"moral":""}\n\n'
+            f"SANITIZED PLAN JSON:\n{_compact_json(prompt_plan)}"
+        )
+
     async def _step_generate_image_plan(
         self, story: Story, story_plan: dict[str, Any], story_json: dict[str, Any], flags: StoryGenerationFlags
     ) -> dict[str, Any]:
@@ -1052,7 +1088,7 @@ class StoryService:
         child = await self.children.get_for_user(story.user_id, story.child_id)
         if child is None:
             raise NotFoundException("Child profile not found during image plan generation")
-        character_context = self._build_character_reference_context(child)
+        character_context = self._build_story_cast_context(story, child, story_plan=story_plan)
         compact_story_plan, compact_story_json = self._build_image_plan_context(story_plan, story_json)
 
         # Populate all placeholders in template
@@ -1064,6 +1100,9 @@ class StoryService:
         prompt = prompt.replace("{child_name}", character_context["child_name"])
         prompt = prompt.replace("{child_age_label}", character_context["child_age_label"])
         prompt = prompt.replace("{child_age_visual_guidance}", character_context["child_age_visual_guidance"])
+        prompt = prompt.replace("{cast_mode}", character_context["cast_mode"])
+        prompt = prompt.replace("{cast_mode_instructions}", character_context["cast_mode_instructions"])
+        prompt = prompt.replace("{character_reference_mode}", character_context["character_reference_mode"])
         step.prompt = prompt
         await self.story_steps.update(step)
         await self.session.commit()
@@ -1555,6 +1594,15 @@ class StoryService:
                 "story_title": story_title,
                 "child_age_label": character_context["child_age_label"],
                 "child_age_visual_guidance": character_context["child_age_visual_guidance"],
+                "cast_mode": character_context.get("cast_mode", StoryService.CAST_MODE_CHILD_HERO),
+                "cast_mode_instructions": character_context.get(
+                    "cast_mode_instructions",
+                    "CHILD_HERO: preserve the selected child as the story hero.",
+                ),
+                "character_reference_mode": character_context.get(
+                    "character_reference_mode",
+                    "A generated Master Character Reference Portrait is attached for the hero child.",
+                ),
                 "page_type": page_type,
                 "target_aspect_ratio": target_aspect_ratio,
                 "current_page_image_prompt": image_prompt,
@@ -1575,19 +1623,33 @@ class StoryService:
     ) -> str:
         """Render the story planner template for first attempt and retry."""
         character_profile = StoryService._build_story_planner_character_profile(child, character_context)
+        first_name = child.first_name or "Child"
+        gender = child.gender or "neutral"
+        if not character_context.get("use_child_character", True):
+            first_name = "AI-created story hero"
+            gender = "chosen by the story plan"
         return render_prompt(
             template,
             {
                 "age_group": age_group_label(story.age_group),
-                "first_name": child.first_name or "Child",
-                "gender": child.gender or "neutral",
+                "first_name": first_name,
+                "gender": gender,
                 "theme": _safe_prompt_value(theme),
                 "hobby": hobby,
                 "learning_goal": _safe_prompt_value(source_inputs["learning_goal"]),
                 "story_context": _safe_prompt_value(source_inputs["context"], "none"),
                 "moral": "kindness and courage",
                 "pages": pages,
-                "custom_character": False,
+                "custom_character": character_context.get("use_child_character", True),
+                "cast_mode": character_context.get("cast_mode", StoryService.CAST_MODE_CHILD_HERO),
+                "cast_mode_instructions": character_context.get(
+                    "cast_mode_instructions",
+                    "CHILD_HERO: preserve the selected child as the story hero.",
+                ),
+                "character_reference_mode": character_context.get(
+                    "character_reference_mode",
+                    "A generated Master Character Reference Portrait is attached for the hero child.",
+                ),
                 "character_profile_json": character_profile,
                 "character_profile": character_profile,
                 "character_description": character_context["character_description"],
@@ -1597,9 +1659,19 @@ class StoryService:
     @staticmethod
     def _build_story_planner_character_profile(child: Any, character_context: dict[str, str]) -> dict[str, Any]:
         """Build the character-profile input expected by the new planner prompt."""
+        if not character_context.get("use_child_character", True):
+            return {
+                "cast_mode": StoryService.CAST_MODE_IMAGINED,
+                "hero_source": "AI must invent the story hero and all recurring characters from the story inputs.",
+                "profile_summary": character_context["character_description"],
+                "child_age_label": character_context["child_age_label"],
+                "age_visual_guidance": character_context["child_age_visual_guidance"],
+                "generated_character": None,
+            }
         metadata = child.character_metadata if isinstance(child.character_metadata, dict) else {}
         identity_profile = StoryService._story_planner_identity_profile(metadata)
         return {
+            "cast_mode": StoryService.CAST_MODE_CHILD_HERO,
             "age": child.age,
             "gender": child.gender or "",
             "name": child.first_name or "Child",
@@ -1644,6 +1716,16 @@ class StoryService:
 
     @staticmethod
     def _format_prompt_character_identity_lock(character_context: dict[str, str]) -> str:
+        if not character_context.get("use_child_character", True):
+            return (
+                f"Cast mode: {StoryService.CAST_MODE_IMAGINED}\n"
+                "Reference image role: No external character reference image is attached.\n"
+                "Identity source: Use the Visual Bible as the complete model sheet for the hero, companions, "
+                "side characters, outfits, colors, face/head details, body scale, recurring objects, and style.\n"
+                f"Hero name: {character_context.get('child_name', 'AI-created story hero')}\n"
+                f"Age/body guidance: {character_context['child_age_visual_guidance']}\n"
+                f"Consistency instruction: {character_context['character_description']}"
+            )
         identity_summary = character_context.get("identity_summary") or character_context["character_description"]
         return (
             f"Hero child name: {character_context.get('child_name', 'Child')}\n"
@@ -1693,7 +1775,7 @@ class StoryService:
                 }
             )
 
-        return {
+        compact_plan = {
             "title": text(story_plan.get("title")),
             "summary": text(story_plan.get("summary")),
             "theme": text(story_plan.get("theme")),
@@ -1714,6 +1796,64 @@ class StoryService:
             "visual_bible": story_plan.get("visual_bible") if isinstance(story_plan.get("visual_bible"), dict) else {},
             "pages": pages,
         }
+        return StoryService._child_safe_story_context(compact_plan)
+
+    @staticmethod
+    def _child_safe_story_context(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {key: StoryService._child_safe_story_context(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [StoryService._child_safe_story_context(item) for item in value]
+        if not isinstance(value, str):
+            return value
+        return StoryService._soften_child_safety_language(value)
+
+    @staticmethod
+    def _soften_child_safety_language(text: str) -> str:
+        replacements = (
+            ("people fall ill", "people cannot enjoy the place"),
+            ("people falling ill", "people having trouble enjoying the place"),
+            ("people get sick", "people cannot enjoy playing there"),
+            ("people getting sick", "people being unable to enjoy playing there"),
+            ("people and animals sick", "people and animals staying away"),
+            ("animals get sick", "animals stay away"),
+            ("animals getting sick", "animals staying away"),
+            ("making people sick", "making the place hard to enjoy"),
+            ("make people sick", "make the place hard to enjoy"),
+            ("health crisis", "community worry"),
+            ("health risk", "reason to clean things up"),
+            ("unhealthy", "unclean"),
+            ("widespread pollution", "litter and clutter"),
+            ("air pollution", "dusty air"),
+            ("water pollution", "cloudy water"),
+            ("land pollution", "litter on the ground"),
+            ("polluted", "messy"),
+            ("pollution", "litter and mess"),
+            ("poisoned air", "dusty air"),
+            ("poisoned water", "cloudy water"),
+            ("poisoning", "polluting"),
+            ("disease", "mess"),
+            ("suffering", "discouraged"),
+        )
+        softened = text
+        for risky, safe in replacements:
+            softened = StoryService._replace_case_insensitive(softened, risky, safe)
+        return softened
+
+    @staticmethod
+    def _replace_case_insensitive(text: str, old: str, new: str) -> str:
+        lower_text = text.lower()
+        lower_old = old.lower()
+        start = 0
+        parts: list[str] = []
+        while True:
+            index = lower_text.find(lower_old, start)
+            if index == -1:
+                parts.append(text[start:])
+                return "".join(parts)
+            parts.append(text[start:index])
+            parts.append(new)
+            start = index + len(old)
 
     @staticmethod
     def _build_image_plan_context(
@@ -1869,15 +2009,96 @@ class StoryService:
             )
         return "teen-appropriate but still child-safe proportions, matching the profile photo and not adult features"
 
+    @classmethod
+    def _cast_mode(cls, story: Any) -> str:
+        if hasattr(story, "use_child_character"):
+            return cls.CAST_MODE_CHILD_HERO if bool(getattr(story, "use_child_character")) else cls.CAST_MODE_IMAGINED
+        request = getattr(story, "input_request", None)
+        if not isinstance(request, dict):
+            return cls.CAST_MODE_CHILD_HERO
+        cast_mode = request.get("cast_mode")
+        if isinstance(cast_mode, str) and cast_mode.strip():
+            normalized = cast_mode.strip().upper()
+            if normalized in {cls.CAST_MODE_CHILD_HERO, cls.CAST_MODE_IMAGINED}:
+                return normalized
+        if "use_child_character" in request:
+            return cls.CAST_MODE_CHILD_HERO if bool(request.get("use_child_character")) else cls.CAST_MODE_IMAGINED
+        return cls.CAST_MODE_CHILD_HERO
+
+    @classmethod
+    def _use_child_character(cls, story: Any) -> bool:
+        return cls._cast_mode(story) == cls.CAST_MODE_CHILD_HERO
+
+    @classmethod
+    def _build_story_cast_context(
+        cls,
+        story: Any,
+        child: Any,
+        *,
+        story_plan: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if cls._use_child_character(story):
+            return cls._build_character_reference_context(child)
+        return cls._build_imagined_cast_context(story, story_plan=story_plan)
+
+    @classmethod
+    def _build_imagined_cast_context(
+        cls,
+        story: Any,
+        *,
+        story_plan: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        visual_bible = story_plan.get("visual_bible") if isinstance(story_plan, dict) else None
+        hero = visual_bible.get("hero") if isinstance(visual_bible, dict) else None
+        hero_name = hero.get("name") if isinstance(hero, dict) and isinstance(hero.get("name"), str) else ""
+        hero_name = hero_name.strip() or "AI-created story hero"
+        age_label = age_group_label(getattr(story, "age_group", None))
+        character_description = (
+            "Imaginative cast mode. Do not use the child profile as the story hero. "
+            "Invent the hero and all recurring characters from the category, learning goal, and story idea. "
+            "Lock every recurring character in the Visual Bible with stable face/head shape, hair or fur, eyes, "
+            "skin or body color, outfit, shoes, accessories, size, distinctive features, and a single story style. "
+            "The Visual Bible is the only character consistency source for image generation."
+        )
+        return {
+            "cast_mode": cls.CAST_MODE_IMAGINED,
+            "use_child_character": False,
+            "child_name": hero_name,
+            "character_description": character_description,
+            "identity_summary": "AI-created cast; use the Visual Bible as the locked character model sheet.",
+            "child_age_label": age_label,
+            "child_age_visual_guidance": (
+                "age-appropriate proportions for the reader band; preserve each invented character's locked age, "
+                "body scale, outfit, colors, and style from the Visual Bible"
+            ),
+            "character_reference_mode": (
+                "No external character reference image is attached. Use Visual Bible text locks only."
+            ),
+            "cast_mode_instructions": (
+                "IMAGINED_CAST: create a named hero and complete recurring cast from the story inputs. "
+                "Do not use the child profile as a character. Every recurring character must have detailed, "
+                "stable visual locks suitable for consistent batch image generation."
+            ),
+        }
+
     @staticmethod
-    def _build_character_reference_context(child) -> dict[str, str]:
+    def _build_character_reference_context(child) -> dict[str, Any]:
         character_description = StoryService._extract_character_analysis(child)
         return {
+            "cast_mode": StoryService.CAST_MODE_CHILD_HERO,
+            "use_child_character": True,
             "child_name": (child.first_name or "Child") if child else "Child",
             "character_description": character_description,
             "identity_summary": StoryService._extract_identity_summary(child) or character_description,
             "child_age_label": StoryService._child_age_label(child),
             "child_age_visual_guidance": StoryService._age_visual_guidance(child.age if child else None),
+            "character_reference_mode": (
+                "A generated Master Character Reference Portrait is attached for the hero child."
+            ),
+            "cast_mode_instructions": (
+                "CHILD_HERO: use the selected child as the story hero. Preserve the child identity lock and "
+                "use the Visual Bible for the single story outfit, companions, side characters, objects, and style."
+            ),
         }
 
     @staticmethod

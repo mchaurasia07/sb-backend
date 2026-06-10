@@ -179,11 +179,9 @@ class StoryInputSafetyService:
     @staticmethod
     def _story_idea_text(payload: StoryGenerationRequest) -> str:
         fields = {
-            "mode": payload.mode,
             "category": payload.category or "",
             "learning_goal": payload.learning_goal or "",
             "context": payload.context or "",
-            "event_description": payload.event_description or "",
         }
         return json.dumps(fields, ensure_ascii=False)
 

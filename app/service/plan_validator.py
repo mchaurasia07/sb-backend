@@ -125,10 +125,25 @@ class PlanValidator:
     ) -> None:
         expected_theme = source_inputs.get("category", "")
         expected_learning_goal = source_inputs.get("learning_goal", "")
-        if plan.get("theme") != expected_theme:
-            errors.append("`theme` must match the request Theme exactly.")
+        if expected_theme and not self._theme_includes_request(plan.get("theme"), expected_theme):
+            errors.append("`theme` must include the requested Theme.")
         if plan.get("learning_goal") != expected_learning_goal:
             errors.append("`learning_goal` must match the request Learning Goal exactly.")
+
+    @staticmethod
+    def _theme_includes_request(plan_theme: Any, expected_theme: str) -> bool:
+        if not isinstance(plan_theme, str) or not plan_theme.strip():
+            return False
+        normalized_expected = expected_theme.strip().lower()
+        normalized_theme = plan_theme.strip().lower()
+        if normalized_theme == normalized_expected:
+            return True
+        parts = [
+            part.strip()
+            for part in normalized_theme.replace("|", ",").replace(";", ",").split(",")
+            if part.strip()
+        ]
+        return normalized_expected in parts or normalized_expected in normalized_theme
 
     def _validate_content_anchors(self, content_anchors: Any, errors: list[str]) -> None:
         if not isinstance(content_anchors, dict):

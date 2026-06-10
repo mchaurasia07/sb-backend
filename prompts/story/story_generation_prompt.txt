@@ -67,6 +67,29 @@ Do not contradict the story plan.
 
 ---
 
+## CHILD-SAFE CONFLICT LANGUAGE
+
+Preserve the story's meaning, but use gentle child-safe wording.
+
+For environment, cleanup, safety, or community-care stories, use gentle
+storybook stakes instead of clinical, frightening, or severe consequence
+wording.
+
+If the plan contains intense wording, translate it into softer storybook stakes:
+
+* the park feels messy or forgotten
+* the stream cannot sparkle under litter
+* animals avoid a noisy or cluttered area
+* families cannot enjoy playing there yet
+* the air feels dusty or dull
+* the community wants its clean, cheerful space back
+
+Keep the environmental care, teamwork, responsibility, and restoration. Do not
+make the problem feel trivial. Keep the concern practical, emotional, and
+restorative.
+
+---
+
 ## WRITING PHILOSOPHY
 
 Show.

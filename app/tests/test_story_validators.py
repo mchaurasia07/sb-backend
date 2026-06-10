@@ -68,6 +68,7 @@ def _image_plan(page_count: int = 2) -> dict:
     return {
         "visual_bible": {
             "hero": {
+                "name": "Mira",
                 "appearance": "A curious child with bright eyes.",
                 "outfit": "Yellow raincoat and red scarf.",
                 "signature_item": "Moon map",
@@ -124,6 +125,19 @@ def test_plan_validator_accepts_descriptive_roles_and_null_signature_item():
 
     assert result.ok, result.errors
     assert plan["pages"][0]["story_role"] == "first_day_moment"
+
+
+def test_plan_validator_accepts_theme_with_requested_theme_plus_extra_context():
+    plan = _story_plan(page_count=8)
+    plan["theme"] = "Adventure, Environmental Awareness"
+
+    result = PlanValidator().validate(
+        plan,
+        age_group="3-6",
+        source_inputs={"category": "Adventure", "learning_goal": "problem solving", "context": ""},
+    )
+
+    assert result.ok, result.errors
 
 
 def test_plan_validator_rejects_old_page_metadata_schema():
