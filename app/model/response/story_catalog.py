@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -22,6 +22,8 @@ class StoryCatalogResponse(BaseModel):
     total_pages: int | None = None
     cover_image_url: str | None = None
     available_languages: list[str] = Field(default_factory=list)
+    video_created: bool = False
+    video_metadata: dict[str, Any] | None = None
     status: str
     created_at: datetime
     updated_at: datetime

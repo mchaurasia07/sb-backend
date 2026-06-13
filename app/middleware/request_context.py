@@ -18,6 +18,11 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
         request_id = request.headers.get("X-Request-ID", str(uuid4()))
         structlog.contextvars.bind_contextvars(request_id=request_id)
         start = time.perf_counter()
+        logger.info(
+            "api_request_started",
+            method=request.method,
+            path=request.url.path,
+        )
         try:
             response = await call_next(request)
             duration_ms = round((time.perf_counter() - start) * 1000, 2)
@@ -30,5 +35,15 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
                 duration_ms=duration_ms,
             )
             return response
+        except Exception as exc:
+            duration_ms = round((time.perf_counter() - start) * 1000, 2)
+            logger.exception(
+                "api_request_failed",
+                method=request.method,
+                path=request.url.path,
+                duration_ms=duration_ms,
+                error=str(exc),
+            )
+            raise
         finally:
             structlog.contextvars.clear_contextvars()

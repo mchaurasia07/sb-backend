@@ -77,6 +77,16 @@ class Settings(BaseSettings):
     AUDIO_LIBRARY_STORAGE_PROVIDER: str = "r2"
     CLOUDFLARE_R2_AUDIO_KEY_PREFIX: str = "audio"
 
+    # Video Storage and Rendering Configuration
+    VIDEO_STORAGE_PROVIDER: str = "r2"
+    CLOUDFLARE_R2_VIDEO_KEY_PREFIX: str = "video"
+    STORY_VIDEO_WIDTH: int = 1280
+    STORY_VIDEO_HEIGHT: int = 720
+    STORY_VIDEO_FPS: int = 30
+    STORY_VIDEO_COVER_DURATION_SECONDS: float = 3.0
+    STORY_VIDEO_END_DURATION_SECONDS: float = 4.0
+    STORY_VIDEO_MAX_ASSET_BYTES: int = 100 * 1024 * 1024
+
     # AI Provider Selection
     AI_PROVIDER: str  # Options: "openai", "google"
 

@@ -2,6 +2,7 @@ import base64
 from io import BytesIO
 import json
 import logging
+import math
 import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -395,6 +396,8 @@ class StoryService:
             learning_goal=story.learning_goal,
             context=story.context,
             pages=[],  # No pages yet, story is PENDING
+            video_created=bool(story.video_created),
+            video_metadata=story.video_metadata,
             created_at=story.created_at,
             updated_at=story.updated_at,
         )
@@ -1530,7 +1533,7 @@ class StoryService:
 
     @staticmethod
     def _crop_image_bytes_to_aspect_ratio(image_bytes: bytes, aspect_ratio: str) -> bytes:
-        """Center-crop generated image bytes to an exact width:height ratio."""
+        """Fit generated image bytes onto an exact width:height canvas without cropping."""
         try:
             numerator_text, denominator_text = aspect_ratio.split(":", 1)
             numerator = int(numerator_text)
@@ -1550,21 +1553,38 @@ class StoryService:
         try:
             with Image.open(BytesIO(image_bytes)) as image:
                 image.load()
+                image = image.convert("RGBA")
                 width, height = image.size
-                scale = min(width // numerator, height // denominator)
+                scale = max(math.ceil(width / numerator), math.ceil(height / denominator))
                 if scale <= 0:
                     return image_bytes
 
                 target_width = scale * numerator
                 target_height = scale * denominator
-                left = (width - target_width) // 2
-                top = (height - target_height) // 2
-                cropped = image.crop((left, top, left + target_width, top + target_height))
+                fitted = image.copy()
+                fitted.thumbnail((target_width, target_height), Image.Resampling.LANCZOS)
+                canvas = Image.new("RGBA", (target_width, target_height), StoryService._image_padding_color(image))
+                left = (target_width - fitted.width) // 2
+                top = (target_height - fitted.height) // 2
+                canvas.alpha_composite(fitted, (left, top))
                 output = BytesIO()
-                cropped.save(output, format="PNG")
+                canvas.convert("RGB").save(output, format="PNG")
                 return output.getvalue()
         except UnidentifiedImageError as exc:
             raise AppException("Generated story image is not a valid image", code="INVALID_GENERATED_IMAGE") from exc
+
+    @staticmethod
+    def _image_padding_color(image: Image.Image) -> tuple[int, int, int, int]:
+        """Pick a quiet padding color from the image corners."""
+        rgba = image.convert("RGBA")
+        width, height = rgba.size
+        pixels = [
+            rgba.getpixel((0, 0)),
+            rgba.getpixel((max(0, width - 1), 0)),
+            rgba.getpixel((0, max(0, height - 1))),
+            rgba.getpixel((max(0, width - 1), max(0, height - 1))),
+        ]
+        return tuple(round(sum(pixel[channel] for pixel in pixels) / len(pixels)) for channel in range(4))
 
     @staticmethod
     def _render_story_image_prompt(
@@ -2231,6 +2251,8 @@ class StoryService:
             learning_goal=story.learning_goal,
             context=story.context,
             pages=pages,
+            video_created=bool(story.video_created),
+            video_metadata=story.video_metadata,
             created_at=story.created_at,
             updated_at=story.updated_at,
         )
@@ -2319,6 +2341,8 @@ class StoryService:
                     learning_goal=story.learning_goal,
                     context=story.context,
                     pages=pages,
+                    video_created=bool(story.video_created),
+                    video_metadata=story.video_metadata,
                     created_at=story.created_at,
                     updated_at=story.updated_at,
                 )

@@ -33,6 +33,8 @@ class StoryResponse(BaseModel):
     learning_goal: str | None = None
     context: str | None = None
     pages: list[StoryPageResponse] = []
+    video_created: bool = False
+    video_metadata: dict[str, Any] | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -97,3 +99,18 @@ class StoryBatchJobReconcileResponse(BaseModel):
     checked_count: int
     processed_count: int
     results: list[StoryBatchJobReconcileItemResponse]
+
+
+class StoryVideoResponse(BaseModel):
+    """Language-specific custom story video generation state."""
+
+    story_id: UUID
+    language: str
+    status: str
+    video_url: str | None = None
+    local_video_path: str | None = None
+    error_message: str | None = None
+    requested_at: str | None = None
+    started_at: str | None = None
+    completed_at: str | None = None
+    updated_at: str | None = None

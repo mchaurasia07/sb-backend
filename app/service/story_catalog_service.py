@@ -156,6 +156,8 @@ class StoryCatalogService:
             total_pages=story.total_pages,
             cover_image_url=_story_json_cover_image_url(story_json) or story.cover_image,
             available_languages=available_languages or [DEFAULT_GENERIC_STORY_LANGUAGE],
+            video_created=False,
+            video_metadata=None,
             status=story.status,
             created_at=story.created_at,
             updated_at=story.updated_at,
@@ -190,6 +192,8 @@ class StoryCatalogService:
             cover_image_url=_story_json_cover_image_url(story_json)
             or next((page.image_url for page in pages if page.page_type == "cover"), None),
             available_languages=available_languages or ["en"],
+            video_created=bool(getattr(story, "video_created", False)),
+            video_metadata=getattr(story, "video_metadata", None),
             status=_enum_value(story.status) or "",
             created_at=story.created_at,
             updated_at=story.updated_at,

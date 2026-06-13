@@ -82,6 +82,8 @@ class Story(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     image_plan_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     image_plan_validated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
     input_request: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    video_created: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
+    video_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # AI configuration locked at story creation so retries use the same provider/models.
     ai_provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
