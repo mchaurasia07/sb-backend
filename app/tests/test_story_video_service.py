@@ -1,14 +1,19 @@
+from io import BytesIO
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from PIL import Image
 
+from app.core.config import settings
 from app.core.exceptions import AppException
 from app.service.story_video_service import (
     VIDEO_STATUS_COMPLETED,
     VIDEO_STATUS_FAILED,
     VIDEO_STATUS_IN_PROGRESS,
     StoryVideoService,
+    VideoSlide,
+    VideoSlideAssets,
 )
 
 
@@ -35,6 +40,12 @@ def _story_json() -> dict:
         ],
         "moral": {"text": "Wisdom can come from anyone."},
     }
+
+
+def _png_bytes(width: int = 320, height: int = 180, color: tuple[int, int, int] = (255, 255, 255)) -> bytes:
+    output = BytesIO()
+    Image.new("RGB", (width, height), color).save(output, format="PNG")
+    return output.getvalue()
 
 
 class _FakeSession:
@@ -72,12 +83,36 @@ class _FakeStoryRepository:
 class _FastStoryVideoService(StoryVideoService):
     async def _render_and_upload_video(self, *, story_id, language, slides):
         self.rendered = {"story_id": story_id, "language": language, "slides": slides}
+        self._last_timing = {"slide_count": len(slides), "concat_seconds": 0.01}
         return f"https://cdn.example.test/video/stories/{story_id}/{language}/story.mp4"
 
 
 class _FailingStoryVideoService(StoryVideoService):
     async def _render_and_upload_video(self, *, story_id, language, slides):
+        self._last_timing = {"slide_count": len(slides), "asset_read_seconds": 0.01}
         raise AppException("render failed", code="TEST_RENDER_FAILED")
+
+
+class _AssetOrderStoryVideoService(StoryVideoService):
+    def __init__(self):
+        self.events = []
+        self._last_timing = {}
+
+    async def _read_slide_assets(self, slides):
+        self.events.append("assets")
+        return [VideoSlideAssets(image_bytes=b"image", audio_bytes=None) for _ in slides]
+
+    def _write_slide_image(self, output_path, image_bytes, slide):
+        self.events.append("slide_image")
+        output_path.write_bytes(b"image")
+
+    def _render_segment(self, image_path, audio_path, output_path, duration_seconds):
+        self.events.append("segment")
+        output_path.write_bytes(b"segment")
+
+    def _concat_segments(self, tmpdir, segment_paths, output_path):
+        self.events.append("concat")
+        output_path.write_bytes(b"video")
 
 
 def _service(service_cls=StoryVideoService, *, story_json=None, metadata=None):
@@ -166,6 +201,29 @@ async def test_prepare_generation_marks_language_in_progress_when_starting():
 
 
 @pytest.mark.asyncio
+async def test_prepare_generation_reuses_in_progress_video_without_duplicate_start():
+    metadata = {
+        "en": {
+            "status": VIDEO_STATUS_IN_PROGRESS,
+            "requested_at": "2026-06-13T10:00:00+00:00",
+            "started_at": "2026-06-13T10:00:01+00:00",
+        }
+    }
+    service, story, _, session, user_id, story_id = _service(metadata=metadata)
+
+    response, should_start = await service.prepare_generation(
+        user_id=user_id,
+        story_id=story_id,
+        language="en",
+        overwrite=False,
+    )
+
+    assert should_start is False
+    assert response.status == VIDEO_STATUS_IN_PROGRESS
+    assert session.commits == 0
+
+
+@pytest.mark.asyncio
 async def test_generate_video_updates_completed_metadata():
     service, story, _, session, user_id, story_id = _service(_FastStoryVideoService)
 
@@ -181,6 +239,9 @@ async def test_generate_video_updates_completed_metadata():
     assert story.video_created is True
     assert story.video_metadata["en"]["status"] == VIDEO_STATUS_COMPLETED
     assert story.video_metadata["en"]["completed_at"]
+    assert story.video_metadata["en"]["total_seconds"] >= 0
+    assert story.video_metadata["en"]["queued_seconds"] == 0
+    assert story.video_metadata["en"]["timing"]["slide_count"] == 4
     assert session.commits == 2
 
 
@@ -200,4 +261,93 @@ async def test_generate_video_records_failed_metadata():
     assert story.video_created is False
     assert story.video_metadata["en"]["status"] == VIDEO_STATUS_FAILED
     assert story.video_metadata["en"]["error_message"] == "render failed"
+    assert story.video_metadata["en"]["total_seconds"] >= 0
+    assert story.video_metadata["en"]["timing"]["asset_read_seconds"] == 0.01
     assert session.commits == 2
+
+
+def test_concat_segments_uses_stream_copy_without_reencoding(monkeypatch, tmp_path):
+    captured = {}
+    service = StoryVideoService.__new__(StoryVideoService)
+    segment_path = tmp_path / "segment_000.mp4"
+    output_path = tmp_path / "story.mp4"
+
+    def _capture(cmd):
+        captured["cmd"] = cmd
+
+    monkeypatch.setattr(StoryVideoService, "_ffmpeg_executable", staticmethod(lambda: "ffmpeg"))
+    monkeypatch.setattr(StoryVideoService, "_run_ffmpeg", staticmethod(_capture))
+
+    service._concat_segments(tmp_path, [segment_path], output_path)
+
+    cmd = captured["cmd"]
+    assert cmd[cmd.index("-c") + 1] == "copy"
+    assert "libx264" not in cmd
+    assert "aac" not in cmd
+
+
+def test_cover_slide_does_not_draw_title_overlay(monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "STORY_VIDEO_WIDTH", 320)
+    monkeypatch.setattr(settings, "STORY_VIDEO_HEIGHT", 180)
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("cover title overlay should not be drawn")
+
+    monkeypatch.setattr(StoryVideoService, "_draw_center_title", staticmethod(_fail_if_called))
+    output_path = tmp_path / "cover.png"
+    slide = VideoSlide(
+        kind="cover",
+        image_url="",
+        title="Do Not Show",
+        text=None,
+        page_number=None,
+        audio_url=None,
+        duration_seconds=1.0,
+    )
+
+    StoryVideoService.__new__(StoryVideoService)._write_slide_image(output_path, _png_bytes(), slide)
+
+    with Image.open(output_path) as output:
+        assert output.convert("RGB").getpixel((160, 90)) == (255, 255, 255)
+
+
+def test_page_text_draws_without_black_background_panel(monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "STORY_VIDEO_WIDTH", 320)
+    monkeypatch.setattr(settings, "STORY_VIDEO_HEIGHT", 180)
+    output_path = tmp_path / "page.png"
+    slide = VideoSlide(
+        kind="page",
+        image_url="",
+        title=None,
+        text="Short page text.",
+        page_number=1,
+        audio_url=None,
+        duration_seconds=1.0,
+    )
+
+    StoryVideoService.__new__(StoryVideoService)._write_slide_image(output_path, _png_bytes(), slide)
+
+    with Image.open(output_path) as output:
+        assert output.convert("RGB").getpixel((61, 150)) == (255, 255, 255)
+
+
+@pytest.mark.asyncio
+async def test_render_video_preloads_assets_before_slide_rendering():
+    service = _AssetOrderStoryVideoService()
+    slides = [
+        VideoSlide(
+            kind="cover",
+            image_url="image",
+            title=None,
+            text=None,
+            page_number=None,
+            audio_url=None,
+            duration_seconds=1.0,
+        )
+    ]
+
+    video_bytes = await service._render_video(slides)
+
+    assert video_bytes == b"video"
+    assert service.events == ["assets", "slide_image", "segment", "concat"]
+    assert service._last_timing["slide_count"] == 1

@@ -114,3 +114,7 @@ class StoryVideoResponse(BaseModel):
     started_at: str | None = None
     completed_at: str | None = None
     updated_at: str | None = None
+    elapsed_seconds: float | None = None
+    total_seconds: float | None = None
+    queued_seconds: float | None = None
+    timing: dict[str, Any] | None = None

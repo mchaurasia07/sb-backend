@@ -1,10 +1,10 @@
 import logging
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db_session
+from app.core.database import get_db_session, AsyncSessionLocal
 from app.core.dependencies import get_auth_context, AuthContext
 from app.model.response.common import ApiResponse, PaginatedResponse, success_response
 from app.model.response.story import StoryVideoResponse
@@ -16,6 +16,42 @@ from app.service.story_video_service import StoryVideoService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+async def generate_custom_story_video_background(
+    *,
+    user_id: UUID,
+    story_id: UUID,
+    language: str,
+) -> None:
+    """Generate custom story video with a fresh background database session."""
+    logger.info(
+        "Custom story video background task started: story_id=%s user_id=%s language=%s",
+        story_id,
+        user_id,
+        language,
+    )
+    async with AsyncSessionLocal() as session:
+        try:
+            await StoryVideoService(session).generate_video(
+                user_id=user_id,
+                story_id=story_id,
+                language=language,
+                overwrite=False,
+            )
+            logger.info(
+                "Custom story video background task completed: story_id=%s user_id=%s language=%s",
+                story_id,
+                user_id,
+                language,
+            )
+        except Exception:
+            logger.exception(
+                "Custom story video background task failed: story_id=%s user_id=%s language=%s",
+                story_id,
+                user_id,
+                language,
+            )
 
 
 @router.get("", response_model=ApiResponse[PaginatedResponse[StoryCatalogResponse]])
@@ -62,6 +98,8 @@ async def get_custom_story_content(
 )
 async def generate_custom_story_video(
     story_id: UUID,
+    background_tasks: BackgroundTasks,
+    response: Response,
     language: str = Query("en", min_length=2, max_length=16),
     overwrite: bool = Query(False),
     auth: AuthContext = Depends(get_auth_context),
@@ -75,12 +113,20 @@ async def generate_custom_story_video(
         overwrite,
     )
     try:
-        data = await StoryVideoService(session).generate_video(
+        data, should_start = await StoryVideoService(session).prepare_generation(
             user_id=auth.user_id,
             story_id=story_id,
             language=language,
             overwrite=overwrite,
         )
+        if should_start:
+            response.status_code = status.HTTP_202_ACCEPTED
+            background_tasks.add_task(
+                generate_custom_story_video_background,
+                user_id=auth.user_id,
+                story_id=story_id,
+                language=language,
+            )
     except Exception:
         logger.exception(
             "Custom story video generation request failed: story_id=%s user_id=%s language=%s overwrite=%s",
@@ -91,15 +137,17 @@ async def generate_custom_story_video(
         )
         raise
     logger.info(
-        "Custom story video generation request completed: story_id=%s user_id=%s language=%s status=%s video_url=%s local_video_path=%s",
+        "Custom story video generation request accepted: story_id=%s user_id=%s language=%s status=%s should_start=%s video_url=%s local_video_path=%s",
         story_id,
         auth.user_id,
         data.language,
         data.status,
+        should_start,
         data.video_url,
         data.local_video_path,
     )
-    return success_response(data, "Custom story video generated successfully")
+    message = "Custom story video generation started" if should_start else "Custom story video status retrieved successfully"
+    return success_response(data, message)
 
 
 @router.get(

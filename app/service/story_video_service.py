@@ -9,6 +9,7 @@ import wave
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 from urllib.parse import urlparse
 from uuid import UUID
@@ -48,6 +49,12 @@ class VideoSlide:
     duration_seconds: float | None
 
 
+@dataclass(slots=True)
+class VideoSlideAssets:
+    image_bytes: bytes
+    audio_bytes: bytes | None
+
+
 class StoryVideoService:
     """Builds and stores language-specific custom story slideshow videos."""
 
@@ -55,6 +62,7 @@ class StoryVideoService:
         self.session = session
         self.stories = StoryRepository(session)
         self.video_storage = local_story_video_storage_service
+        self._last_timing: dict[str, Any] = {}
 
     async def get_video_status(
         self,
@@ -89,6 +97,8 @@ class StoryVideoService:
             and (existing.get("video_url") or existing.get("local_video_path"))
         ):
             return self._response_from_story(story, normalized_language), False
+        if not overwrite and existing.get("status") == VIDEO_STATUS_IN_PROGRESS:
+            return self._response_from_story(story, normalized_language), False
 
         content = await self.stories.get_content_by_story_and_language(
             story_id=story.id,
@@ -110,6 +120,10 @@ class StoryVideoService:
                 "started_at": None,
                 "completed_at": None,
                 "updated_at": self._now(),
+                "elapsed_seconds": None,
+                "total_seconds": None,
+                "queued_seconds": None,
+                "timing": None,
             },
             commit=True,
         )
@@ -183,6 +197,10 @@ class StoryVideoService:
                 "started_at": started_at,
                 "completed_at": None,
                 "updated_at": started_at,
+                "elapsed_seconds": None,
+                "total_seconds": None,
+                "queued_seconds": self._seconds_between(existing.get("requested_at") or started_at, started_at),
+                "timing": None,
             },
             commit=True,
         )
@@ -201,17 +219,20 @@ class StoryVideoService:
                 slides=slides,
             )
             video_url, local_video_path = self._storage_result_values(storage_result)
+            timing = dict(getattr(self, "_last_timing", {}) or {})
             logger.info(
-                "Custom story video render stored: story_id=%s language=%s video_url=%s local_video_path=%s",
+                "Custom story video render stored: story_id=%s language=%s video_url=%s local_video_path=%s timing=%s",
                 story_id,
                 normalized_language,
                 video_url,
                 local_video_path,
+                timing,
             )
             story = await self.stories.get_for_user_for_update(user_id, story_id)
             if story is None:
                 raise NotFoundException("Story not found", "STORY_NOT_FOUND")
             completed_at = self._now()
+            total_seconds = self._seconds_between(started_at, completed_at)
             await self._set_language_metadata(
                 story,
                 normalized_language,
@@ -224,6 +245,10 @@ class StoryVideoService:
                     "started_at": started_at,
                     "completed_at": completed_at,
                     "updated_at": completed_at,
+                    "elapsed_seconds": total_seconds,
+                    "total_seconds": total_seconds,
+                    "queued_seconds": self._seconds_between(existing.get("requested_at") or started_at, started_at),
+                    "timing": timing or None,
                 },
                 commit=True,
             )
@@ -241,6 +266,7 @@ class StoryVideoService:
             story = await self.stories.get_for_user_for_update(user_id, story_id)
             if story is not None:
                 failed_at = self._now()
+                total_seconds = self._seconds_between(started_at, failed_at)
                 await self._set_language_metadata(
                     story,
                     normalized_language,
@@ -253,6 +279,10 @@ class StoryVideoService:
                         "started_at": started_at,
                         "completed_at": None,
                         "updated_at": failed_at,
+                        "elapsed_seconds": total_seconds,
+                        "total_seconds": total_seconds,
+                        "queued_seconds": self._seconds_between(existing.get("requested_at") or started_at, started_at),
+                        "timing": dict(getattr(self, "_last_timing", {}) or {}) or None,
                     },
                     commit=True,
                 )
@@ -354,15 +384,25 @@ class StoryVideoService:
         language: str,
         slides: list[VideoSlide],
     ) -> StoryVideoStorageResult:
+        started_at = perf_counter()
         video_bytes = await self._render_video(slides)
+        render_seconds = self._elapsed_seconds(started_at)
         version = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-        return await self.video_storage.save_story_video(
+        upload_started_at = perf_counter()
+        result = await self.video_storage.save_story_video(
             story_id=story_id,
             language=language,
             video_bytes=video_bytes,
             filename=f"story_{version}.mp4",
             content_type="video/mp4",
         )
+        self._last_timing = {
+            **dict(getattr(self, "_last_timing", {}) or {}),
+            "render_seconds": render_seconds,
+            "upload_seconds": self._elapsed_seconds(upload_started_at),
+            "total_render_upload_seconds": self._elapsed_seconds(started_at),
+        }
+        return result
 
     async def _render_video(self, slides: list[VideoSlide]) -> bytes:
         if not slides:
@@ -371,23 +411,29 @@ class StoryVideoService:
         with tempfile.TemporaryDirectory(prefix="story-video-") as tmp:
             tmpdir = Path(tmp)
             segment_paths: list[Path] = []
+            asset_started_at = perf_counter()
+            slide_assets = await self._read_slide_assets(slides)
+            asset_seconds = self._elapsed_seconds(asset_started_at)
+            slide_image_seconds = 0.0
+            segment_render_seconds = 0.0
             for index, slide in enumerate(slides):
-                image_bytes = await self._read_asset(slide.image_url, asset_type="image")
                 image_path = tmpdir / f"slide_{index:03d}.png"
                 audio_path = tmpdir / f"slide_{index:03d}.wav"
                 segment_path = tmpdir / f"segment_{index:03d}.mp4"
 
-                await asyncio.to_thread(self._write_slide_image, image_path, image_bytes, slide)
-                if slide.audio_url:
+                image_started_at = perf_counter()
+                await asyncio.to_thread(self._write_slide_image, image_path, slide_assets[index].image_bytes, slide)
+                if slide.audio_url and slide_assets[index].audio_bytes is not None:
                     audio_path = tmpdir / f"slide_{index:03d}{self._asset_suffix(slide.audio_url, '.audio')}"
-                    audio_bytes = await self._read_asset(slide.audio_url, asset_type="audio")
-                    await asyncio.to_thread(audio_path.write_bytes, audio_bytes)
+                    await asyncio.to_thread(audio_path.write_bytes, slide_assets[index].audio_bytes)
                 else:
                     await asyncio.to_thread(
                         self._write_silent_wav,
                         audio_path,
                         slide.duration_seconds or 1.0,
                     )
+                slide_image_seconds += self._elapsed_seconds(image_started_at)
+                segment_started_at = perf_counter()
                 await asyncio.to_thread(
                     self._render_segment,
                     image_path,
@@ -395,13 +441,64 @@ class StoryVideoService:
                     segment_path,
                     slide.duration_seconds,
                 )
+                segment_render_seconds += self._elapsed_seconds(segment_started_at)
                 segment_paths.append(segment_path)
 
             output_path = tmpdir / "story.mp4"
+            concat_started_at = perf_counter()
             await asyncio.to_thread(self._concat_segments, tmpdir, segment_paths, output_path)
+            concat_seconds = self._elapsed_seconds(concat_started_at)
+            self._last_timing = {
+                "slide_count": len(slides),
+                "asset_read_seconds": asset_seconds,
+                "slide_image_seconds": round(slide_image_seconds, 2),
+                "segment_render_seconds": round(segment_render_seconds, 2),
+                "concat_seconds": concat_seconds,
+            }
             return await asyncio.to_thread(output_path.read_bytes)
 
-    async def _read_asset(self, url: str, *, asset_type: str) -> bytes:
+    async def _read_slide_assets(self, slides: list[VideoSlide]) -> list[VideoSlideAssets]:
+        semaphore = asyncio.Semaphore(4)
+        tasks: dict[tuple[str, str], asyncio.Task[bytes]] = {}
+
+        async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
+            async def cached_read(url: str, asset_type: str) -> bytes:
+                key = (asset_type, url)
+                task = tasks.get(key)
+                if task is None:
+                    task = asyncio.create_task(
+                        self._read_asset_with_limit(
+                            url,
+                            asset_type=asset_type,
+                            client=client,
+                            semaphore=semaphore,
+                        )
+                    )
+                    tasks[key] = task
+                return await task
+
+            async def read_for_slide(slide: VideoSlide) -> VideoSlideAssets:
+                image_task = asyncio.create_task(cached_read(slide.image_url, "image"))
+                audio_task = asyncio.create_task(cached_read(slide.audio_url, "audio")) if slide.audio_url else None
+                return VideoSlideAssets(
+                    image_bytes=await image_task,
+                    audio_bytes=await audio_task if audio_task is not None else None,
+                )
+
+            return await asyncio.gather(*(read_for_slide(slide) for slide in slides))
+
+    async def _read_asset_with_limit(
+        self,
+        url: str,
+        *,
+        asset_type: str,
+        client: httpx.AsyncClient,
+        semaphore: asyncio.Semaphore,
+    ) -> bytes:
+        async with semaphore:
+            return await self._read_asset(url, asset_type=asset_type, client=client)
+
+    async def _read_asset(self, url: str, *, asset_type: str, client: httpx.AsyncClient | None = None) -> bytes:
         data_url = self._data_url_bytes(url)
         if data_url is not None:
             return data_url
@@ -419,16 +516,21 @@ class StoryVideoService:
             self._validate_asset_size(content, asset_type)
             return content
 
-        async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
-            try:
-                response = await client.get(url)
-                response.raise_for_status()
-            except httpx.HTTPError as exc:
-                raise AppException(
-                    f"Failed to download {asset_type} asset for story video: {url}",
-                    status.HTTP_502_BAD_GATEWAY,
-                    "STORY_VIDEO_ASSET_DOWNLOAD_FAILED",
-                ) from exc
+        if client is None:
+            async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as owned_client:
+                return await self._download_asset(owned_client, url, asset_type=asset_type)
+        return await self._download_asset(client, url, asset_type=asset_type)
+
+    async def _download_asset(self, client: httpx.AsyncClient, url: str, *, asset_type: str) -> bytes:
+        try:
+            response = await client.get(url)
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise AppException(
+                f"Failed to download {asset_type} asset for story video: {url}",
+                status.HTTP_502_BAD_GATEWAY,
+                "STORY_VIDEO_ASSET_DOWNLOAD_FAILED",
+            ) from exc
         self._validate_asset_size(response.content, asset_type)
         return response.content
 
@@ -441,9 +543,7 @@ class StoryVideoService:
 
         overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
         draw = ImageDraw.Draw(overlay)
-        if slide.kind == "cover" and slide.title:
-            self._draw_center_title(draw, overlay.size, slide.title)
-        elif slide.kind == "end":
+        if slide.kind == "end":
             self._draw_center_title(draw, overlay.size, slide.title or "The End", body=slide.text)
         elif slide.text:
             self._draw_bottom_text(draw, overlay.size, slide.text)
@@ -536,18 +636,8 @@ class StoryVideoService:
             "0",
             "-i",
             str(concat_path),
-            "-c:v",
-            "libx264",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "128k",
-            "-ar",
-            "24000",
-            "-pix_fmt",
-            "yuv420p",
-            "-r",
-            str(int(settings.STORY_VIDEO_FPS)),
+            "-c",
+            "copy",
             "-movflags",
             "+faststart",
             str(output_path),
@@ -611,18 +701,28 @@ class StoryVideoService:
         body_height = sum(StoryVideoService._text_height(draw, line, body_font) + 8 for line in body_lines)
         block_height = title_height + body_height + (22 if body_lines else 0)
         top = max(80, (height - block_height) // 2)
-        StoryVideoService._draw_text_panel(draw, (90, top - 40, width - 90, top + block_height + 40))
 
         y = top
         for line in title_lines:
             text_width = StoryVideoService._text_width(draw, line, title_font)
-            draw.text(((width - text_width) / 2, y), line, font=title_font, fill=(255, 255, 255, 255))
+            StoryVideoService._draw_readable_text(
+                draw,
+                ((width - text_width) / 2, y),
+                line,
+                title_font,
+            )
             y += StoryVideoService._text_height(draw, line, title_font) + line_gap
         if body_lines:
             y += 10
             for line in body_lines:
                 text_width = StoryVideoService._text_width(draw, line, body_font)
-                draw.text(((width - text_width) / 2, y), line, font=body_font, fill=(255, 255, 255, 245))
+                StoryVideoService._draw_readable_text(
+                    draw,
+                    ((width - text_width) / 2, y),
+                    line,
+                    body_font,
+                    fill=(255, 255, 255, 245),
+                )
                 y += StoryVideoService._text_height(draw, line, body_font) + 8
 
     @staticmethod
@@ -635,17 +735,29 @@ class StoryVideoService:
             lines = lines[:max_lines]
             lines[-1] = lines[-1].rstrip(".") + "..."
         line_height = StoryVideoService._text_height(draw, "Ag", font) + 10
-        panel_height = max(120, line_height * len(lines) + 46)
-        top = height - panel_height - 26
-        StoryVideoService._draw_text_panel(draw, (60, top, width - 60, height - 26))
-        y = top + 23
+        text_height = line_height * len(lines)
+        y = height - text_height - 42
         for line in lines:
-            draw.text((86, y), line, font=font, fill=(255, 255, 255, 255))
+            StoryVideoService._draw_readable_text(draw, (86, y), line, font)
             y += line_height
 
     @staticmethod
-    def _draw_text_panel(draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int]) -> None:
-        draw.rounded_rectangle(box, radius=24, fill=(0, 0, 0, 168))
+    def _draw_readable_text(
+        draw: ImageDraw.ImageDraw,
+        position: tuple[float, float],
+        text: str,
+        font: ImageFont.ImageFont,
+        *,
+        fill: tuple[int, int, int, int] = (255, 255, 255, 255),
+    ) -> None:
+        draw.text(
+            position,
+            text,
+            font=font,
+            fill=fill,
+            stroke_width=2,
+            stroke_fill=(0, 0, 0, 190),
+        )
 
     @staticmethod
     def _wrap_text(text: str, font: ImageFont.ImageFont, max_width: int) -> list[str]:
@@ -729,6 +841,10 @@ class StoryVideoService:
             started_at=record.get("started_at"),
             completed_at=record.get("completed_at"),
             updated_at=record.get("updated_at"),
+            elapsed_seconds=StoryVideoService._response_elapsed_seconds(record),
+            total_seconds=StoryVideoService._numeric_record_value(record, "total_seconds"),
+            queued_seconds=StoryVideoService._numeric_record_value(record, "queued_seconds"),
+            timing=record.get("timing") if isinstance(record.get("timing"), dict) else None,
         )
 
     @staticmethod
@@ -846,3 +962,48 @@ class StoryVideoService:
     @staticmethod
     def _now() -> str:
         return datetime.now(timezone.utc).isoformat()
+
+    @staticmethod
+    def _elapsed_seconds(started_at: float) -> float:
+        return round(perf_counter() - started_at, 2)
+
+    @staticmethod
+    def _parse_datetime(value: Any) -> datetime | None:
+        if not isinstance(value, str) or not value.strip():
+            return None
+        try:
+            parsed = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed
+
+    @staticmethod
+    def _seconds_between(start: Any, end: Any) -> float | None:
+        started_at = StoryVideoService._parse_datetime(start)
+        ended_at = StoryVideoService._parse_datetime(end)
+        if started_at is None or ended_at is None:
+            return None
+        return round(max(0.0, (ended_at - started_at).total_seconds()), 2)
+
+    @staticmethod
+    def _numeric_record_value(record: dict[str, Any], key: str) -> float | None:
+        value = record.get(key)
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, (int, float)):
+            return round(float(value), 2)
+        return None
+
+    @staticmethod
+    def _response_elapsed_seconds(record: dict[str, Any]) -> float | None:
+        value = StoryVideoService._numeric_record_value(record, "elapsed_seconds")
+        if value is not None:
+            return value
+        if record.get("status") == VIDEO_STATUS_IN_PROGRESS:
+            started_at = StoryVideoService._parse_datetime(record.get("started_at"))
+            if started_at is None:
+                return None
+            return round(max(0.0, (datetime.now(timezone.utc) - started_at).total_seconds()), 2)
+        return None
