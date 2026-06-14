@@ -1,4 +1,5 @@
 from enum import Enum
+from typing import Annotated
 from uuid import UUID
 
 from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
@@ -86,11 +87,11 @@ class StoryGenerationRequest(BaseModel):
         None,
         description="Generate story images. When omitted, this is derived from skip_image_generation.",
     )
-    execute_narration: bool = Field(
+    execute_narration: Annotated[bool, Field(
         True,
-        validation_alias=AliasChoices("execute_narration", "execute_narrration"),
+        validation_alias=AliasChoices("execute_narration", "execute_narration"),
         description="Generate page narration audio",
-    )
+    )]
     skip_validation: bool = Field(False, description="Skip validation steps for testing")
     execute_workflow: bool = Field(
         False,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import logging
 from types import MethodType, SimpleNamespace
 from typing import Any
 from uuid import UUID
@@ -42,6 +43,8 @@ from app.service.image_storage_provider import get_image_storage_service
 from app.service.story_input_safety_service import StoryInputSafetyService
 from app.service.story_service import DEFAULT_STORY_LANGUAGE, StoryGenerationFlags, StoryService
 from app.service.story_service_batch_service import StoryServiceBatchService
+
+logger = logging.getLogger(__name__)
 
 
 class _WorkflowBatchJobs:
@@ -281,8 +284,16 @@ class CustomStoryWorkflowService:
             await runner._ensure_story_ai_config(workflow)
             start_step = await self._first_incomplete_step(workflow)
             if start_step == self.ORDERED_STEPS[0]:
+                logger.info(
+                    "[CUSTOM_WORKFLOW_STEP] workflow=%s step=INPUT_SAFETY_VALIDATION action=llm_start",
+                    workflow.id,
+                )
                 await StoryInputSafetyService().validate(
                     StoryGenerationRequest.model_validate(self._input_request_for_validation(workflow))
+                )
+                logger.info(
+                    "[CUSTOM_WORKFLOW_STEP] workflow=%s step=INPUT_SAFETY_VALIDATION action=completed",
+                    workflow.id,
                 )
             for step in self.ORDERED_STEPS[self.ORDERED_STEPS.index(start_step) :]:
                 if self._step_disabled_by_request(workflow, step):
@@ -340,6 +351,16 @@ class CustomStoryWorkflowService:
         await self.session.commit()
         flags = self._flags(workflow)
         step_input = self._step_input(workflow, step)
+        logger.info(
+            "[CUSTOM_WORKFLOW_STEP] workflow=%s step=%s action=started processing_mode=%s execute_image=%s "
+            "execute_narration=%s skip_validation=%s",
+            workflow.id,
+            step.value,
+            workflow.processing_mode,
+            self._execute_image_enabled(workflow),
+            self._execute_narration_enabled(workflow),
+            flags.skip_validation,
+        )
 
         if self._step_disabled_by_request(workflow, step):
             output = {"skipped": True, "message": f"{step.value} skipped by request"}
@@ -353,60 +374,85 @@ class CustomStoryWorkflowService:
                     "message": "Narration generation skipped by request",
                 }
             await self._record_completed_step(workflow, step, step_input, output)
+            logger.info(
+                "[CUSTOM_WORKFLOW_STEP] workflow=%s step=%s action=skipped",
+                workflow.id,
+                step.value,
+            )
             return
 
         if step == CustomStoryWorkflowStep.STORY_PLAN_GENERATION:
-            story_plan = await runner._step_generate_plan(workflow, flags)
-            workflow.story_plan_json = story_plan
-            workflow.story_plan_validated = False
-            await self._annotate_latest_step(workflow, step, step_input, story_plan)
-            return
+            try:
+                story_plan = await runner._step_generate_plan(workflow, flags)
+                workflow.story_plan_json = story_plan
+                workflow.story_plan_validated = False
+                await self._annotate_latest_step(workflow, step, step_input, story_plan)
+                return
+            except Exception as exc:
+                self._log_step_failed(workflow, step, exc)
+                raise
 
         if step == CustomStoryWorkflowStep.STORY_PLAN_VALIDATION:
             if flags.skip_validation:
                 workflow.story_plan_validated = True
                 await self._record_completed_step(workflow, step, step_input, workflow.story_plan_json or {})
                 return
-            story_plan = await runner._step_validate_plan(workflow, workflow.story_plan_json or {}, flags)
-            workflow.story_plan_json = story_plan
-            workflow.story_plan_validated = True
-            await self._annotate_latest_step(workflow, step, step_input, story_plan)
-            return
+            try:
+                story_plan = await runner._step_validate_plan(workflow, workflow.story_plan_json or {}, flags)
+                workflow.story_plan_json = story_plan
+                workflow.story_plan_validated = True
+                await self._annotate_latest_step(workflow, step, step_input, story_plan)
+                return
+            except Exception as exc:
+                self._log_step_failed(workflow, step, exc)
+                raise
 
         if step == CustomStoryWorkflowStep.STORY_GENERATION:
-            story_json = await runner._step_generate_story(workflow, workflow.story_plan_json or {}, flags)
-            runner._apply_story_metadata(workflow, workflow.story_plan_json or {}, story_json)
-            workflow.story_json = story_json
-            await self._annotate_latest_step(workflow, step, step_input, story_json)
-            return
+            try:
+                story_json = await runner._step_generate_story(workflow, workflow.story_plan_json or {}, flags)
+                runner._apply_story_metadata(workflow, workflow.story_plan_json or {}, story_json)
+                workflow.story_json = story_json
+                await self._annotate_latest_step(workflow, step, step_input, story_json)
+                return
+            except Exception as exc:
+                self._log_step_failed(workflow, step, exc)
+                raise
 
         if step == CustomStoryWorkflowStep.IMAGE_PLAN_GENERATION:
-            image_plan = await runner._step_generate_image_plan(
-                workflow,
-                workflow.story_plan_json or {},
-                workflow.story_json or {},
-                flags,
-            )
-            workflow.image_plan_json = image_plan
-            workflow.image_plan_validated = False
-            await self._annotate_latest_step(workflow, step, step_input, image_plan)
-            return
+            try:
+                image_plan = await runner._step_generate_image_plan(
+                    workflow,
+                    workflow.story_plan_json or {},
+                    workflow.story_json or {},
+                    flags,
+                )
+                workflow.image_plan_json = image_plan
+                workflow.image_plan_validated = False
+                await self._annotate_latest_step(workflow, step, step_input, image_plan)
+                return
+            except Exception as exc:
+                self._log_step_failed(workflow, step, exc)
+                raise
 
         if step == CustomStoryWorkflowStep.IMAGE_PLAN_VALIDATION:
             if flags.skip_validation:
                 workflow.image_plan_validated = True
                 await self._record_completed_step(workflow, step, step_input, workflow.image_plan_json or {})
                 return
-            image_plan = await runner._step_validate_image_plan(
-                workflow,
-                workflow.image_plan_json or {},
-                workflow.story_json or {},
-                flags,
-            )
-            workflow.image_plan_json = image_plan
-            workflow.image_plan_validated = True
-            await self._annotate_latest_step(workflow, step, step_input, image_plan)
-            return
+            try:
+                image_plan = await runner._step_validate_image_plan(
+                    workflow,
+                    workflow.image_plan_json or {},
+                    workflow.story_json or {},
+                    flags,
+                )
+                workflow.image_plan_json = image_plan
+                workflow.image_plan_validated = True
+                await self._annotate_latest_step(workflow, step, step_input, image_plan)
+                return
+            except Exception as exc:
+                self._log_step_failed(workflow, step, exc)
+                raise
 
         if step == CustomStoryWorkflowStep.IMAGE_GENERATION:
             if flags.skip_image_generation:
@@ -677,6 +723,21 @@ class CustomStoryWorkflowService:
         step.output_json = output
         step.error_message = None
         await self.steps.update(step)
+        logger.info(
+            "[CUSTOM_WORKFLOW_STEP] workflow=%s step=%s action=completed output=%s",
+            workflow.id,
+            step_name.value,
+            self._step_output_summary(output),
+        )
+
+    @staticmethod
+    def _log_step_failed(workflow: CustomStoryWorkflow, step: CustomStoryWorkflowStep, exc: Exception) -> None:
+        logger.error(
+            "[CUSTOM_WORKFLOW_STEP] workflow=%s step=%s action=failed error=%s",
+            workflow.id,
+            step.value,
+            str(exc),
+        )
 
     async def _annotate_latest_step(
         self,
@@ -693,6 +754,12 @@ class CustomStoryWorkflowService:
         if output is not None and step.output_json is None:
             step.output_json = output
         await self.steps.update(step)
+        logger.info(
+            "[CUSTOM_WORKFLOW_STEP] workflow=%s step=%s action=completed output=%s",
+            workflow.id,
+            step_name.value,
+            self._step_output_summary(output),
+        )
 
     async def reconcile_batch_jobs(self, *, limit: int = 50) -> dict[str, Any]:
         jobs = await self.batch_jobs.list_reconcilable(limit=limit)
@@ -943,6 +1010,14 @@ class CustomStoryWorkflowService:
         }
         step.error_message = None
         await self.steps.update(step)
+        logger.info(
+            "[CUSTOM_WORKFLOW_STEP] workflow=%s step=%s action=submitted_batch job_id=%s provider_job=%s status=%s",
+            workflow.id,
+            step_name.value,
+            job.id,
+            job.provider_job_name,
+            self._status_value(job.status),
+        )
 
     def _batch_reconcile_result(
         self,
@@ -1146,6 +1221,34 @@ class CustomStoryWorkflowService:
             "image_page_count": sum(1 for page in pages if isinstance(page, dict) and page.get("image_url")),
             "audio_page_count": sum(1 for page in pages if isinstance(page, dict) and page.get("audio_url")),
         }
+
+    @staticmethod
+    def _step_output_summary(output: dict[str, Any] | None) -> dict[str, Any]:
+        if not isinstance(output, dict):
+            return {}
+        if output.get("skipped"):
+            return {"skipped": True, "message": output.get("message")}
+        if output.get("deferred"):
+            return {
+                "deferred": True,
+                "mode": output.get("mode"),
+                "batch_job_id": output.get("batch_job_id"),
+                "status": output.get("status"),
+            }
+        pages = output.get("pages")
+        visual_bible = output.get("visual_bible")
+        summary: dict[str, Any] = {
+            "keys": sorted(str(key) for key in output.keys() if not str(key).startswith("_")),
+        }
+        if isinstance(pages, list):
+            summary["page_count"] = len(pages)
+        if isinstance(visual_bible, dict):
+            summary["has_visual_bible"] = True
+        if output.get("title"):
+            summary["title"] = output.get("title")
+        if output.get("story_id"):
+            summary["story_id"] = output.get("story_id")
+        return summary
 
     @staticmethod
     def _input_request_for_validation(workflow: CustomStoryWorkflow) -> dict[str, Any]:

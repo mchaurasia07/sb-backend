@@ -793,12 +793,36 @@ class StoryService:
 
         try:
             # Call LLM
-            result = await self.ai_provider.generate_text(
-                prompt,
-                max_tokens=self.PLAN_MAX_TOKENS,
-                temperature=0.4,
-                response_format={"type": "json_object"},
-            )
+            try:
+                result = await self.ai_provider.generate_text(
+                    prompt,
+                    max_tokens=self.PLAN_MAX_TOKENS,
+                    temperature=0.4,
+                    response_format={"type": "json_object"},
+                )
+            except AppException as exc:
+                if not self._is_google_prompt_safety_block(exc):
+                    raise
+                fallback_prompt = self._story_plan_fallback_prompt(
+                    story=story,
+                    child=child,
+                    source_inputs=source_inputs,
+                    pages=pages,
+                    character_context=character_context,
+                )
+                step.prompt = fallback_prompt
+                await self.story_steps.update(step)
+                await self.session.commit()
+                logger.warning(
+                    "Story %s: Google blocked story plan prompt; retrying once with compact safe planner prompt.",
+                    story.id,
+                )
+                result = await self.ai_provider.generate_text(
+                    fallback_prompt,
+                    max_tokens=self.PLAN_MAX_TOKENS,
+                    temperature=0.35,
+                    response_format={"type": "json_object"},
+                )
 
             # Log raw response for debugging
             logger.info(f"Story {story.id}: Raw LLM response (first 2000 chars):\n{result.text[:2000]}")
@@ -1643,6 +1667,7 @@ class StoryService:
     ) -> str:
         """Render the story planner template for first attempt and retry."""
         character_profile = StoryService._build_story_planner_character_profile(child, character_context)
+        safe_source_inputs = StoryService._story_plan_prompt_source_inputs(source_inputs)
         first_name = child.first_name or "Child"
         gender = child.gender or "neutral"
         if not character_context.get("use_child_character", True):
@@ -1654,10 +1679,12 @@ class StoryService:
                 "age_group": age_group_label(story.age_group),
                 "first_name": first_name,
                 "gender": gender,
-                "theme": _safe_prompt_value(theme),
+                "theme": _safe_prompt_value(
+                    StoryService._story_plan_safe_user_text(theme or safe_source_inputs["category"])
+                ),
                 "hobby": hobby,
-                "learning_goal": _safe_prompt_value(source_inputs["learning_goal"]),
-                "story_context": _safe_prompt_value(source_inputs["context"], "none"),
+                "learning_goal": _safe_prompt_value(safe_source_inputs["learning_goal"]),
+                "story_context": _safe_prompt_value(safe_source_inputs["context"], "none"),
                 "moral": "kindness and courage",
                 "pages": pages,
                 "custom_character": character_context.get("use_child_character", True),
@@ -1677,6 +1704,130 @@ class StoryService:
         )
 
     @staticmethod
+    def _story_plan_prompt_source_inputs(source_inputs: dict[str, str]) -> dict[str, str]:
+        """Return provider-facing story inputs rewritten into neutral child-safe wording."""
+        return {
+            "category": StoryService._story_plan_safe_user_text(source_inputs.get("category") or "adventure"),
+            "learning_goal": StoryService._story_plan_safe_user_text(
+                source_inputs.get("learning_goal") or "personal growth"
+            ),
+            "context": StoryService._story_plan_safe_user_text(source_inputs.get("context") or ""),
+        }
+
+    @staticmethod
+    def _story_plan_safe_user_text(text: str) -> str:
+        safe = (text or "").strip()
+        replacements = (
+            (
+                "if someone says no she should respect it",
+                "practice listening when someone asks for space and accepting another person's choice kindly",
+            ),
+            (
+                "if someone says no he should respect it",
+                "practice listening when someone asks for space and accepting another person's choice kindly",
+            ),
+            (
+                "if someone says no they should respect it",
+                "practice listening when someone asks for space and accepting another person's choice kindly",
+            ),
+            ("someone says no", "someone asks for space"),
+            ("says no", "asks for space"),
+            ("say no", "ask for space"),
+            ("respect it", "accept another person's choice kindly"),
+            (
+                "personal hygiene",
+                "daily self-care routines such as brushing teeth and washing hands",
+            ),
+            ("hygiene", "self-care routines"),
+        )
+        for risky, neutral in replacements:
+            safe = StoryService._replace_case_insensitive(safe, risky, neutral)
+        return StoryService._soften_child_safety_language(safe)
+
+    @staticmethod
+    def _story_planner_age_visual_guidance(character_context: dict[str, str]) -> str:
+        label = character_context.get("child_age_label") or "the reader age group"
+        return f"age-appropriate look for {label}; keep a friendly childlike picture-book appearance"
+
+    @staticmethod
+    def _story_plan_fallback_prompt(
+        *,
+        story: Story,
+        child: Any,
+        source_inputs: dict[str, str],
+        pages: int,
+        character_context: dict[str, str],
+    ) -> str:
+        safe_inputs = StoryService._story_plan_prompt_source_inputs(source_inputs)
+        character_profile = StoryService._build_story_planner_character_profile(child, character_context)
+        payload = {
+            "child_name": child.first_name or "Child",
+            "age_group": age_group_label(story.age_group),
+            "gender": child.gender or "neutral",
+            "page_count": pages,
+            "theme": safe_inputs["category"],
+            "learning_goal": safe_inputs["learning_goal"],
+            "story_context": safe_inputs["context"] or "none",
+            "cast_mode": character_context.get("cast_mode", StoryService.CAST_MODE_CHILD_HERO),
+            "character_profile": character_profile,
+        }
+        schema = {
+            "title": "",
+            "summary": "",
+            "theme": "",
+            "learning_goal": "",
+            "moral_theme": "",
+            "setting": "",
+            "tone": "",
+            "central_problem": "",
+            "hero_want": "",
+            "emotional_need": "",
+            "stakes": "",
+            "climax_choice": "",
+            "resolution_payoff": "",
+            "moral_explanation": "",
+            "content_anchors": {
+                "required_names": [],
+                "required_facts": [],
+                "age_safe_explanations": [],
+            },
+            "visual_bible": {
+                "style": "",
+                "hero": {"name": "", "appearance": "", "outfit": "", "signature_item": ""},
+                "companion": {"name": "", "appearance": ""},
+                "father": {"appearance": ""},
+                "mother": {"appearance": ""},
+                "recurring_characters": [{"name": "", "role": "", "appearance": ""}],
+            },
+            "pages": [
+                {
+                    "page_number": 1,
+                    "story_role": "",
+                    "scene_description": "",
+                    "characters_present": [],
+                    "child_action": "",
+                    "emotional_beat": "",
+                    "learning_goal_integration": "",
+                    "growth_step": "",
+                    "domain_detail": "",
+                    "page_turn_hook": "",
+                    "continuity_requirements": [],
+                }
+            ],
+        }
+        return (
+            "You are a professional children's picture-book planning engine.\n"
+            "The parent request has been rewritten into neutral child-safe wording. Create a warm, gentle, "
+            "age-appropriate story blueprint with the exact requested page count. Keep the same story quality: "
+            "clear hero want, gentle central problem, try-fail-try-better growth, meaningful climax choice, "
+            "emotional payoff, concrete theme details, and stable visual bible. Use family-friendly language. "
+            "Keep all conflict calm, practical, hopeful, and suitable for a children's picture book.\n\n"
+            "Return STRICT VALID JSON ONLY in this schema shape:\n"
+            f"{_compact_json(schema)}\n\n"
+            f"SAFE STORY REQUEST JSON:\n{_compact_json(payload)}"
+        )
+
+    @staticmethod
     def _build_story_planner_character_profile(child: Any, character_context: dict[str, str]) -> dict[str, Any]:
         """Build the character-profile input expected by the new planner prompt."""
         if not character_context.get("use_child_character", True):
@@ -1685,7 +1836,7 @@ class StoryService:
                 "hero_source": "AI must invent the story hero and all recurring characters from the story inputs.",
                 "profile_summary": character_context["character_description"],
                 "child_age_label": character_context["child_age_label"],
-                "age_visual_guidance": character_context["child_age_visual_guidance"],
+                "age_visual_guidance": StoryService._story_planner_age_visual_guidance(character_context),
                 "generated_character": None,
             }
         metadata = child.character_metadata if isinstance(child.character_metadata, dict) else {}
@@ -1697,7 +1848,7 @@ class StoryService:
             "name": child.first_name or "Child",
             "profile_summary": StoryService._story_planner_profile_summary(child, metadata, character_context),
             "child_age_label": character_context["child_age_label"],
-            "age_visual_guidance": character_context["child_age_visual_guidance"],
+            "age_visual_guidance": StoryService._story_planner_age_visual_guidance(character_context),
             "generated_character": {
                 "identity_profile": identity_profile,
                 "style": metadata.get("style") or "premium semi-realistic 3D storybook",
@@ -1712,7 +1863,11 @@ class StoryService:
     ) -> str:
         identity_profile = StoryService._story_planner_identity_profile(metadata)
         if not identity_profile:
-            return str(metadata.get("description") or character_context["character_description"] or "").strip()
+            description = str(metadata.get("description") or character_context["character_description"] or "").strip()
+            if description:
+                return StoryService._story_planner_safe_profile_text(description)
+            name = child.first_name or "Child"
+            return f"{name} is {character_context['child_age_label']}."
 
         parts = [
             f"{child.first_name or 'Child'} is {character_context['child_age_label']}.",
@@ -1727,12 +1882,53 @@ class StoryService:
         identity_profile = metadata.get("identity_profile")
         if not isinstance(identity_profile, dict):
             return {}
-        omitted_for_story_planning = {"mouth_description"}
-        return {
-            key: value
-            for key, value in identity_profile.items()
-            if key not in omitted_for_story_planning
-        }
+        allowed_for_story_planning = (
+            "face_shape",
+            "skin_tone",
+            "eye_color",
+            "eye_shape",
+            "hair_color",
+            "hair_style",
+            "hair_length",
+            "hair_texture",
+            "hair_direction",
+            "age_appearance",
+            "distinctive_features",
+        )
+        result: dict[str, Any] = {}
+        for key in allowed_for_story_planning:
+            value = identity_profile.get(key)
+            if key == "distinctive_features" and isinstance(value, list):
+                clean_features = [
+                    item
+                    for item in value
+                    if isinstance(item, str)
+                    and item.strip()
+                    and not re.search(r"\b(mouth|lip|tooth|teeth|body)\b", item, flags=re.IGNORECASE)
+                ]
+                if clean_features:
+                    result[key] = clean_features
+            elif isinstance(value, str) and value.strip():
+                result[key] = value.strip()
+        return result
+
+    @staticmethod
+    def _story_planner_safe_profile_text(text: str) -> str:
+        safe = text
+        replacements = (
+            ("closed-mouth", "gentle"),
+            ("mouth shape", "smile shape"),
+            ("mouth", "smile"),
+            ("lips", "smile details"),
+            ("lip", "smile detail"),
+            ("tooth gap", "bright smile"),
+            ("teeth", "smile"),
+            ("body proportions", "age-appropriate proportions"),
+            ("body", "appearance"),
+        )
+        for risky, neutral in replacements:
+            safe = StoryService._replace_case_insensitive(safe, risky, neutral)
+        return safe
 
     @staticmethod
     def _format_prompt_character_identity_lock(character_context: dict[str, str]) -> str:

@@ -1,9 +1,11 @@
 from types import SimpleNamespace
+import json
 
 import pytest
 
 from app.core.exceptions import AppException
 from app.entity.story import AgeGroup
+from app.service.ai.base import TextGenerationResult
 from app.service.story_narration_profile import build_page_narration
 from app.service.story_service import StoryService, _compact_json, _normalize_story_output
 from app.utils.prompt_loader import load_prompt
@@ -185,6 +187,178 @@ def test_story_plan_template_renders_all_current_placeholders():
     assert "{pages}" not in prompt
     assert "Mira" in prompt
     assert '"profile_summary": "A curious child with bright eyes."' in prompt
+
+
+def test_story_plan_prompt_uses_safe_intent_and_omits_unrelated_trigger_terms():
+    template = load_prompt("prompts/story/story_plan_prompt.txt")
+    story = SimpleNamespace(age_group=AgeGroup.EARLY_READER)
+    child = SimpleNamespace(
+        first_name="Amayra",
+        age=7,
+        gender="female",
+        character_image_url="https://example.test/character.png",
+        character_metadata={
+            "style": "storybook",
+            "identity_profile": {
+                "face_shape": "round",
+                "skin_tone": "warm medium",
+                "eye_color": "dark brown",
+                "eye_shape": "almond",
+                "mouth_shape": "medium width lips",
+                "mouth_description": "closed-mouth smile",
+                "smile_type": "closed-mouth smile",
+                "hair_color": "dark brown",
+                "hair_style": "two pigtails",
+                "hair_length": "medium",
+                "distinctive_features": ["bright eyes", "small tooth gap"],
+            },
+        },
+    )
+
+    prompt = StoryService._render_story_plan_prompt(
+        template,
+        story=story,
+        child=child,
+        source_inputs={
+            "learning_goal": "Kindness and personal hygiene",
+            "context": "Story to teach her kindness with people and if someone says no she should respect it",
+        },
+        theme="Family",
+        hobby="reading",
+        pages=8,
+        character_context={
+            "use_child_character": True,
+            "cast_mode": StoryService.CAST_MODE_CHILD_HERO,
+            "character_description": "Detailed identity is reserved for image generation.",
+            "child_age_label": "7 years old",
+            "child_age_visual_guidance": "older child proportions with natural child build",
+        },
+    )
+    lowered = prompt.lower()
+
+    assert "someone says no" not in lowered
+    assert "respect it" not in lowered
+    assert "personal hygiene" not in lowered
+    assert "asks for space" in lowered
+    assert "daily self-care routines such as brushing teeth and washing hands" in lowered
+    assert "pool" not in lowered
+    assert "swim" not in lowered
+    assert "upper body" not in lowered
+    assert "mouth" not in lowered
+    assert "lip" not in lowered
+    assert "tooth" not in lowered
+    assert '"central_problem": ""' in prompt
+    assert '"visual_bible": {' in prompt
+
+
+@pytest.mark.asyncio
+async def test_story_plan_generation_retries_with_compact_prompt_on_google_safety_block():
+    class _FakeChildren:
+        async def get_for_user(self, user_id, child_id):
+            _ = user_id, child_id
+            return SimpleNamespace(
+                first_name="Amayra",
+                age=7,
+                gender="female",
+                character_metadata={
+                    "identity_profile": {
+                        "face_shape": "round",
+                        "skin_tone": "warm medium",
+                        "eye_color": "dark brown",
+                        "eye_shape": "almond",
+                        "mouth_shape": "medium width lips",
+                        "hair_color": "dark brown",
+                        "hair_style": "two pigtails",
+                    }
+                },
+            )
+
+    class _FakeSteps:
+        def __init__(self):
+            self.created = []
+
+        async def create(self, story_id, step_name):
+            step = SimpleNamespace(
+                story_id=story_id,
+                step_name=step_name,
+                prompt=None,
+                status=None,
+                started_at=None,
+                completed_at=None,
+                retry_count=0,
+                error_message=None,
+                response=None,
+            )
+            self.created.append(step)
+            return step
+
+        async def update(self, step):
+            return step
+
+    class _FakeSession:
+        def __init__(self):
+            self.commits = 0
+
+        async def commit(self):
+            self.commits += 1
+
+    class _FakeProvider:
+        def __init__(self):
+            self.prompts = []
+
+        async def generate_text(self, prompt, **kwargs):
+            _ = kwargs
+            self.prompts.append(prompt)
+            if len(self.prompts) == 1:
+                raise AppException(
+                    "Empty response from Google API prompt_feedback={'block_reason': "
+                    "<BlockedReason.PROHIBITED_CONTENT: 'PROHIBITED_CONTENT'>}",
+                    code="EMPTY_RESPONSE",
+                )
+            plan = {
+                "title": "Amayra's Kind Choice",
+                "summary": "Amayra practices listening kindly.",
+                "pages": [{"page_number": 1}],
+                "visual_bible": {"hero": {"name": "Amayra", "appearance": "friendly child", "outfit": "blue dress"}},
+            }
+            return TextGenerationResult(
+                text=json.dumps(plan),
+                prompt_used=prompt,
+                model="fake-model",
+                metadata={"provider": "fake", "finish_reason": "STOP"},
+            )
+
+    service = StoryService.__new__(StoryService)
+    service.children = _FakeChildren()
+    service.story_steps = _FakeSteps()
+    service.session = _FakeSession()
+    service._ai_provider = _FakeProvider()
+    story = SimpleNamespace(
+        id="story-1",
+        user_id="user-1",
+        child_id="child-1",
+        age_group=AgeGroup.EARLY_READER,
+        category="Family",
+        learning_goal="Kindness",
+        context="Story to teach her kindness with people and if someone says no she should respect it",
+        event_description=None,
+        input_request={"use_child_character": True},
+    )
+
+    plan = await service._step_generate_plan(story, SimpleNamespace())
+
+    assert len(service._ai_provider.prompts) == 2
+    assert "SAFE STORY REQUEST JSON" in service._ai_provider.prompts[1]
+    assert "someone says no" not in service._ai_provider.prompts[1].lower()
+    assert plan["source_inputs"] == {
+        "category": "Family",
+        "learning_goal": "Kindness",
+        "context": "Story to teach her kindness with people and if someone says no she should respect it",
+    }
+    step = service.story_steps.created[0]
+    assert step.status.value == "COMPLETED"
+    assert step.error_message is None
+    assert step.prompt == service._ai_provider.prompts[1]
 
 
 def test_character_context_uses_identity_profile_not_legacy_analysis_text():

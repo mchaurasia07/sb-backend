@@ -209,7 +209,7 @@ Space adventure:
 Earth, Moon, Mars, Saturn, rocket, stars, orbit, red planet, rings
 
 Ocean story:
-tide pools, coral reef, shells, sea turtles, waves, floating, tide
+rocky tide shore, coral reef, shells, sea turtles, waves, floating, tide
 
 Garden story:
 seeds, soil, watering can, sunlight, sprouts, butterflies, tomatoes
@@ -339,12 +339,9 @@ green forest adventurer outfit
 Beach story:
 bright summer outfit
 
-Water park, pool, beach, rain, or splash-play story:
-modest child-safe water-play outfit with a rash guard shirt that covers the
-shoulders and upper body, knee-length swim shorts or leggings, and water
-shoes. Caregivers should wear modest family-friendly cover-up clothing such as
-a rash guard or t-shirt with knee-length shorts or leggings. Use modest covered
-water-play clothing for every visible person.
+For any setting, use modest, family-friendly clothing appropriate to the story
+activity, weather, culture, and location. Keep every visible person dressed in a
+children's picture-book appropriate way.
 
 Store this outfit inside visual_bible.hero.outfit.
 
