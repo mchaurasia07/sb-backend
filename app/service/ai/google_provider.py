@@ -1,6 +1,7 @@
 import logging
 import mimetypes
 import json
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -154,6 +155,65 @@ class GoogleProvider(AIProvider):
                 pending_text_parts.clear()
 
         return images, "\n".join(text_parts) or None
+
+    @staticmethod
+    def _is_transient_google_error(error: Exception) -> bool:
+        text = str(error).upper()
+        transient_markers = (
+            "503",
+            "500",
+            "502",
+            "504",
+            "429",
+            "UNAVAILABLE",
+            "RESOURCE_EXHAUSTED",
+            "DEADLINE_EXCEEDED",
+            "INTERNAL",
+            "SERVICE IS CURRENTLY UNAVAILABLE",
+        )
+        return any(marker in text for marker in transient_markers)
+
+    async def _generate_text_content_with_transient_retry(
+        self,
+        prompt: str,
+        *,
+        response_mime_type: str | None,
+        safety_settings: Any,
+        max_output_tokens: int,
+        temperature: float,
+        transient_retries: int,
+        retry_base_delay_seconds: float,
+    ) -> types.GenerateContentResponse:
+        max_attempts = max(1, transient_retries + 1)
+        last_error: Exception | None = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return await self.client.aio.models.generate_content(
+                    model=self.text_model,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        max_output_tokens=max_output_tokens,
+                        temperature=temperature,
+                        response_mime_type=response_mime_type,
+                        safety_settings=safety_settings,
+                    ),
+                )
+            except Exception as exc:
+                last_error = exc
+                if attempt >= max_attempts or not self._is_transient_google_error(exc):
+                    raise
+                delay = max(0.0, retry_base_delay_seconds) * (2 ** (attempt - 1))
+                logger.warning(
+                    "Google text generation transient error; retrying attempt=%s/%s delay=%ss error=%s",
+                    attempt + 1,
+                    max_attempts,
+                    delay,
+                    exc,
+                )
+                if delay:
+                    await asyncio.sleep(delay)
+
+        raise last_error or AppException("Google text generation failed", code="GOOGLE_ERROR")
 
     async def create_character_from_photo(
         self,
@@ -366,19 +426,25 @@ Format your response as a clear visual identity list."""
             response_format = kwargs.get("response_format")
             response_mime_type = "application/json" if response_format == {"type": "json_object"} else None
             max_attempts = int(kwargs.get("empty_response_retries", 2)) + 1
+            transient_retries = int(kwargs.get("transient_error_retries", settings.GOOGLE_TEXT_TRANSIENT_RETRIES))
+            retry_base_delay_seconds = float(
+                kwargs.get(
+                    "transient_error_retry_base_delay_seconds",
+                    settings.GOOGLE_TEXT_TRANSIENT_RETRY_BASE_DELAY_SECONDS,
+                )
+            )
             last_empty_message = "Empty response from Google API"
 
             for attempt in range(1, max_attempts + 1):
                 safety_settings = kwargs.get("safety_settings")
-                response = await self.client.aio.models.generate_content(
-                    model=self.text_model,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        max_output_tokens=kwargs.get("max_tokens", 36000),
-                        temperature=kwargs.get("temperature", 0.7),
-                        response_mime_type=response_mime_type,
-                        safety_settings=safety_settings,
-                    ),
+                response = await self._generate_text_content_with_transient_retry(
+                    prompt,
+                    response_mime_type=response_mime_type,
+                    safety_settings=safety_settings,
+                    max_output_tokens=kwargs.get("max_tokens", 36000),
+                    temperature=kwargs.get("temperature", 0.7),
+                    transient_retries=transient_retries,
+                    retry_base_delay_seconds=retry_base_delay_seconds,
                 )
 
                 debug = self._text_response_debug(response)
@@ -479,10 +545,80 @@ Format your response as a clear visual identity list."""
             logger.error(f"Google character description failed: {e}")
             raise AppException(f"Character description failed: {str(e)}", code="GOOGLE_ERROR")
 
+    @staticmethod
+    def _story_reference_inputs(
+        reference_image_base64: str | None,
+        kwargs: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Normalize one legacy reference or many named references for Gemini."""
+        raw_references = kwargs.get("reference_images_base64")
+        references: list[dict[str, Any]] = []
+        if isinstance(raw_references, list):
+            for index, item in enumerate(raw_references, start=1):
+                if isinstance(item, str):
+                    references.append(
+                        {
+                            "image_base64": item,
+                            "character_id": f"reference_{index}",
+                            "name": f"Reference {index}",
+                            "role": "character_reference",
+                        }
+                    )
+                elif isinstance(item, dict):
+                    image_base64 = item.get("image_base64") or item.get("base64") or item.get("data")
+                    if image_base64:
+                        references.append(
+                            {
+                                "image_base64": image_base64,
+                                "character_id": item.get("character_id") or f"reference_{index}",
+                                "name": item.get("name") or item.get("character_name") or f"Reference {index}",
+                                "role": item.get("role") or "character_reference",
+                                "image_url": item.get("image_url") or item.get("reference_image_url"),
+                            }
+                        )
+        if not references and reference_image_base64:
+            references.append(
+                {
+                    "image_base64": reference_image_base64,
+                    "character_id": "hero_child",
+                    "name": "Hero child",
+                    "role": "master_character_reference_portrait",
+                }
+            )
+        return references
+
+    @staticmethod
+    def _reference_manifest_instruction(references: list[dict[str, Any]]) -> str:
+        if len(references) <= 1:
+            return (
+                "\nThe only attached image after this prompt is the generated Master Character Reference Portrait "
+                "from character_image_url. It is the PRIMARY visual identity reference for the hero child. "
+                "No original child avatar photo is attached. Preserve the master character's face, facial "
+                "proportions, hairstyle, hairline, skin tone, and age appearance. "
+            )
+
+        lines = [
+            "\nAttached images after this prompt are named character identity references in this exact order.",
+            "Use each attached image only for the matching character's face/head identity and stable visual design.",
+            "Do not copy reference-image clothing, crop, pose, white background, or studio framing unless the scene prompt asks for it.",
+            "Reference order:",
+        ]
+        for index, reference in enumerate(references, start=1):
+            character_id = str(reference.get("character_id") or f"reference_{index}")
+            name = str(reference.get("name") or character_id)
+            role = str(reference.get("role") or "character_reference")
+            lines.append(f"{index}. character_id={character_id}; name={name}; role={role}")
+        lines.append(
+            "For the hero child, preserve face, facial proportions, eye shape, natural eye size, hairstyle, "
+            "hairline, skin tone, and age appearance. For side characters, preserve the attached reference "
+            "character's face/head shape, hair/fur/body pattern, colors, outfit/accessories, scale, and distinctive features."
+        )
+        return "\n".join(lines) + "\n"
+
     async def create_story_image(
         self,
         prompt: str,
-        reference_image_base64: str,
+        reference_image_base64: str | None = None,
         **kwargs: Any,
     ) -> ImageGenerationResult:
         """Generate a story image using a prompt and base64 character reference image."""
@@ -500,8 +636,15 @@ Format your response as a clear visual identity list."""
                 metadata={"mock_mode": True, "placeholder": True, "provider": "google"},
             )
 
+        reference_inputs = self._story_reference_inputs(reference_image_base64, kwargs)
+        if not reference_inputs:
+            raise AppException("At least one character reference image is required", code="MISSING_REFERENCE_IMAGE")
+
+        parsed_references = []
         try:
-            reference_image = parse_base64_image_data(reference_image_base64)
+            for reference in reference_inputs:
+                parsed = parse_base64_image_data(str(reference.get("image_base64") or ""))
+                parsed_references.append((reference, parsed))
         except ValueError as e:
             raise AppException(str(e), code="INVALID_REFERENCE_IMAGE")
 
@@ -517,17 +660,14 @@ Format your response as a clear visual identity list."""
             )
 
         consistency_instruction = (
-            "\nThe only attached image after this prompt is the generated Master Character Reference Portrait "
-            "from character_image_url. It is the PRIMARY and ONLY visual identity reference for story image "
-            "generation. No original child avatar photo is attached. Preserve the master character's face, "
-            "facial proportions, hairstyle, hairline, skin tone, and age appearance. Do not invent a new "
-            "face, hairstyle, or story-theme costume. Use the Character Identity Lock inside the scene prompt "
-            "as the written identity and age lock. "
+            self._reference_manifest_instruction(reference_inputs)
+            + "Do not invent a new face, hairstyle, character variant, or story-theme costume. Use the Character "
+            "Identity Lock inside the scene prompt as the written identity and age lock. "
             "Use the Visual Bible and scene prompt for the single locked story outfit, shoes, accessories, "
             "body scale, rendering style, and environment. Do not copy portrait clothing, portrait crop, "
             "white studio background, or head-and-shoulders framing. If the scene prompt conflicts with "
-            "the master character face, hairstyle, or age appearance, keep the master facial identity and "
-            "only change the action/environment.\n"
+            "an attached character identity reference, keep the attached character identity and only change "
+            "the action, expression, clothing allowed by the page prompt, or environment.\n"
         )
 
         story_prompt = (
@@ -547,12 +687,13 @@ Format your response as a clear visual identity list."""
 
         try:
             contents: list[Any] = [story_prompt]
-            contents.append(
-                types.Part.from_bytes(
-                    data=reference_image.image_bytes,
-                    mime_type=reference_image.mime_type,
+            for _reference, parsed_reference in parsed_references:
+                contents.append(
+                    types.Part.from_bytes(
+                        data=parsed_reference.image_bytes,
+                        mime_type=parsed_reference.mime_type,
+                    )
                 )
-            )
 
             try:
                 response = await self.client.aio.models.generate_content(
@@ -590,12 +731,13 @@ Format your response as a clear visual identity list."""
                     f"{prompt}"
                 )
                 retry_contents: list[Any] = [retry_prompt]
-                retry_contents.append(
-                    types.Part.from_bytes(
-                        data=reference_image.image_bytes,
-                        mime_type=reference_image.mime_type,
+                for _reference, parsed_reference in parsed_references:
+                    retry_contents.append(
+                        types.Part.from_bytes(
+                            data=parsed_reference.image_bytes,
+                            mime_type=parsed_reference.mime_type,
+                        )
                     )
-                )
 
                 try:
                     response = await self.client.aio.models.generate_content(
@@ -626,12 +768,18 @@ Format your response as a clear visual identity list."""
                 prompt_used=story_prompt,
                 model=model,
                 metadata={
-                        "provider": "google",
-                        "mode": "story_reference_image",
+                    "provider": "google",
+                    "mode": "story_reference_image",
                     "aspect_ratio": kwargs.get("aspect_ratio", "1:1"),
-                    "reference_mime_type": reference_image.mime_type,
-                    "reference_role": "master_character_reference_portrait",
-                    "single_reference_used": True,
+                    "reference_mime_type": parsed_references[0][1].mime_type,
+                    "reference_role": parsed_references[0][0].get("role"),
+                    "reference_count": len(parsed_references),
+                    "reference_character_ids": [
+                        str(reference.get("character_id") or "")
+                        for reference, _parsed_reference in parsed_references
+                        if reference.get("character_id")
+                    ],
+                    "single_reference_used": len(parsed_references) == 1,
                     "image_response_text": response_text,
                     "usage": usage,
                 },

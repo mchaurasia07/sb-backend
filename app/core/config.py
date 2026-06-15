@@ -105,6 +105,8 @@ class Settings(BaseSettings):
     GOOGLE_TTS_MODEL: str
     GOOGLE_TTS_VOICE: str
     GOOGLE_TTS_SKIP_CALL: bool
+    GOOGLE_TEXT_TRANSIENT_RETRIES: int = 2
+    GOOGLE_TEXT_TRANSIENT_RETRY_BASE_DELAY_SECONDS: float = 2.0
 
     # Character Generation Settings
     CHARACTER_IMAGE_SIZE: str
@@ -132,6 +134,7 @@ class Settings(BaseSettings):
     STORY_BATCH_RECONCILE_SCHEDULER_ENABLED: bool = True
     STORY_BATCH_RECONCILE_RUN_MINUTE: int = 1
     STORY_BATCH_RECONCILE_LIMIT: int = 50
+    CUSTOM_STORY_EXECUTE_WORKFLOW_DEFAULT: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8-sig", extra="ignore")
 

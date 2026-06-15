@@ -38,14 +38,27 @@ The illustration must preserve the same child character, recurring characters, o
 
 {character_reference_mode}
 
-## Master Character Reference Image
+## Attached Character Reference Images
 
-If a reference image is attached, it is the PRIMARY source of truth for facial
-identity only:
+If one or more reference images are attached, they are the PRIMARY source of
+truth for the matching character IDs/names listed in Current Page Data:
 
 * face
+* facial proportions
+* eye shape and natural eye size
 * hairstyle
+* hairline
+* skin tone
 * age appearance
+* distinctive visible features
+
+For recurring side characters, attached references also lock:
+
+* face/head shape
+* hair/fur/feather/body pattern
+* outfit/accessory design
+* color palette
+* body scale and distinctive feature
 
 It may be a head-and-shoulders portrait. Do not treat the portrait clothing,
 portrait crop, or portrait background as story requirements.
@@ -83,7 +96,7 @@ camera angle, or environment.
 
 # PRIORITY ORDER
 
-1. Attached Master Character Reference Image when present
+1. Attached Character Reference Images when present
 2. Character Identity Lock / Visual Bible character locks
 3. Visual Bible for locked story outfit, body scale, recurring characters, and style
 4. Current Page Data for action, emotion, environment, and composition
@@ -101,7 +114,9 @@ Cast Mode Instructions:
 {cast_mode_instructions}
 
 When a Master Character Reference Image is attached, it is the visual source of
-truth for the hero child's face and age appearance.
+truth for the hero child's face and age appearance. When side-character
+reference images are attached, each is the visual source of truth for that
+side character's face/head identity and locked design.
 
 The hero child name is "{child_name}". When the page refers to the hero, treat
 that named child as the same hero defined in the Visual Bible.
@@ -118,6 +133,11 @@ Preserve exactly:
 * smile
 * skin tone
 * age appearance
+
+Expressions, pose, and camera angle may vary when Current Page Data requests
+it. The story outfit stays locked unless a specific child-safe coverage rule is
+needed for water play. The underlying face/head identity must stay the same. Do
+not make a new variant that merely resembles the reference.
 
 For CHILD_HERO, also preserve the attached reference portrait's face, hairstyle,
 hairline, and likeness. Do not preserve from the portrait:
@@ -158,6 +178,11 @@ model has been posed in each scene.
 # CHARACTER CONSISTENCY
 
 All recurring characters defined in the Visual Bible must remain visually identical across all illustrations.
+
+If Current Page Data includes reference_character_ids, draw only those matching
+character identities from the attached references and Visual Bible. Do not swap
+faces between characters. Do not use the hero child's face for a side character
+or a side character's face for the hero child.
 
 Preserve:
 
@@ -202,6 +227,40 @@ Do not introduce outfit changes.
 
 If an attached Master Character Reference Image shows different clothing, ignore
 the portrait clothing and keep the Visual Bible outfit.
+
+---
+
+# BASIC CLOTHING AND FOOTWEAR ETIQUETTE
+
+Apply basic scene etiquette before drawing footwear.
+
+When the scene is outdoors, in a jungle, park, street, schoolyard, garden,
+travel setting, or other footwear-appropriate place, the hero and recurring
+human characters should wear their exact locked footwear from the Visual Bible.
+
+When the scene is inside a temple, prayer room, sacred space, or a home area
+where shoes are removed:
+
+* do not draw outdoor shoes on feet
+* use bare feet or socks when appropriate
+* if footwear is visible, place the exact locked footwear neatly near the
+  entrance or beside the character
+
+When a character is on a bed, mattress, bedding, or sofa used for sleeping:
+
+* do not draw outdoor shoes on the bed
+* do not draw outdoor shoes on the character's feet
+* use bare feet or socks, with the exact locked footwear placed on the floor
+  nearby if footwear needs to be shown
+
+This is not an outfit change or character redesign. The locked footwear remains
+the character's footwear whenever footwear is appropriate. If footwear is
+removed, any visible shoes must still match the locked footwear design, color,
+and style.
+
+Use modest, respectful, family-friendly clothing for temples, prayer rooms, and
+sacred spaces. Keep the locked outfit unless the Visual Bible or Current Page
+Data explicitly requires a respectful covered variation.
 
 ---
 
@@ -367,8 +426,10 @@ Do not generate:
 * age changes
 * hairstyle changes
 * outfit changes
-* minimal water-play outfits
-* uncovered water-play outfits
+* outdoor shoes on beds, bedding, temples, prayer rooms, sacred spaces, or
+  no-shoe home areas
+* random replacement footwear when locked footwear is removed for etiquette
+* non-family-friendly water-play styling
 * detailed background people in water-play scenes
 * inconsistent facial features
 * oversized eyes
@@ -386,6 +447,9 @@ Do not generate:
 * misspelled cover title
 * extra cover words beyond the exact Story Title
 * black rectangle or label behind cover title
+
+For water-play scenes, use modest covered family-friendly outfits for every
+visible person.
 
 ---
 

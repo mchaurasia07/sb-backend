@@ -133,7 +133,7 @@ class AIProvider(ABC):
     async def create_story_image(
         self,
         prompt: str,
-        reference_image_base64: str,
+        reference_image_base64: str | None = None,
         **kwargs: Any,
     ) -> ImageGenerationResult:
         """Create a story image using a prompt and base64 master character reference image.
@@ -141,7 +141,9 @@ class AIProvider(ABC):
         Args:
             prompt: Story image generation prompt
             reference_image_base64: Base64-encoded generated Master Character Reference Portrait.
-                Can be raw base64 or a data URL.
+                Can be raw base64 or a data URL. Providers may also accept
+                `reference_images_base64` in kwargs for multiple named character
+                references.
             **kwargs: Provider-specific options such as size, quality,
                 aspect_ratio, or model
 

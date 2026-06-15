@@ -14,6 +14,26 @@ class ImagePlanValidator:
     """Semantic validator for the Image Planner JSON schema."""
 
     _VALID_VISUAL_IMPORTANCE = {"low", "medium", "high", "climax"}
+    _FOOTWEAR_TERMS = (
+        "shoe",
+        "shoes",
+        "sneaker",
+        "sneakers",
+        "sandal",
+        "sandals",
+        "boot",
+        "boots",
+        "slipper",
+        "slippers",
+        "sock",
+        "socks",
+        "footwear",
+        "barefoot",
+        "bare feet",
+        "water shoes",
+        "flip-flops",
+        "flip flops",
+    )
     _REQUIRED_PAGE_KEYS = {
         "page_number",
         "story_role",
@@ -107,10 +127,11 @@ class ImagePlanValidator:
         if not isinstance(hero, dict):
             errors.append("visual_bible.hero must be an object.")
         else:
-            for field in ("name", "appearance", "outfit", "signature_item"):
+            for field in ("name", "appearance", "outfit", "footwear", "signature_item"):
                 self._validate_required_string(hero, field, "visual_bible.hero", errors)
             self._validate_detailed_string(hero, "appearance", "visual_bible.hero", errors)
             self._validate_detailed_string(hero, "outfit", "visual_bible.hero", errors, min_words=4)
+            self._validate_footwear_lock(hero, "visual_bible.hero", errors)
 
         companion = visual_bible.get("companion")
         if companion is not None:
@@ -180,6 +201,13 @@ class ImagePlanValidator:
         words = [word for word in value.replace(",", " ").split() if word.strip()]
         if len(words) < min_words:
             errors.append(f"{label}.{field} must include enough locked visual detail for image consistency.")
+
+    def _validate_footwear_lock(self, obj: dict[str, Any], label: str, errors: list[str]) -> None:
+        footwear = obj.get("footwear")
+        outfit = obj.get("outfit")
+        combined = f"{footwear or ''} {outfit or ''}".lower()
+        if not any(term in combined for term in self._FOOTWEAR_TERMS):
+            errors.append(f"{label}.footwear must lock exact footwear, socks, or bare feet for image consistency.")
 
     def _validate_string_array(
         self,

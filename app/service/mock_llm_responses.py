@@ -42,6 +42,21 @@ def get_mock_story_plan(child_name: str = "Emma", age_group: str = DEFAULT_AGE_G
         "climax_choice": f"{child_name} chooses to carefully unblock the waterfall instead of giving up.",
         "resolution_payoff": f"The water flows again, the garden blooms, and {child_name} feels proud and brave.",
         "moral_explanation": "Brave, kind actions can grow when we keep trying step by step.",
+        "story_spine": {
+            "hero_want": f"{child_name} wants to help Luna bring the garden back to life.",
+            "blocking_problem": "The crystal spring has stopped flowing.",
+            "failed_attempt": f"{child_name} first tries a quick fix, but the water still does not move.",
+            "lesson_learned": "Careful, brave steps work better than giving up or rushing.",
+            "climax_choice": f"{child_name} chooses to carefully unblock the waterfall instead of giving up.",
+            "resolution": f"The water flows again, the garden blooms, and {child_name} feels proud and brave.",
+        },
+        "language_profile": {
+            "reading_stage": age_band,
+            "sentence_length": "5-12 words per sentence" if age_group != AGE_GROUP_6_9 else "8-18 words per sentence",
+            "vocabulary_level": "simple everyday vocabulary" if age_group != AGE_GROUP_6_9 else "richer age-appropriate vocabulary",
+            "repetition_level": "gentle repetition" if age_group == AGE_GROUP_0_3 else "light repetition",
+            "dialogue_complexity": "short simple dialogue" if age_group != AGE_GROUP_6_9 else "richer dialogue",
+        },
         "content_anchors": {
             "required_names": ["magical garden", "golden gate", "crystal spring", "waterfall", "moonlight"],
             "required_facts": [

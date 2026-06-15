@@ -122,6 +122,39 @@ Consistency JSON.
 Treat the child as the SAME animated movie character model in every
 illustration.
 
+# BASIC CLOTHING AND FOOTWEAR ETIQUETTE
+
+Apply basic scene etiquette before drawing footwear.
+
+When the scene is outdoors, in a jungle, park, street, schoolyard, garden,
+travel setting, or other footwear-appropriate place, the hero and recurring
+human characters should wear their exact locked footwear from Character
+Consistency JSON.
+
+When the scene is inside a temple, prayer room, sacred space, or a home area
+where shoes are removed:
+
+- do not draw outdoor shoes on feet
+- use bare feet or socks when appropriate
+- if footwear is visible, place the exact locked footwear neatly near the
+  entrance or beside the character
+
+When a character is on a bed, mattress, bedding, or sofa used for sleeping:
+
+- do not draw outdoor shoes on the bed
+- do not draw outdoor shoes on the character's feet
+- use bare feet or socks, with the exact locked footwear placed on the floor
+  nearby if footwear needs to be shown
+
+This is not an outfit change or character redesign. The locked footwear remains
+the character's footwear whenever footwear is appropriate. If footwear is
+removed, any visible shoes must still match the locked footwear design, color,
+and style.
+
+Use modest, respectful, family-friendly clothing for temples, prayer rooms, and
+sacred spaces. Keep the locked outfit unless Character Consistency JSON or the
+Current Page Image Prompt explicitly requires a respectful covered variation.
+
 # CHILD-SAFE CLOTHING COVERAGE
 
 All visible children and adults must be dressed modestly and appropriately for a
@@ -277,12 +310,15 @@ Always apply:
 "no character redesign, no generic cartoon child, no stock Pixar face, no
 oversized eyes, no oversized head, no thick cartoon eyebrows, no inconsistent
 face, no age change, no hairstyle change, no outfit change, no side-character
-hair change, no minimal water-play outfit, no uncovered water-play outfit, no
+hair change, use modest covered family-friendly water-play outfits, no
 detailed background people in water-play scenes, no extra characters, no
 duplicate limbs, no distorted anatomy, no extra fingers, no blurry textures, no
 cropped face, no low-resolution rendering, no horror elements, no dark
 aggressive lighting, no raw photographic output, no messy composition, no
-misspelled cover title, no black rectangle or label behind cover title"
+misspelled cover title, no black rectangle or label behind cover title, no
+outdoor shoes on beds, bedding, temples, prayer rooms, sacred spaces, or
+no-shoe home areas, no random replacement footwear when locked footwear is
+removed for etiquette"
 
 # FINAL EXECUTION RULES
 

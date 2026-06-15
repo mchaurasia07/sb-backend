@@ -9,6 +9,7 @@ from uuid import UUID
 from fastapi import status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.exceptions import AppException, NotFoundException
 from app.entity.custom_story_workflow import (
     CustomStoryBatchJob,
@@ -42,6 +43,7 @@ from app.repository.story_repository import StoryRepository
 from app.service.image_storage_provider import get_image_storage_service
 from app.service.story_input_safety_service import StoryInputSafetyService
 from app.service.story_service import DEFAULT_STORY_LANGUAGE, StoryGenerationFlags, StoryService
+from app.service.story_completion_email_service import StoryCompletionEmailService
 from app.service.story_service_batch_service import StoryServiceBatchService
 
 logger = logging.getLogger(__name__)
@@ -188,6 +190,7 @@ class CustomStoryWorkflowService:
 
         story_service = StoryService(self.session)
         age_group = age_group_for_reader_category(payload.reader_category)
+        execute_workflow = self._effective_execute_workflow(payload)
         workflow = await self.workflows.create(
             user_id=user_id,
             child_id=payload.child_id,
@@ -203,12 +206,18 @@ class CustomStoryWorkflowService:
             execute_image=bool(payload.execute_image),
             execute_narration=payload.execute_narration,
             skip_validation=payload.skip_validation,
-            execute_workflow=payload.execute_workflow,
+            execute_workflow=execute_workflow,
             status=CustomStoryWorkflowStatus.PENDING,
             **story_service._current_ai_config(),
         )
         await self.session.commit()
         return self._response(workflow)
+
+    @staticmethod
+    def _effective_execute_workflow(payload: StoryGenerationRequest) -> bool:
+        if "execute_workflow" in payload.model_fields_set:
+            return bool(payload.execute_workflow)
+        return bool(settings.CUSTOM_STORY_EXECUTE_WORKFLOW_DEFAULT)
 
     async def list(
         self,
@@ -335,6 +344,7 @@ class CustomStoryWorkflowService:
             workflow.current_step = None
             await self.workflows.update(workflow)
             await self.session.commit()
+            await self._send_completion_notifications(workflow)
             return workflow
         except Exception as exc:
             await self.session.rollback()
@@ -441,6 +451,11 @@ class CustomStoryWorkflowService:
 
         if step == CustomStoryWorkflowStep.IMAGE_PLAN_VALIDATION:
             if flags.skip_validation:
+                if not flags.skip_image_generation:
+                    workflow.image_plan_json = await runner._ensure_image_plan_character_references(
+                        workflow,
+                        workflow.image_plan_json or {},
+                    )
                 workflow.image_plan_validated = True
                 await self._record_completed_step(workflow, step, step_input, workflow.image_plan_json or {})
                 return
@@ -451,6 +466,8 @@ class CustomStoryWorkflowService:
                     workflow.story_json or {},
                     flags,
                 )
+                if not flags.skip_image_generation:
+                    image_plan = await runner._ensure_image_plan_character_references(workflow, image_plan)
                 workflow.image_plan_json = image_plan
                 workflow.image_plan_validated = True
                 await self._annotate_latest_step(workflow, step, step_input, image_plan)
@@ -620,6 +637,36 @@ class CustomStoryWorkflowService:
             job.story_id = story.id
             await self.batch_jobs.update(job)
         await self.workflows.update(workflow)
+
+    async def _send_completion_notifications(self, workflow: CustomStoryWorkflow) -> None:
+        if workflow.story_id is None:
+            logger.warning(
+                "[CUSTOM_WORKFLOW_NOTIFY] workflow=%s action=skipped reason=no_story_id",
+                workflow.id,
+            )
+            return
+        story = await self.stories.get_by_id(workflow.story_id)
+        if story is None:
+            logger.warning(
+                "[CUSTOM_WORKFLOW_NOTIFY] workflow=%s story_id=%s action=skipped reason=story_not_found",
+                workflow.id,
+                workflow.story_id,
+            )
+            return
+        story_json = workflow.story_json if isinstance(workflow.story_json, dict) else None
+        try:
+            await StoryCompletionEmailService(self.session).send_story_completed(story, story_json)
+            logger.info(
+                "[CUSTOM_WORKFLOW_NOTIFY] workflow=%s story_id=%s action=sent",
+                workflow.id,
+                workflow.story_id,
+            )
+        except Exception:
+            logger.exception(
+                "[CUSTOM_WORKFLOW_NOTIFY] workflow=%s story_id=%s action=failed",
+                workflow.id,
+                workflow.story_id,
+            )
 
     async def _copy_story_images_to_final_story_storage(
         self,

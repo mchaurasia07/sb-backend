@@ -1,5 +1,6 @@
 from app.service.image_plan_validator import ImagePlanValidator
 from app.service.plan_validator import PlanValidator
+from app.service.story_service import StoryService
 
 
 def _story_plan(page_count: int = 8) -> dict:
@@ -18,6 +19,21 @@ def _story_plan(page_count: int = 8) -> dict:
         "climax_choice": "Mira pauses, checks the final clue, and chooses the careful path.",
         "resolution_payoff": "The reading nook opens and Mira feels proud of her patience.",
         "moral_explanation": "Careful steps can solve a big puzzle.",
+        "story_spine": {
+            "hero_want": "Mira wants to find the moonlit reading nook.",
+            "blocking_problem": "The map opens only when Mira follows each clue carefully.",
+            "failed_attempt": "Mira rushes and the silver path fades.",
+            "lesson_learned": "Mira learns to solve one clue at a time.",
+            "climax_choice": "Mira pauses and chooses the careful path.",
+            "resolution": "The reading nook opens and Mira feels proud.",
+        },
+        "language_profile": {
+            "reading_stage": "Early Reader",
+            "sentence_length": "5-12 words per sentence",
+            "vocabulary_level": "simple everyday vocabulary",
+            "repetition_level": "light repetition",
+            "dialogue_complexity": "short dialogue",
+        },
         "content_anchors": {
             "required_names": ["moon map", "silver path", "reading nook"],
             "required_facts": ["A map can guide one careful step at a time."],
@@ -26,12 +42,29 @@ def _story_plan(page_count: int = 8) -> dict:
         "visual_bible": {
             "style": "premium semi-realistic 3D storybook",
             "hero": {
+                "character_id": "hero_child",
                 "name": "Mira",
                 "appearance": "A curious child with bright eyes.",
-                "outfit": "Yellow raincoat and red scarf.",
+                "outfit": "Yellow raincoat, red scarf, and yellow rain boots.",
+                "footwear": "yellow rain boots",
+                "hair_lock": "short dark bob with a yellow clip",
+                "outfit_lock": "Yellow raincoat, red scarf, and yellow rain boots.",
+                "body_scale_lock": "Same early-reader child height, build, proportions, and age appearance.",
+                "relative_size": "child-sized hero",
                 "signature_item": "Moon map",
             },
-            "companion": {"name": "Luma", "appearance": "A small glowing moth."},
+            "companion": {
+                "name": "Luma",
+                "character_id": "luma",
+                "role": "companion",
+                "appearance": "A small glowing moth.",
+                "outfit": "",
+                "hair_lock": "",
+                "outfit_lock": "",
+                "body_scale_lock": "Small glowing moth, much smaller than Mira.",
+                "relative_size": "fits near Mira's shoulder",
+                "signature_item": "soft moon glow",
+            },
             "father": {"appearance": ""},
             "mother": {"appearance": ""},
             "recurring_characters": [],
@@ -70,7 +103,8 @@ def _image_plan(page_count: int = 2) -> dict:
             "hero": {
                 "name": "Mira",
                 "appearance": "A curious child with bright eyes.",
-                "outfit": "Yellow raincoat and red scarf.",
+                "outfit": "Yellow raincoat, red scarf, and yellow rain boots.",
+                "footwear": "yellow rain boots",
                 "signature_item": "Moon map",
             },
             "companion": {"appearance": "A small glowing moth."},
@@ -104,6 +138,32 @@ def _image_plan(page_count: int = 2) -> dict:
 def test_plan_validator_accepts_new_story_planner_schema():
     result = PlanValidator().validate(
         _story_plan(),
+        age_group="3-6",
+        source_inputs={"category": "adventure", "learning_goal": "problem solving", "context": ""},
+    )
+
+    assert result.ok, result.errors
+
+
+def test_plan_validator_accepts_visual_bible_consistency_lock_fields():
+    plan = _story_plan()
+    plan["visual_bible"]["recurring_characters"] = [
+        {
+            "character_id": "uncle_raj",
+            "name": "Uncle Raj",
+            "role": "mentor",
+            "appearance": "A warm mentor with silver glasses and a kind smile.",
+            "outfit": "Blue kurta, brown sandals, and round silver glasses.",
+            "hair_lock": "short salt-and-pepper hair combed neatly back",
+            "outfit_lock": "Blue kurta, brown sandals, and round silver glasses.",
+            "body_scale_lock": "Adult height and slim build, always taller than Mira.",
+            "relative_size": "taller than Mira",
+            "signature_item": "round silver glasses",
+        }
+    ]
+
+    result = PlanValidator().validate(
+        plan,
         age_group="3-6",
         source_inputs={"category": "adventure", "learning_goal": "problem solving", "context": ""},
     )
@@ -171,3 +231,33 @@ def test_image_plan_validator_rejects_old_character_consistency_schema():
 
     assert not result.ok
     assert any("visual_bible" in error for error in result.errors)
+
+
+def test_image_plan_validator_rejects_missing_hero_footwear_lock():
+    image_plan = _image_plan(page_count=2)
+    image_plan["visual_bible"]["hero"].pop("footwear")
+    image_plan["visual_bible"]["hero"]["outfit"] = "Yellow raincoat and red scarf."
+
+    result = ImagePlanValidator().validate(image_plan, story_json=_story_json(page_count=2))
+
+    assert not result.ok
+    assert any("footwear" in error for error in result.errors)
+
+
+def test_normalize_image_plan_adds_missing_hero_footwear_to_prompts():
+    image_plan = _image_plan(page_count=2)
+    image_plan["visual_bible"]["hero"].pop("footwear")
+    image_plan["visual_bible"]["hero"]["outfit"] = "bright yellow t-shirt and blue shorts"
+    for node in [image_plan["cover"], *image_plan["pages"], image_plan["back_cover"]]:
+        node["characters_present"] = ["Mira"]
+        node["reference_character_ids"] = ["hero_child"]
+        node["image_prompt"] = "Mira explores the jungle in a yellow t-shirt and blue shorts."
+
+    normalized = StoryService._normalize_image_plan(image_plan)
+
+    hero = normalized["visual_bible"]["hero"]
+    assert hero["footwear"] == "closed-toe brown story shoes"
+    assert "closed-toe brown story shoes" in hero["outfit"]
+    assert "closed-toe brown story shoes" in normalized["cover"]["image_prompt"]
+    assert all("closed-toe brown story shoes" in page["image_prompt"] for page in normalized["pages"])
+    assert "closed-toe brown story shoes" in normalized["back_cover"]["image_prompt"]

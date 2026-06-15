@@ -27,6 +27,21 @@ def test_build_story_generation_context_reduces_story_plan_to_narrative_fields()
         "climax_choice": "Mira pauses, checks the final clue, and chooses the careful path.",
         "resolution_payoff": "The reading nook opens and Mira feels proud of her patience.",
         "moral_explanation": "Careful steps can solve a big puzzle.",
+        "story_spine": {
+            "hero_want": "Mira wants to find the moonlit reading nook.",
+            "blocking_problem": "The map opens only when Mira follows each clue carefully.",
+            "failed_attempt": "Mira rushes and the silver path fades.",
+            "lesson_learned": "Mira learns to solve one clue at a time.",
+            "climax_choice": "Mira pauses and chooses the careful path.",
+            "resolution": "The reading nook opens and Mira feels proud.",
+        },
+        "language_profile": {
+            "reading_stage": "Early Reader",
+            "sentence_length": "5-12 words per sentence",
+            "vocabulary_level": "simple everyday vocabulary",
+            "repetition_level": "light repetition",
+            "dialogue_complexity": "short dialogue",
+        },
         "content_anchors": {
             "required_names": ["Moon map", "silver path"],
             "required_facts": ["Maps can show one step at a time."],
@@ -47,6 +62,7 @@ def test_build_story_generation_context_reduces_story_plan_to_narrative_fields()
                 "story_role": "introduction",
                 "scene_description": "Mira finds a folded moon map.",
                 "characters_present": ["Mira"],
+                "child_action": "Mira opens the moon map and traces the first silver path.",
                 "emotional_beat": "quiet wonder",
                 "learning_goal_integration": "She pauses before acting.",
                 "growth_step": "Mira practices slowing down before choosing.",
@@ -74,6 +90,21 @@ def test_build_story_generation_context_reduces_story_plan_to_narrative_fields()
         "climax_choice": "Mira pauses, checks the final clue, and chooses the careful path.",
         "resolution_payoff": "The reading nook opens and Mira feels proud of her patience.",
         "moral_explanation": "Careful steps can solve a big puzzle.",
+        "story_spine": {
+            "hero_want": "Mira wants to find the moonlit reading nook.",
+            "blocking_problem": "The map opens only when Mira follows each clue carefully.",
+            "failed_attempt": "Mira rushes and the silver path fades.",
+            "lesson_learned": "Mira learns to solve one clue at a time.",
+            "climax_choice": "Mira pauses and chooses the careful path.",
+            "resolution": "The reading nook opens and Mira feels proud.",
+        },
+        "language_profile": {
+            "reading_stage": "Early Reader",
+            "sentence_length": "5-12 words per sentence",
+            "vocabulary_level": "simple everyday vocabulary",
+            "repetition_level": "light repetition",
+            "dialogue_complexity": "short dialogue",
+        },
         "content_anchors": {
             "required_names": ["Moon map", "silver path"],
             "required_facts": ["Maps can show one step at a time."],
@@ -94,6 +125,7 @@ def test_build_story_generation_context_reduces_story_plan_to_narrative_fields()
                 "story_role": "introduction",
                 "scene_description": "Mira finds a folded moon map.",
                 "characters_present": ["Mira"],
+                "child_action": "Mira opens the moon map and traces the first silver path.",
                 "emotional_beat": "quiet wonder",
                 "learning_goal_integration": "She pauses before acting.",
                 "growth_step": "Mira practices slowing down before choosing.",
@@ -103,6 +135,29 @@ def test_build_story_generation_context_reduces_story_plan_to_narrative_fields()
             }
         ],
     }
+
+
+def test_story_generation_prompt_aligns_with_story_plan_contract():
+    prompt = load_prompt("prompts/story/story_generation_prompt.txt")
+
+    assert "## STORY SPINE AUTHORITY" in prompt
+    assert "Use story_spine as the narrative backbone" in prompt
+    assert "Want -> Attempt -> Result -> New Challenge -> Better Attempt -> Resolution" in prompt
+    assert "Write each page as a lived story moment, not a summary" in prompt
+    assert "Avoid page-summary writing" in prompt
+    assert "Keep the selected child's want, feelings, choices, and growth central" in prompt
+    assert "The child remains the actor who changes the outcome" in prompt
+    assert "Follow language_profile as the primary guide for vocabulary, sentence length" in prompt
+    assert "Age band fallback targets" in prompt
+    assert "read-aloud and audiobook narration" in prompt
+    assert "The final story page must show the resolution_payoff" in prompt
+    assert "before the moral field explains it" in prompt
+    assert "- child_action" in prompt
+    assert '"pages": [' in prompt
+    assert '"page_number": 1' in prompt
+    assert '"emotion": ""' in prompt
+    assert '"text": ""' in prompt
+    assert '"moral": ""' in prompt
 
 
 def test_story_generation_context_softens_medical_harm_language():
@@ -248,7 +303,26 @@ def test_story_plan_prompt_uses_safe_intent_and_omits_unrelated_trigger_terms():
     assert "lip" not in lowered
     assert "tooth" not in lowered
     assert '"central_problem": ""' in prompt
+    assert '"story_spine": {' in prompt
+    assert '"failed_attempt": ""' in prompt
+    assert '"language_profile": {' in prompt
+    assert '"sentence_length": ""' in prompt
+    assert "Follow language_profile" not in prompt
+    assert "1-8 words per sentence" in prompt
+    assert "5-12 words per sentence" in prompt
+    assert "8-18 words per sentence" in prompt
+    assert "Each page should happen because of the previous page" in prompt
+    assert "The first meaningful attempt must not completely solve the problem" in prompt
     assert '"visual_bible": {' in prompt
+    assert '"character_id": "hero_child"' in prompt
+    assert '"hair_lock": ""' in prompt
+    assert '"outfit_lock": ""' in prompt
+    assert '"body_scale_lock": ""' in prompt
+    assert '"relative_size": ""' in prompt
+    assert 'visual_bible.hero.character_id must be "hero_child"' in prompt
+    assert "Use the exact Visual Bible names in pages.characters_present" in prompt
+    assert "same child height, build, proportions" in prompt
+    assert '"role": ""' in prompt
 
 
 @pytest.mark.asyncio
@@ -359,6 +433,274 @@ async def test_story_plan_generation_retries_with_compact_prompt_on_google_safet
     assert step.status.value == "COMPLETED"
     assert step.error_message is None
     assert step.prompt == service._ai_provider.prompts[1]
+
+
+@pytest.mark.asyncio
+async def test_standard_image_plan_generation_retries_with_compact_prompt_on_google_safety_block():
+    class _FakeChildren:
+        async def get_for_user(self, user_id, child_id):
+            _ = user_id, child_id
+            return SimpleNamespace(
+                first_name="Mira",
+                age=6,
+                character_image_url="/media/mira.png",
+                character_metadata={
+                    "identity_profile": {
+                        "face_shape": "round",
+                        "skin_tone": "warm medium",
+                        "eye_color": "dark brown",
+                        "eye_shape": "almond",
+                        "hair_color": "dark brown",
+                        "hair_style": "side-swept bob",
+                    }
+                },
+            )
+
+    class _FakeSteps:
+        def __init__(self):
+            self.created = []
+
+        async def create(self, story_id, step_name):
+            step = SimpleNamespace(
+                story_id=story_id,
+                step_name=step_name,
+                prompt=None,
+                status=None,
+                started_at=None,
+                completed_at=None,
+                retry_count=0,
+                error_message=None,
+                response=None,
+            )
+            self.created.append(step)
+            return step
+
+        async def update(self, step):
+            return step
+
+    class _FakeSession:
+        async def commit(self):
+            return None
+
+    class _FakeProvider:
+        def __init__(self):
+            self.prompts = []
+
+        async def generate_text(self, prompt, **kwargs):
+            _ = kwargs
+            self.prompts.append(prompt)
+            if len(self.prompts) == 1:
+                raise AppException(
+                    "Empty response from Google API prompt_feedback={'block_reason': "
+                    "<BlockedReason.PROHIBITED_CONTENT: 'PROHIBITED_CONTENT'>}",
+                    code="EMPTY_RESPONSE",
+                )
+            image_plan = {
+                "visual_bible": {
+                    "hero": {
+                        "character_id": "hero_child",
+                        "name": "Mira",
+                        "appearance": "Mira has a round face and side-swept bob.",
+                        "outfit": "blue tunic with white sneakers",
+                        "signature_item": "star bracelet",
+                    },
+                    "companion": {"appearance": ""},
+                    "recurring_characters": [],
+                },
+                "character_reference_manifest": [
+                    {"character_id": "hero_child", "name": "Mira", "role": "hero_child"}
+                ],
+                "cover": {
+                    "title_text": "Mira's Map",
+                    "visual_focus": "Mira holds a glowing map.",
+                    "emotion": "wonder",
+                    "characters_present": ["Mira"],
+                    "reference_character_ids": ["hero_child"],
+                    "image_prompt": "Mira holds a glowing map.",
+                },
+                "pages": [
+                    {
+                        "page_number": 1,
+                        "story_role": "opening",
+                        "visual_importance": "medium",
+                        "emotion": "wonder",
+                        "scene_action": "Mira opens the map.",
+                        "environment": "cozy library",
+                        "characters_present": ["Mira"],
+                        "reference_character_ids": ["hero_child"],
+                        "image_prompt": "Mira opens the map in a cozy library.",
+                    }
+                ],
+                "back_cover": {
+                    "emotion": "calm",
+                    "characters_present": ["Mira"],
+                    "reference_character_ids": ["hero_child"],
+                    "image_prompt": "Mira smiles with the map.",
+                },
+            }
+            return TextGenerationResult(
+                text=json.dumps(image_plan),
+                prompt_used=prompt,
+                model="fake-model",
+                metadata={"provider": "fake", "finish_reason": "STOP"},
+            )
+
+    service = StoryService.__new__(StoryService)
+    service.children = _FakeChildren()
+    service.story_steps = _FakeSteps()
+    service.session = _FakeSession()
+    service._ai_provider = _FakeProvider()
+    story = SimpleNamespace(
+        id="story-1",
+        user_id="user-1",
+        child_id="child-1",
+        age_group=AgeGroup.EARLY_READER,
+        title="Mira's Map",
+        input_request={"use_child_character": True},
+        use_child_character=True,
+    )
+    story_plan = {
+        "title": "Mira's Map",
+        "visual_bible": {
+            "hero": {
+                "appearance": (
+                    "Mira keeps the same skin tone, body proportions, upper body pose, "
+                    "mouth, lips, and teeth."
+                ),
+                "outfit": "rash guard, swim shorts, and leggings",
+            }
+        },
+        "pages": [{"page_number": 1, "visual_brief": "Mira opens a map with no horror imagery."}],
+    }
+    story_json = {"title": "Mira's Map", "pages": [{"page_number": 1, "text": "Mira opened the map."}]}
+
+    image_plan = await service._step_generate_image_plan(story, story_plan, story_json, SimpleNamespace())
+
+    assert len(service._ai_provider.prompts) == 2
+    assert "children's picture-book illustration planner" in service._ai_provider.prompts[1]
+    assert "Avoid sensitive negative phrasing" in service._ai_provider.prompts[1]
+    assert image_plan["pages"][0]["reference_character_ids"] == ["hero_child"]
+
+
+@pytest.mark.asyncio
+async def test_custom_image_plan_generation_uses_safe_prompt_without_safety_fallback():
+    class _FakeChildren:
+        async def get_for_user(self, user_id, child_id):
+            _ = user_id, child_id
+            return SimpleNamespace(
+                first_name="Mira",
+                age=6,
+                character_image_url="/media/mira.png",
+                character_metadata={
+                    "identity_summary": (
+                        "Mira has a round face, warm medium skin tone, brown almond eyes, "
+                        "a gentle mouth, and age-appropriate body proportions."
+                    ),
+                    "identity_profile": {
+                        "face_shape": "round",
+                        "skin_tone": "warm medium",
+                        "eye_color": "dark brown",
+                        "eye_shape": "almond",
+                        "hair_color": "dark brown",
+                        "hair_style": "side-swept bob",
+                    },
+                },
+            )
+
+    class _FakeSteps:
+        def __init__(self):
+            self.created = []
+
+        async def create(self, story_id, step_name):
+            step = SimpleNamespace(
+                story_id=story_id,
+                step_name=step_name,
+                prompt=None,
+                status=None,
+                started_at=None,
+                completed_at=None,
+                retry_count=0,
+                error_message=None,
+                response=None,
+            )
+            self.created.append(step)
+            return step
+
+        async def update(self, step):
+            return step
+
+    class _FakeSession:
+        async def commit(self):
+            return None
+
+    class _FakeProvider:
+        text_model = "fake-google-text-model"
+
+        def __init__(self):
+            self.prompts = []
+
+        async def generate_text(self, prompt, **kwargs):
+            _ = kwargs
+            self.prompts.append(prompt)
+            raise AppException(
+                "Empty response from Google API prompt_feedback={'block_reason': "
+                "<BlockedReason.PROHIBITED_CONTENT: 'PROHIBITED_CONTENT'>}",
+                code="EMPTY_RESPONSE",
+            )
+
+    class CustomStoryWorkflow(SimpleNamespace):
+        pass
+
+    service = StoryService.__new__(StoryService)
+    service.children = _FakeChildren()
+    service.story_steps = _FakeSteps()
+    service.session = _FakeSession()
+    service._ai_provider = _FakeProvider()
+    workflow = CustomStoryWorkflow(
+        id="workflow-1",
+        user_id="user-1",
+        child_id="child-1",
+        age_group=AgeGroup.EARLY_READER,
+        title="Mira's Map",
+        input_request={"use_child_character": True},
+        use_child_character=True,
+    )
+    story_plan = {
+        "title": "Mira's Map",
+        "visual_bible": {
+            "hero": {
+                "appearance": (
+                    "Mira keeps the same skin tone, body proportions, upper body pose, "
+                    "mouth, lips, and teeth."
+                ),
+                "outfit": "rash guard, swim shorts, and leggings",
+            }
+        },
+        "pages": [{"page_number": 1, "visual_brief": "Mira opens a map with no horror imagery."}],
+    }
+    story_json = {"title": "Mira's Map", "pages": [{"page_number": 1, "text": "Mira opened the map."}]}
+
+    with pytest.raises(AppException) as exc_info:
+        await service._step_generate_image_plan(workflow, story_plan, story_json, SimpleNamespace())
+
+    assert exc_info.value.code == "EMPTY_RESPONSE"
+    assert len(service._ai_provider.prompts) == 1
+    prompt = service._ai_provider.prompts[0]
+    lowered = prompt.lower()
+    assert "safe character planning summary" in lowered
+    assert "character identity lock" not in lowered
+    assert "skin tone" not in lowered
+    assert "body proportions" not in lowered
+    assert "upper body" not in lowered
+    assert "rash guard" not in lowered
+    assert "swim shorts" not in lowered
+    assert "leggings" not in lowered
+    assert "horror" not in lowered
+    assert "aggressive" not in lowered
+    assert "frightening" not in lowered
+    assert "mouth" not in lowered
+    assert "lips" not in lowered
+    assert "teeth" not in lowered
 
 
 def test_character_context_uses_identity_profile_not_legacy_analysis_text():

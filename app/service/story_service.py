@@ -583,6 +583,12 @@ class StoryService:
                 await self.stories.update(story)
                 await self.session.commit()
 
+            if not flags.skip_image_generation:
+                image_plan = await self._ensure_image_plan_character_references(story, image_plan)
+                story.image_plan_json = image_plan
+                await self.stories.update(story)
+                await self.session.commit()
+
             # Step 6: Image Generation
             if not flags.skip_image_generation:
                 await self._set_current_step(story, StoryStepName.IMAGE_GENERATION)
@@ -1102,6 +1108,206 @@ class StoryService:
             f"SANITIZED PLAN JSON:\n{_compact_json(prompt_plan)}"
         )
 
+    @staticmethod
+    def _image_plan_generation_fallback_prompt(
+        story_plan: dict[str, Any],
+        story_json: dict[str, Any],
+        character_context: dict[str, Any],
+    ) -> str:
+        return (
+            "You are a children's picture-book illustration planner. Return only valid JSON.\n"
+            "Create a concise visual plan from the sanitized story inputs. Use warm, family-friendly, "
+            "school-and-home-safe wording. Avoid sensitive negative phrasing; state positive visual requirements only.\n"
+            "Keep character identities stable. If water play appears, choose modest covered family-friendly outfits.\n"
+            "Use hero_child as the selected child character_id whenever the hero appears.\n\n"
+            "Return this exact JSON shape:\n"
+            '{"visual_bible":{"hero":{"character_id":"hero_child","name":"","appearance":"","outfit":"","footwear":"","signature_item":""},'
+            '"companion":{"appearance":""},"recurring_characters":[]},'
+            '"character_reference_manifest":[{"character_id":"hero_child","name":"","role":"hero_child"}],'
+            '"cover":{"title_text":"","visual_focus":"","emotion":"","characters_present":[],"reference_character_ids":[],"image_prompt":""},'
+            '"pages":[{"page_number":1,"story_role":"","visual_importance":"medium","emotion":"","scene_action":"","environment":"",'
+            '"characters_present":[],"reference_character_ids":[],"image_prompt":""}],'
+            '"back_cover":{"emotion":"","characters_present":[],"reference_character_ids":[],"image_prompt":""}}\n\n'
+            f"Hero name: {character_context.get('child_name', 'Child')}\n"
+            f"Cast mode: {character_context.get('cast_mode', StoryService.CAST_MODE_CHILD_HERO)}\n"
+            f"Character identity lock:\n{StoryService._format_prompt_character_identity_lock(character_context)}\n\n"
+            f"STORY PLAN JSON:\n{_compact_json(story_plan)}\n\n"
+            f"STORY JSON:\n{_compact_json(story_json)}"
+        )
+
+    @staticmethod
+    def _is_custom_story_workflow_record(story: Any) -> bool:
+        return story.__class__.__name__ == "CustomStoryWorkflow"
+
+    @staticmethod
+    def _custom_image_plan_identity_summary(character_context: dict[str, Any]) -> str:
+        if not character_context.get("use_child_character", True):
+            return (
+                f"Cast mode: {StoryService.CAST_MODE_IMAGINED}\n"
+                f"Hero name: {character_context.get('child_name', 'AI-created story hero')}\n"
+                f"Age label: {character_context.get('child_age_label', '')}\n"
+                "Plan stable names, roles, hair/head details, outfit, accessories, and color palette for every "
+                "recurring character. The final image step will use the visual bible as the model sheet."
+            )
+
+        summary = str(character_context.get("identity_summary") or "").strip()
+        if not summary:
+            summary = str(character_context.get("character_description") or "").strip()
+        summary = StoryService._story_planner_safe_profile_text(summary)
+        summary = StoryService._replace_case_insensitive(summary, "skin tone", "overall coloring")
+        summary = StoryService._replace_case_insensitive(summary, "body proportions", "age appearance")
+        summary = StoryService._replace_case_insensitive(summary, "body", "appearance")
+        return (
+            f"Hero child name: {character_context.get('child_name', 'Child')}\n"
+            f"Character id to use when visible: hero_child\n"
+            f"Age label: {character_context.get('child_age_label', '')}\n"
+            "Identity note for planning only: use broad face/head, eye, and hairstyle cues. The generated "
+            "character portrait will be attached later as the visual identity reference for final images.\n"
+            f"Safe identity summary: {summary[:800]}"
+        )
+
+    @staticmethod
+    def _custom_safe_image_plan_prompt(
+        story_plan: dict[str, Any],
+        story_json: dict[str, Any],
+        character_context: dict[str, Any],
+    ) -> str:
+        story_plan = StoryService._custom_safe_image_plan_context(story_plan)
+        story_json = StoryService._custom_safe_image_plan_context(story_json)
+        schema = {
+            "visual_bible": {
+                "hero": {
+                    "character_id": "hero_child",
+                    "name": "",
+                    "appearance": "",
+                    "outfit": "",
+                    "footwear": "",
+                    "signature_item": "",
+                },
+                "companion": {"appearance": ""},
+                "recurring_characters": [
+                    {"character_id": "", "name": "", "role": "", "appearance": "", "outfit": ""}
+                ],
+            },
+            "character_reference_manifest": [
+                {"character_id": "hero_child", "name": "", "role": "hero_child"}
+            ],
+            "cover": {
+                "title_text": "",
+                "visual_focus": "",
+                "emotion": "",
+                "characters_present": [],
+                "reference_character_ids": [],
+                "image_prompt": "",
+            },
+            "pages": [
+                {
+                    "page_number": 1,
+                    "story_role": "",
+                    "visual_importance": "low | medium | high | climax",
+                    "emotion": "",
+                    "scene_action": "",
+                    "environment": "",
+                    "characters_present": [],
+                    "reference_character_ids": [],
+                    "image_prompt": "",
+                }
+            ],
+            "back_cover": {
+                "emotion": "",
+                "characters_present": [],
+                "reference_character_ids": [],
+                "image_prompt": "",
+            },
+        }
+        return (
+            "# ROLE\n"
+            "You are a professional children's storybook illustration planner. Return STRICT VALID JSON only.\n\n"
+            "## SAFE INPUTS\n"
+            f"Story Plan JSON:\n{_compact_json(story_plan)}\n\n"
+            f"Story JSON:\n{_compact_json(story_json)}\n\n"
+            "Safe Character Planning Summary:\n"
+            f"{StoryService._custom_image_plan_identity_summary(character_context)}\n\n"
+            f"Hero Child Name: {character_context.get('child_name', 'Child')}\n"
+            f"Cast Mode: {character_context.get('cast_mode', StoryService.CAST_MODE_CHILD_HERO)}\n\n"
+            "## PLANNING RULES\n"
+            "- Create a visual plan for cover, each page, and back cover.\n"
+            "- Use hero_child in reference_character_ids whenever the selected child appears.\n"
+            "- Identify recurring side characters and assign stable lowercase snake_case character_id values.\n"
+            "- Include only visible recurring characters in characters_present and reference_character_ids.\n"
+            "- Keep character names, hairstyles, outfits, accessories, and color palettes stable across pages.\n"
+            "- Lock exact footwear for the hero in visual_bible.hero.footwear and include it in visual_bible.hero.outfit.\n"
+            "- Never leave shoes/footwear implied; choose one concrete footwear state and repeat it in every image_prompt.\n"
+            "- The final image step will attach character reference images; do not request or describe uploaded photos.\n"
+            "- Use modest, family-friendly outfits. For water-play scenes, use covered play clothing and water shoes.\n"
+            "- Keep scenes warm, calm, age-appropriate, expressive, and easy for children to understand.\n"
+            "- Avoid intense, scary, violent, or unsafe visual wording. State positive visual requirements only.\n"
+            "- Each image_prompt should be about 90-150 words and include action, setting, emotion, lighting, "
+            "composition, and premium semi-realistic 3D children's storybook style.\n"
+            "- Do not include negative-prompt wording.\n\n"
+            "## OUTPUT JSON SHAPE\n"
+            f"{_compact_json(schema)}\n\n"
+            "Return ONLY valid JSON."
+        )
+
+    @staticmethod
+    def _custom_safe_image_plan_context(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {key: StoryService._custom_safe_image_plan_context(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [StoryService._custom_safe_image_plan_context(item) for item in value]
+        if not isinstance(value, str):
+            return value
+        safe = StoryService._story_planner_safe_profile_text(value)
+        replacements = (
+            ("skin tone", "overall coloring"),
+            ("skin/body color", "overall color palette"),
+            ("body proportions", "age appearance"),
+            ("upper body", "covered top"),
+            ("rash guard", "covered swim shirt"),
+            ("swim shorts", "water-play shorts"),
+            ("leggings", "covered play bottoms"),
+            ("horror", "intense"),
+            ("aggressive", "tense"),
+            ("frightening", "unsettling"),
+        )
+        for risky, neutral in replacements:
+            safe = StoryService._replace_case_insensitive(safe, risky, neutral)
+        return safe
+
+    @staticmethod
+    def _prompt_safety_diagnostics(prompt: str) -> dict[str, Any]:
+        keywords = (
+            "skin tone",
+            "body proportions",
+            "upper body",
+            "rash guard",
+            "swim shorts",
+            "leggings",
+            "horror",
+            "aggressive",
+            "frightening",
+            "mouth",
+            "lips",
+            "teeth",
+        )
+        lowered = prompt.lower()
+        section_names = re.findall(r"^#{1,6}\s+(.+)$", prompt, flags=re.MULTILINE)
+        return {
+            "prompt_length": len(prompt),
+            "section_names": section_names[:20],
+            "keyword_counts": {keyword: lowered.count(keyword) for keyword in keywords if lowered.count(keyword)},
+        }
+
+    def _log_custom_image_plan_safety_block(self, story: Any, prompt: str) -> None:
+        provider = self.ai_provider
+        logger.warning(
+            "Custom story %s: safe image plan prompt blocked by Google safety filter. diagnostics=%s model=%s",
+            getattr(story, "id", None),
+            self._prompt_safety_diagnostics(prompt),
+            getattr(provider, "text_model", None),
+        )
+
     async def _step_generate_image_plan(
         self, story: Story, story_plan: dict[str, Any], story_json: dict[str, Any], flags: StoryGenerationFlags
     ) -> dict[str, Any]:
@@ -1117,30 +1323,59 @@ class StoryService:
             raise NotFoundException("Child profile not found during image plan generation")
         character_context = self._build_story_cast_context(story, child, story_plan=story_plan)
         compact_story_plan, compact_story_json = self._build_image_plan_context(story_plan, story_json)
+        is_custom_story_workflow = self._is_custom_story_workflow_record(story)
 
         # Populate all placeholders in template
-        prompt = template.replace("{story_plan_json}", _compact_json(compact_story_plan))
-        prompt = prompt.replace("{story_json}", _compact_json(compact_story_json))
-        prompt = prompt.replace("{character_description}", character_context["character_description"])
-        prompt = prompt.replace("{character_profile}", character_context["character_description"])
-        prompt = prompt.replace("{character_identity_lock}", self._format_prompt_character_identity_lock(character_context))
-        prompt = prompt.replace("{child_name}", character_context["child_name"])
-        prompt = prompt.replace("{child_age_label}", character_context["child_age_label"])
-        prompt = prompt.replace("{child_age_visual_guidance}", character_context["child_age_visual_guidance"])
-        prompt = prompt.replace("{cast_mode}", character_context["cast_mode"])
-        prompt = prompt.replace("{cast_mode_instructions}", character_context["cast_mode_instructions"])
-        prompt = prompt.replace("{character_reference_mode}", character_context["character_reference_mode"])
+        if is_custom_story_workflow:
+            prompt = self._custom_safe_image_plan_prompt(compact_story_plan, compact_story_json, character_context)
+        else:
+            prompt = template.replace("{story_plan_json}", _compact_json(compact_story_plan))
+            prompt = prompt.replace("{story_json}", _compact_json(compact_story_json))
+            prompt = prompt.replace("{character_description}", character_context["character_description"])
+            prompt = prompt.replace("{character_profile}", character_context["character_description"])
+            prompt = prompt.replace("{character_identity_lock}", self._format_prompt_character_identity_lock(character_context))
+            prompt = prompt.replace("{child_name}", character_context["child_name"])
+            prompt = prompt.replace("{child_age_label}", character_context["child_age_label"])
+            prompt = prompt.replace("{child_age_visual_guidance}", character_context["child_age_visual_guidance"])
+            prompt = prompt.replace("{cast_mode}", character_context["cast_mode"])
+            prompt = prompt.replace("{cast_mode_instructions}", character_context["cast_mode_instructions"])
+            prompt = prompt.replace("{character_reference_mode}", character_context["character_reference_mode"])
         step.prompt = prompt
         await self.story_steps.update(step)
         await self.session.commit()
 
         try:
-            result = await self.ai_provider.generate_text(
-                prompt,
-                max_tokens=self._image_plan_max_tokens(story.age_group),
-                temperature=0.2,
-                response_format={"type": "json_object"},
-            )
+            try:
+                result = await self.ai_provider.generate_text(
+                    prompt,
+                    max_tokens=self._image_plan_max_tokens(story.age_group),
+                    temperature=0.2,
+                    response_format={"type": "json_object"},
+                )
+            except AppException as exc:
+                if not self._is_google_prompt_safety_block(exc):
+                    raise
+                if is_custom_story_workflow:
+                    self._log_custom_image_plan_safety_block(story, prompt)
+                    raise
+                fallback_prompt = self._image_plan_generation_fallback_prompt(
+                    compact_story_plan,
+                    compact_story_json,
+                    character_context,
+                )
+                logger.warning(
+                    "Story %s: image plan prompt blocked by Google safety filter; retrying with compact fallback prompt",
+                    story.id,
+                )
+                step.prompt = fallback_prompt
+                await self.story_steps.update(step)
+                await self.session.commit()
+                result = await self.ai_provider.generate_text(
+                    fallback_prompt,
+                    max_tokens=self._image_plan_max_tokens(story.age_group),
+                    temperature=0.1,
+                    response_format={"type": "json_object"},
+                )
 
             try:
                 image_plan = json.loads(result.text)
@@ -1249,7 +1484,389 @@ class StoryService:
 
     @staticmethod
     def _normalize_image_plan(image_plan: dict[str, Any]) -> dict[str, Any]:
+        visual_bible = image_plan.get("visual_bible") if isinstance(image_plan.get("visual_bible"), dict) else None
+        hero = visual_bible.get("hero") if isinstance(visual_bible, dict) and isinstance(visual_bible.get("hero"), dict) else None
+        if not isinstance(hero, dict):
+            return image_plan
+
+        outfit = str(hero.get("outfit") or "").strip()
+        footwear = str(hero.get("footwear") or "").strip()
+        if not footwear:
+            footwear = StoryService._image_plan_footwear_from_text(outfit)
+        if not footwear:
+            footwear = StoryService._default_image_plan_footwear(image_plan)
+        hero["footwear"] = footwear
+
+        if outfit and not StoryService._text_has_footwear_lock(outfit):
+            hero["outfit"] = f"{outfit}, with {footwear}"
+        elif not outfit:
+            hero["outfit"] = f"Locked story outfit with {footwear}"
+
+        if not str(hero.get("outfit_lock") or "").strip():
+            hero["outfit_lock"] = str(hero.get("outfit") or "").strip()
+
+        StoryService._append_hero_footwear_to_image_prompts(image_plan, hero["footwear"], hero)
         return image_plan
+
+    _FOOTWEAR_PATTERN = re.compile(
+        r"\b("
+        r"shoe|shoes|sneaker|sneakers|sandal|sandals|boot|boots|slipper|slippers|"
+        r"sock|socks|footwear|barefoot|bare feet|water shoes|flip-flops|flip flops"
+        r")\b",
+        re.IGNORECASE,
+    )
+
+    @classmethod
+    def _text_has_footwear_lock(cls, text: str) -> bool:
+        return bool(cls._FOOTWEAR_PATTERN.search(text or ""))
+
+    @classmethod
+    def _image_plan_footwear_from_text(cls, text: str) -> str:
+        if not isinstance(text, str) or not text.strip():
+            return ""
+        lowered = text.lower()
+        options = (
+            "water shoes",
+            "white sneakers",
+            "brown sandals",
+            "red rain boots",
+            "brown boots",
+            "ankle boots",
+            "soft socks",
+            "bare feet",
+            "sneakers",
+            "sandals",
+            "shoes",
+            "boots",
+            "slippers",
+            "socks",
+            "barefoot",
+        )
+        for option in options:
+            if option in lowered:
+                return "bare feet" if option == "barefoot" else option
+        match = cls._FOOTWEAR_PATTERN.search(text)
+        return match.group(0) if match else ""
+
+    @classmethod
+    def _default_image_plan_footwear(cls, image_plan: dict[str, Any]) -> str:
+        text = json.dumps(image_plan, ensure_ascii=False).lower()
+        if any(term in text for term in ("water park", "pool", "beach", "splash pad", "water-play", "water play")):
+            return "blue water shoes"
+        if any(term in text for term in ("rain", "mud", "puddle")):
+            return "yellow rain boots"
+        return "closed-toe brown story shoes"
+
+    @classmethod
+    def _append_hero_footwear_to_image_prompts(
+        cls,
+        image_plan: dict[str, Any],
+        footwear: str,
+        hero: dict[str, Any],
+    ) -> None:
+        footwear = str(footwear or "").strip()
+        if not footwear:
+            return
+        hero_name = StoryService._character_reference_name_key(str(hero.get("name") or ""))
+        hero_id = str(hero.get("character_id") or "hero_child").strip()
+
+        def hero_visible(node: dict[str, Any]) -> bool:
+            reference_ids = {
+                str(value).strip()
+                for value in node.get("reference_character_ids") or []
+                if isinstance(value, str) and value.strip()
+            }
+            character_names = {
+                StoryService._character_reference_name_key(value)
+                for value in node.get("characters_present") or []
+                if isinstance(value, str) and value.strip()
+            }
+            if hero_id in reference_ids or (hero_name and hero_name in character_names):
+                return True
+            prompt = str(node.get("image_prompt") or "")
+            return bool(hero_name and hero_name in StoryService._character_reference_name_key(prompt))
+
+        def append_lock(node: Any) -> None:
+            if not isinstance(node, dict) or not hero_visible(node):
+                return
+            prompt = str(node.get("image_prompt") or "").strip()
+            if not prompt or cls._text_has_footwear_lock(prompt):
+                return
+            node["image_prompt"] = f"{prompt} The hero wears the locked footwear: {footwear}."
+
+        append_lock(image_plan.get("cover"))
+        for page in image_plan.get("pages") or []:
+            append_lock(page)
+        append_lock(image_plan.get("back_cover"))
+
+    @classmethod
+    def _character_reference_id(cls, name: str, *, fallback: str = "character") -> str:
+        slug = re.sub(r"[^a-z0-9]+", "_", (name or "").strip().lower()).strip("_")
+        return slug or fallback
+
+    @staticmethod
+    def _character_reference_name_key(name: str | None) -> str:
+        return re.sub(r"\s+", " ", (name or "").strip().lower())
+
+    @classmethod
+    def _character_reference_manifest(cls, image_plan: dict[str, Any]) -> list[dict[str, Any]]:
+        manifest = image_plan.get("character_reference_manifest")
+        if isinstance(manifest, list):
+            return [item for item in manifest if isinstance(item, dict)]
+        if isinstance(manifest, dict):
+            characters = manifest.get("characters")
+            if isinstance(characters, list):
+                return [item for item in characters if isinstance(item, dict)]
+        manifest = []
+        image_plan["character_reference_manifest"] = manifest
+        return manifest
+
+    @classmethod
+    def _upsert_character_reference_manifest_item(
+        cls,
+        image_plan: dict[str, Any],
+        item: dict[str, Any],
+    ) -> dict[str, Any]:
+        manifest = cls._character_reference_manifest(image_plan)
+        character_id = str(item.get("character_id") or "").strip()
+        name_key = cls._character_reference_name_key(str(item.get("name") or ""))
+        for existing in manifest:
+            if character_id and existing.get("character_id") == character_id:
+                existing.update({key: value for key, value in item.items() if value is not None})
+                return existing
+            if name_key and cls._character_reference_name_key(existing.get("name")) == name_key:
+                existing.update({key: value for key, value in item.items() if value is not None})
+                return existing
+        manifest.append(item)
+        return item
+
+    @classmethod
+    def _visual_bible_recurring_characters(cls, image_plan: dict[str, Any]) -> list[dict[str, Any]]:
+        visual_bible = image_plan.get("visual_bible") if isinstance(image_plan.get("visual_bible"), dict) else {}
+        recurring = visual_bible.get("recurring_characters")
+        if not isinstance(recurring, list):
+            return []
+        return [character for character in recurring if isinstance(character, dict)]
+
+    @classmethod
+    def _side_character_reference_prompt(
+        cls,
+        *,
+        story_title: str,
+        character: dict[str, Any],
+        visual_bible: dict[str, Any],
+    ) -> str:
+        name = str(character.get("name") or "Recurring character").strip()
+        role = str(character.get("role") or "recurring supporting character").strip()
+        appearance = str(character.get("appearance") or "").strip()
+        style = str(
+            visual_bible.get("style")
+            or "Premium semi-realistic 3D children's storybook illustration, cinematic lighting, soft shadows, warm family-film quality."
+        )
+        return (
+            "Create one reusable character reference portrait/model sheet for a children's storybook. "
+            f"Story title: {story_title or 'Untitled story'}. Character name: {name}. Role: {role}. "
+            f"Locked appearance to preserve exactly: {appearance}. "
+            "Show the character alone, centered, clean full-body or three-quarter view with a clearly readable face/head. "
+            "Use a plain light studio background. Preserve the exact hair/fur/body pattern, face/head shape, eyes, "
+            "colors, outfit, accessories, body scale, and one distinctive feature described above. "
+            "This image will be reused as an identity reference for future page illustrations, so avoid action poses, "
+            "scene props, text, labels, logos, watermarks, borders, extra characters, or alternate outfits. "
+            f"Visual style: {style}"
+        )
+
+    async def _ensure_image_plan_character_references(
+        self,
+        story: Story,
+        image_plan: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Ensure image_plan_json carries reusable reference URLs for recurring characters."""
+        if not isinstance(image_plan, dict):
+            return image_plan
+
+        visual_bible = image_plan.get("visual_bible") if isinstance(image_plan.get("visual_bible"), dict) else {}
+        cover_plan = image_plan.get("cover") if isinstance(image_plan.get("cover"), dict) else {}
+        story_title = getattr(story, "title", None) or cover_plan.get("title_text") or ""
+
+        if self._use_child_character(story):
+            child = await self.children.get_for_user(story.user_id, story.child_id)
+            if child is None:
+                raise NotFoundException("Child profile not found during character reference preparation")
+            if not child.character_image_url:
+                raise AppException(
+                    "Generated character image is required for story image generation",
+                    code="NO_CHARACTER_IMAGE",
+                )
+            hero_id = "hero_child"
+            hero_name = child.first_name or "Child"
+            self._upsert_character_reference_manifest_item(
+                image_plan,
+                {
+                    "character_id": hero_id,
+                    "name": hero_name,
+                    "role": "hero_child",
+                    "source": "child.character_image_url",
+                    "reference_image_url": child.character_image_url,
+                    "identity_source": "generated_child_character_portrait",
+                    "priority": 0,
+                },
+            )
+            hero = visual_bible.get("hero") if isinstance(visual_bible.get("hero"), dict) else None
+            if hero is not None:
+                hero.setdefault("character_id", hero_id)
+                hero.setdefault("reference_image_url", child.character_image_url)
+
+        if (getattr(story, "ai_provider", None) or settings.AI_PROVIDER).strip().lower() != "google":
+            return image_plan
+
+        image_storage = get_image_storage_service()
+        image_model_kwargs = self._story_image_model_kwargs(story)
+        recurring = self._visual_bible_recurring_characters(image_plan)
+        for index, character in enumerate(recurring, start=1):
+            name = str(character.get("name") or "").strip()
+            appearance = str(character.get("appearance") or "").strip()
+            if not name or not appearance:
+                continue
+            character_id = str(character.get("character_id") or self._character_reference_id(name, fallback=f"side_{index}"))
+            character["character_id"] = character_id
+            existing_url = character.get("reference_image_url")
+            if not existing_url:
+                for manifest_item in self._character_reference_manifest(image_plan):
+                    if manifest_item.get("character_id") == character_id and manifest_item.get("reference_image_url"):
+                        existing_url = manifest_item.get("reference_image_url")
+                        break
+            if existing_url:
+                character["reference_image_url"] = existing_url
+                self._upsert_character_reference_manifest_item(
+                    image_plan,
+                    {
+                        "character_id": character_id,
+                        "name": name,
+                        "role": character.get("role") or "recurring_character",
+                        "source": "visual_bible.recurring_characters",
+                        "reference_image_url": existing_url,
+                        "appearance": appearance,
+                        "priority": index,
+                    },
+                )
+                continue
+
+            prompt = self._side_character_reference_prompt(
+                story_title=story_title,
+                character=character,
+                visual_bible=visual_bible,
+            )
+            logger.info(
+                "Story %s: generating side character reference character_id=%s name=%s",
+                story.id,
+                character_id,
+                name,
+            )
+            result = await self.ai_provider.generate_image(
+                prompt,
+                **image_model_kwargs,
+                size=settings.STORY_PAGE_IMAGE_SIZE,
+                quality=settings.STORY_IMAGE_QUALITY,
+                aspect_ratio="1:1",
+            )
+            image_bytes = self._crop_image_bytes_to_aspect_ratio(result.image_bytes, "1:1")
+            image_url = await image_storage.save_story_image(
+                story.id,
+                image_bytes,
+                f"character_ref_{character_id}.png",
+                "",
+            )
+            character["reference_image_url"] = image_url
+            self._upsert_character_reference_manifest_item(
+                image_plan,
+                {
+                    "character_id": character_id,
+                    "name": name,
+                    "role": character.get("role") or "recurring_character",
+                    "source": "visual_bible.recurring_characters",
+                    "reference_image_url": image_url,
+                    "appearance": appearance,
+                    "provider": (result.metadata or {}).get("provider"),
+                    "model": result.model,
+                    "prompt_used": result.prompt_used,
+                    "priority": index,
+                },
+            )
+        return image_plan
+
+    @staticmethod
+    def _max_character_references_for_model(model: str | None) -> int:
+        normalized = (model or "").lower()
+        return 5 if "pro" in normalized and "image" in normalized else 4
+
+    @classmethod
+    def _page_reference_text_pool(cls, page_data: dict[str, Any], image_prompt: str | None = None) -> str:
+        values = [
+            image_prompt or "",
+            str(page_data.get("visual_focus") or ""),
+            str(page_data.get("scene_action") or ""),
+            str(page_data.get("environment") or ""),
+            str(page_data.get("image_prompt") or ""),
+        ]
+        characters_present = page_data.get("characters_present")
+        if isinstance(characters_present, list):
+            values.extend(str(value) for value in characters_present if isinstance(value, str))
+        return " ".join(values).lower()
+
+    async def _story_image_reference_inputs(
+        self,
+        story: Story,
+        image_plan: dict[str, Any],
+        page_data: dict[str, Any],
+        *,
+        image_prompt: str | None,
+    ) -> list[dict[str, Any]]:
+        manifest = self._character_reference_manifest(image_plan)
+        if not manifest:
+            return []
+
+        model = story.reference_image_model or settings.GOOGLE_REFERENCE_IMAGE_MODEL
+        max_refs = self._max_character_references_for_model(model)
+        explicit_ids = {
+            str(value).strip()
+            for value in page_data.get("reference_character_ids") or []
+            if isinstance(value, str) and value.strip()
+        }
+        characters_present = {
+            self._character_reference_name_key(value)
+            for value in page_data.get("characters_present") or []
+            if isinstance(value, str)
+        }
+        text_pool = self._page_reference_text_pool(page_data, image_prompt)
+        selected: list[dict[str, Any]] = []
+        for item in sorted(manifest, key=lambda value: int(value.get("priority") or 100)):
+            character_id = str(item.get("character_id") or "").strip()
+            name = str(item.get("name") or character_id)
+            name_key = self._character_reference_name_key(name)
+            is_hero = character_id == "hero_child"
+            should_include = (
+                is_hero
+                or character_id in explicit_ids
+                or name_key in characters_present
+                or (name and name.lower() in text_pool)
+            )
+            if not should_include:
+                continue
+            image_url = str(item.get("reference_image_url") or item.get("image_url") or "").strip()
+            if not image_url:
+                continue
+            selected.append(
+                {
+                    "character_id": character_id,
+                    "name": name,
+                    "role": item.get("role") or "character_reference",
+                    "image_url": image_url,
+                    "image_base64": await self._load_image_as_base64(image_url),
+                }
+            )
+            if len(selected) >= max_refs:
+                break
+        return selected
 
     async def _step_generate_images(
         self,
@@ -1315,9 +1932,16 @@ class StoryService:
                     page_data=cover,
                     story_title=story_json.get("title") or story.title or "",
                 )
+                cover_references = await self._story_image_reference_inputs(
+                    story,
+                    image_plan,
+                    cover,
+                    image_prompt=cover.get("image_prompt"),
+                )
                 cover_bytes = await self.ai_provider.create_story_image(
                     cover_prompt,
                     reference_image_base64=character_image_base64,
+                    reference_images_base64=cover_references,
                     **image_model_kwargs,
                     size=settings.STORY_COVER_IMAGE_SIZE,
                     quality=settings.STORY_IMAGE_QUALITY,
@@ -1333,6 +1957,12 @@ class StoryService:
                         "rendered_prompt": cover_prompt,
                         "provider_prompt_used": cover_bytes.prompt_used,
                         "used_character_reference": True,
+                        "reference_character_ids_used": [
+                            reference["character_id"] for reference in cover_references
+                        ],
+                        "reference_image_urls_used": [
+                            reference["image_url"] for reference in cover_references
+                        ],
                         "model": cover_bytes.model,
                         "provider": (cover_bytes.metadata or {}).get("provider"),
                         "usage": (cover_bytes.metadata or {}).get("usage"),
@@ -1387,9 +2017,16 @@ class StoryService:
                         page_data=img_page,
                         story_title=story_json.get("title") or story.title or "",
                     )
+                    page_references = await self._story_image_reference_inputs(
+                        story,
+                        image_plan,
+                        img_page,
+                        image_prompt=img_page.get("image_prompt"),
+                    )
                     image_bytes = await self.ai_provider.create_story_image(
                         page_prompt,
                         reference_image_base64=character_image_base64,
+                        reference_images_base64=page_references,
                         **image_model_kwargs,
                         size=settings.STORY_PAGE_IMAGE_SIZE,
                         quality=settings.STORY_IMAGE_QUALITY,
@@ -1405,6 +2042,12 @@ class StoryService:
                             "rendered_prompt": page_prompt,
                             "provider_prompt_used": image_bytes.prompt_used,
                             "used_character_reference": True,
+                            "reference_character_ids_used": [
+                                reference["character_id"] for reference in page_references
+                            ],
+                            "reference_image_urls_used": [
+                                reference["image_url"] for reference in page_references
+                            ],
                             "model": image_bytes.model,
                             "provider": (image_bytes.metadata or {}).get("provider"),
                             "usage": (image_bytes.metadata or {}).get("usage"),
@@ -1460,9 +2103,16 @@ class StoryService:
                     page_data=back_cover,
                     story_title=story_json.get("title") or story.title or "",
                 )
+                back_cover_references = await self._story_image_reference_inputs(
+                    story,
+                    image_plan,
+                    back_cover,
+                    image_prompt=back_cover.get("image_prompt"),
+                )
                 back_cover_bytes = await self.ai_provider.create_story_image(
                     back_cover_prompt,
                     reference_image_base64=character_image_base64,
+                    reference_images_base64=back_cover_references,
                     **image_model_kwargs,
                     size=settings.STORY_BACK_COVER_IMAGE_SIZE,
                     quality=settings.STORY_IMAGE_QUALITY,
@@ -1478,6 +2128,12 @@ class StoryService:
                         "rendered_prompt": back_cover_prompt,
                         "provider_prompt_used": back_cover_bytes.prompt_used,
                         "used_character_reference": True,
+                        "reference_character_ids_used": [
+                            reference["character_id"] for reference in back_cover_references
+                        ],
+                        "reference_image_urls_used": [
+                            reference["image_url"] for reference in back_cover_references
+                        ],
                         "model": back_cover_bytes.model,
                         "provider": (back_cover_bytes.metadata or {}).get("provider"),
                         "usage": (back_cover_bytes.metadata or {}).get("usage"),
@@ -1980,6 +2636,7 @@ class StoryService:
                     "story_role": text(page.get("story_role")),
                     "scene_description": text(page.get("scene_description")),
                     "characters_present": characters_present,
+                    "child_action": text(page.get("child_action")),
                     "emotional_beat": text(page.get("emotional_beat")),
                     "learning_goal_integration": text(page.get("learning_goal_integration")),
                     "growth_step": text(page.get("growth_step")),
@@ -2006,6 +2663,10 @@ class StoryService:
             "climax_choice": text(story_plan.get("climax_choice")),
             "resolution_payoff": text(story_plan.get("resolution_payoff")),
             "moral_explanation": text(story_plan.get("moral_explanation")),
+            "story_spine": story_plan.get("story_spine") if isinstance(story_plan.get("story_spine"), dict) else {},
+            "language_profile": story_plan.get("language_profile")
+            if isinstance(story_plan.get("language_profile"), dict)
+            else {},
             "content_anchors": story_plan.get("content_anchors")
             if isinstance(story_plan.get("content_anchors"), dict)
             else {},

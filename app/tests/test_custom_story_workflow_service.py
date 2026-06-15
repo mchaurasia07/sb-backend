@@ -183,6 +183,29 @@ def test_story_generation_request_can_disable_workflow_execution_for_ui_testing(
     assert payload.execute_workflow is False
 
 
+def test_custom_story_execute_workflow_uses_env_default_when_omitted(monkeypatch):
+    payload = StoryGenerationRequest(
+        child_id=uuid4(),
+        reader_category="Early Reader",
+        category="adventure",
+    )
+    monkeypatch.setattr(custom_story_workflow_service.settings, "CUSTOM_STORY_EXECUTE_WORKFLOW_DEFAULT", True)
+
+    assert CustomStoryWorkflowService._effective_execute_workflow(payload) is True
+
+
+def test_custom_story_execute_workflow_request_value_overrides_env_default(monkeypatch):
+    payload = StoryGenerationRequest(
+        child_id=uuid4(),
+        reader_category="Early Reader",
+        category="adventure",
+        execute_workflow=False,
+    )
+    monkeypatch.setattr(custom_story_workflow_service.settings, "CUSTOM_STORY_EXECUTE_WORKFLOW_DEFAULT", True)
+
+    assert CustomStoryWorkflowService._effective_execute_workflow(payload) is False
+
+
 def test_story_generation_request_reader_category_alias_derives_age_group():
     payload = StoryGenerationRequest(
         child_id=uuid4(),
@@ -276,6 +299,7 @@ async def test_create_persists_workflow_before_safety_llm(monkeypatch):
     async def _commit():
         created["committed"] = True
 
+    monkeypatch.setattr(custom_story_workflow_service.settings, "CUSTOM_STORY_EXECUTE_WORKFLOW_DEFAULT", False)
     monkeypatch.setattr(custom_story_workflow_service.StoryInputSafetyService, "validate", _validate_should_not_run)
     service.children = SimpleNamespace(get_for_user=_get_child)
     service.workflows = SimpleNamespace(create=_create_workflow)
@@ -889,6 +913,7 @@ async def test_process_reconciled_image_job_updates_matching_step_response():
     )
     job = SimpleNamespace(
         id=uuid4(),
+        story_id=None,
         status=StoryBatchJobStatus.RUNNING,
         request_keys=["page_1"],
         response_payload=None,
@@ -1061,6 +1086,9 @@ async def test_delayed_run_publishes_after_enabled_batch_jobs_complete():
         calls["published"] = workflow_arg.id
         workflow_arg.story_id = story_id
 
+    async def _notify(workflow_arg):
+        calls["notified"] = workflow_arg.id
+
     class _Runner:
         async def _ensure_story_ai_config(self, story):
             calls["ensure_config"] = story.id
@@ -1071,6 +1099,7 @@ async def test_delayed_run_publishes_after_enabled_batch_jobs_complete():
     service.batch_jobs = batches
     service._story_runner = lambda workflow_arg: _Runner()
     service._publish_story = _publish
+    service._send_completion_notifications = _notify
 
     result = await service.run(workflow.id)
 
@@ -1078,3 +1107,41 @@ async def test_delayed_run_publishes_after_enabled_batch_jobs_complete():
     assert result.current_step is None
     assert result.story_id == story_id
     assert calls["published"] == workflow.id
+    assert calls["notified"] == workflow.id
+
+
+@pytest.mark.asyncio
+async def test_send_completion_notifications_uses_published_story(monkeypatch):
+    story_id = uuid4()
+    workflow = _workflow(
+        story_id=story_id,
+        story_json={"title": "Mira's Map", "pages": [{"page_number": 1, "text": "Mira listened."}]},
+    )
+    story = SimpleNamespace(id=story_id, user_id=workflow.user_id, title="Mira's Map")
+    calls = {}
+
+    class _Stories:
+        async def get_by_id(self, requested_story_id):
+            calls["requested_story_id"] = requested_story_id
+            return story
+
+    class _CompletionService:
+        def __init__(self, session):
+            calls["session"] = session
+
+        async def send_story_completed(self, story_arg, story_json_arg):
+            calls["story"] = story_arg
+            calls["story_json"] = story_json_arg
+
+    service = CustomStoryWorkflowService.__new__(CustomStoryWorkflowService)
+    service.stories = _Stories()
+    service.session = SimpleNamespace(name="session")
+
+    monkeypatch.setattr(custom_story_workflow_service, "StoryCompletionEmailService", _CompletionService)
+
+    await service._send_completion_notifications(workflow)
+
+    assert calls["requested_story_id"] == story_id
+    assert calls["session"] is service.session
+    assert calls["story"] is story
+    assert calls["story_json"] == workflow.story_json

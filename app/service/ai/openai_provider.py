@@ -419,7 +419,7 @@ Focus only on stable identity details needed for a reusable storybook character 
     async def create_story_image(
         self,
         prompt: str,
-        reference_image_base64: str,
+        reference_image_base64: str | None = None,
         **kwargs: Any,
     ) -> ImageGenerationResult:
         """Generate a story image using a prompt and base64 character reference image."""
@@ -439,6 +439,8 @@ Focus only on stable identity details needed for a reusable storybook character 
             )
 
         try:
+            if not reference_image_base64:
+                raise AppException("Reference image data is required", code="INVALID_REFERENCE_IMAGE")
             reference_image = parse_base64_image_data(reference_image_base64)
 
             analysis_prompt = f"""Describe the Master Character Reference Portrait for consistent storybook illustration.
