@@ -96,9 +96,11 @@ def test_tts_prompt_marks_story_text_as_only_spoken_content():
         emotion="wonder",
     )
 
-    assert "Speak the story text only" in prompt
+    assert "Speak ONLY the story text contained within NARRATION_TEXT." in prompt
     assert "Do not add, remove, translate, summarize, or rewrite any words." in prompt
-    assert "<<<NARRATION_TEXT" in prompt
+    assert "Read exclamations and interjections with expressive feeling" in prompt
+    assert '"vah/waah"' in prompt
+    assert "<NARRATION_TEXT>" in prompt
     assert "Mira opened the moon map." in prompt
 
 

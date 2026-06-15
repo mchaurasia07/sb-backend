@@ -75,27 +75,33 @@ class GenericStoryWorkflowRepository:
         self,
         *,
         user_id: UUID | None = None,
+        title: str | None = None,
         page: int,
         page_size: int,
     ) -> tuple[list[GenericStoryWorkflow], int]:
-        filters = []
-        if user_id is not None:
-            filters.append(GenericStoryWorkflow.user_id == user_id)
+        filters = self._list_filters(user_id=user_id, title=title)
 
         total = await self.session.scalar(
             select(func.count()).select_from(GenericStoryWorkflow).where(*filters)
         )
         result = await self.session.execute(
-            self._list_statement(user_id=user_id, page=page, page_size=page_size)
+            self._list_statement(user_id=user_id, title=title, page=page, page_size=page_size)
         )
         return list(result.scalars().all()), int(total or 0)
 
     @staticmethod
-    def _list_statement(*, user_id: UUID | None = None, page: int, page_size: int):
+    def _list_filters(*, user_id: UUID | None = None, title: str | None = None):
         filters = []
         if user_id is not None:
             filters.append(GenericStoryWorkflow.user_id == user_id)
+        normalized_title = str(title or "").strip().lower()
+        if normalized_title:
+            filters.append(func.lower(GenericStoryWorkflow.title).like(f"%{normalized_title}%"))
+        return filters
 
+    @classmethod
+    def _list_statement(cls, *, user_id: UUID | None = None, title: str | None = None, page: int, page_size: int):
+        filters = cls._list_filters(user_id=user_id, title=title)
         return (
             select(GenericStoryWorkflow)
             .options(

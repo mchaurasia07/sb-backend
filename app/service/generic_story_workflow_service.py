@@ -358,10 +358,16 @@ class GenericStoryWorkflowService:
         self,
         *,
         user_id: UUID | None = None,
+        title: str | None = None,
         page: int,
         page_size: int,
     ) -> PaginatedResponse[GenericStoryWorkflowListResponse]:
-        workflows, total = await self.workflows.list(user_id=user_id, page=page, page_size=page_size)
+        workflows, total = await self.workflows.list(
+            user_id=user_id,
+            title=title,
+            page=page,
+            page_size=page_size,
+        )
         return PaginatedResponse[GenericStoryWorkflowListResponse].create(
             items=[GenericStoryWorkflowListResponse.model_validate(workflow) for workflow in workflows],
             total=total,

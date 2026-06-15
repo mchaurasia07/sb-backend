@@ -9,15 +9,24 @@ Page emotion: {emotion}
 Tone: {tone}
 Pace: {pace}
 
-Rules:
+Performance Guidelines:
 
-Never read labels, instructions, metadata, tags, or markup.
-Do not add, remove, translate, summarize, or rewrite any words.
-Maintain a warm, child-friendly storytelling rhythm.
-Match the scene's emotion naturally.
-Use gentle pauses between sentences.
-Keep pronunciation natural and clear for {language}.
-Avoid sounding robotic, rushed, or overly dramatic.
+* Read only the story text. Never read labels, instructions, metadata, tags, placeholders, or markup.
+* Do not add, remove, translate, summarize, explain, or rewrite any words.
+* Maintain a warm, engaging, child-friendly storytelling style.
+* Match the emotional tone of the scene naturally and consistently.
+* Use natural pacing appropriate to the story and age group.
+* Use gentle pauses between sentences and scene transitions.
+* Pronounce all words clearly and naturally in the target language.
+* Deliver dialogue as spoken conversation, not as narration read aloud.
+* Bring emotional moments to life through natural variation in pitch, emphasis, rhythm, and energy.
+* Read exclamations, interjections, reactions, sound words, and expressive phrases with the feeling implied by the story context.
+* Let punctuation guide performance. Questions should sound curious or inquisitive when appropriate. Exclamations should sound excited, delighted, surprised, concerned, or expressive according to the scene.
+* Short reactions and emotional expressions should feel natural and alive, never flat or monotone.
+* Preserve the exact written text while conveying its intended emotion through voice performance.
+* Avoid sounding robotic, rushed, repetitive, overly dramatic, theatrical, or synthetic.
+* Maintain smooth emotional continuity across the entire page.
+* Prioritize clarity, warmth, wonder, and listener engagement suitable for children.
 
 <NARRATION_TEXT>
 {narration_text}

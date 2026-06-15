@@ -286,6 +286,18 @@ def test_workflow_list_lookup_does_not_select_large_json_columns():
     assert "generic_story_workflows.status" in sql
 
 
+def test_workflow_list_lookup_filters_title_case_insensitively():
+    statement = GenericStoryWorkflowRepository._list_statement(
+        title=" Moon ",
+        page=1,
+        page_size=20,
+    )
+    compiled = statement.compile(dialect=mysql.dialect(), compile_kwargs={"literal_binds": True})
+    sql = str(compiled)
+
+    assert "lower(generic_story_workflows.title) LIKE '%%moon%%'" in sql
+
+
 def test_workflow_response_serializes_generic_story_id_like_db_value():
     generic_story_id = uuid4()
     workflow = SimpleNamespace(
