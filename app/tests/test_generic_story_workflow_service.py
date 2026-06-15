@@ -1,5 +1,6 @@
 import base64
 from datetime import UTC, datetime
+import importlib.util
 import json
 import logging
 from pathlib import Path
@@ -13,6 +14,7 @@ from app.core.exceptions import AppException
 from app.core.config import settings
 from app.entity.generic_story_workflow import GenericStoryWorkflow, GenericStoryWorkflowStep
 from app.entity.story_batch_job import StoryBatchJobStatus, StoryBatchJobType
+from app.entity.story_step import StepStatus
 from app.model.request.generic_story_workflow import (
     GenericStoryWorkflowCreateRequest,
     GenericStoryWorkflowExecuteRequest,
@@ -73,6 +75,192 @@ def test_generic_story_workflow_has_user_created_at_index():
         "generic_story_id",
         "created_at",
     )
+
+
+def _generic_steps_migration():
+    path = (
+        Path(__file__).resolve().parents[2]
+        / "alembic"
+        / "versions"
+        / "20260614_0052_add_generic_story_workflow_steps.py"
+    )
+    spec = importlib.util.spec_from_file_location("generic_story_workflow_steps_migration", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+class _FakeGenericWorkflowSteps:
+    def __init__(self):
+        self.records = []
+
+    async def create(self, workflow_id, step_name, retry_count=0):
+        record = SimpleNamespace(
+            id=uuid4(),
+            workflow_id=workflow_id,
+            step_name=GenericStoryWorkflowStep(step_name),
+            status=StepStatus.PENDING,
+            input_json=None,
+            prompt=None,
+            output_json=None,
+            error_message=None,
+            retry_count=retry_count,
+            started_at=None,
+            completed_at=None,
+            created_at=datetime.now(UTC),
+        )
+        self.records.append(record)
+        return record
+
+    async def latest_for_workflow_step(self, workflow_id, step_name):
+        matching = [
+            record
+            for record in self.records
+            if record.workflow_id == workflow_id and record.step_name == GenericStoryWorkflowStep(step_name)
+        ]
+        return matching[-1] if matching else None
+
+    async def list_by_workflow(self, workflow_id):
+        return [record for record in self.records if record.workflow_id == workflow_id]
+
+    async def update(self, step):
+        return step
+
+
+@pytest.mark.asyncio
+async def test_seed_step_records_creates_pending_rows_for_ordered_steps():
+    workflow = SimpleNamespace(id=uuid4())
+    service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
+    service.steps = _FakeGenericWorkflowSteps()
+
+    await service._seed_step_records(workflow)
+
+    assert [record.step_name for record in service.steps.records] == service.ORDERED_STEPS
+    assert all(record.status == StepStatus.PENDING for record in service.steps.records)
+
+
+@pytest.mark.asyncio
+async def test_seed_step_records_only_creates_missing_rows():
+    workflow = SimpleNamespace(id=uuid4())
+    service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
+    service.steps = _FakeGenericWorkflowSteps()
+    existing = await service.steps.create(workflow.id, GenericStoryWorkflowStep.IMAGE_GENERATION.value)
+
+    await service._seed_step_records(workflow)
+
+    assert len(service.steps.records) == len(service.ORDERED_STEPS)
+    assert service.steps.records.count(existing) == 1
+    assert [record.step_name for record in service.steps.records] == [
+        GenericStoryWorkflowStep.IMAGE_GENERATION,
+        GenericStoryWorkflowStep.CHARACTER_EXTRACTION,
+        GenericStoryWorkflowStep.SCENE_PLAN_GENERATION,
+        GenericStoryWorkflowStep.VISUAL_BIBLE_GENERATION,
+        GenericStoryWorkflowStep.STORY_GENERATION,
+        GenericStoryWorkflowStep.IMAGE_PLAN_GENERATION,
+        GenericStoryWorkflowStep.NARRATION_GENERATION,
+        GenericStoryWorkflowStep.PUBLISH_GENERIC_STORY,
+    ]
+
+
+def test_generic_workflow_steps_migration_marks_completed_legacy_workflow_steps():
+    migration = _generic_steps_migration()
+    workflow = {
+        "id": str(uuid4()),
+        "status": "COMPLETED",
+        "current_step": None,
+        "generic_story_id": str(uuid4()),
+        "title": "The Moon Bell",
+        "cover_image": "https://cdn.example.test/cover.png",
+        "character_analysis_json": {"characters": [{"name": "Mira"}]},
+        "scene_plan_json": {"pages": [{"page_number": 1}]},
+        "visual_bible_json": {"characters": [{"name": "Mira"}]},
+        "story_json": {
+            "title": "The Moon Bell",
+            "cover_image_url": "https://cdn.example.test/cover.png",
+            "pages": [
+                {
+                    "page_number": 1,
+                    "image_url": "https://cdn.example.test/page-1.png",
+                    "audio_url": "https://cdn.example.test/page-1.wav",
+                }
+            ],
+        },
+        "image_plan_json": {"cover": {"image_prompt": "Cover prompt."}},
+    }
+
+    statuses = {step: migration._backfilled_step_status(workflow, step) for step in migration.ORDERED_STEPS}
+
+    assert set(statuses.values()) == {"COMPLETED"}
+    assert migration._backfilled_step_output(workflow, "VISUAL_BIBLE_GENERATION")["characters"][0]["name"] == "Mira"
+    assert migration._backfilled_step_output(workflow, "PUBLISH_GENERIC_STORY")["title"] == "The Moon Bell"
+
+
+def test_generic_workflow_steps_migration_marks_failed_and_submitted_image_steps():
+    migration = _generic_steps_migration()
+    workflow = {
+        "id": str(uuid4()),
+        "status": "FAILED",
+        "current_step": "IMAGE_GENERATION",
+        "error_message": "image batch failed",
+        "story_json": {"title": "The Moon Bell", "pages": [{"page_number": 1}]},
+        "image_plan_json": {"pages": [{"page_number": 1}]},
+    }
+
+    assert migration._backfilled_step_status(workflow, "STORY_GENERATION") == "COMPLETED"
+    assert migration._backfilled_step_status(workflow, "IMAGE_PLAN_GENERATION") == "COMPLETED"
+    assert migration._backfilled_step_status(workflow, "IMAGE_GENERATION") == "FAILED"
+
+    workflow["status"] = "IN_PROGRESS"
+    workflow["error_message"] = None
+
+    assert migration._backfilled_step_status(workflow, "IMAGE_GENERATION") == "SUBMITTED_BATCH_JOB"
+
+    workflow["story_json"]["pages"][0]["image_url"] = "https://cdn.example.test/page-1.png"
+
+    assert migration._backfilled_step_status(workflow, "IMAGE_GENERATION") == "COMPLETED"
+
+
+@pytest.mark.asyncio
+async def test_execute_steps_persists_completed_step_record_output():
+    workflow = _retry_workflow(status="PENDING", current_step=None, character_analysis_json=None)
+    service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
+    service.steps = _FakeGenericWorkflowSteps()
+
+    async def _update(workflow_arg):
+        return workflow_arg
+
+    async def _commit():
+        return None
+
+    async def _rollback():
+        return None
+
+    async def _execute_single_step(workflow_arg, step, *, public_base_url, payload):
+        assert step == GenericStoryWorkflowStep.CHARACTER_EXTRACTION
+        workflow_arg.character_analysis_json = {
+            "source_title": "The Moon Bell",
+            "characters": [{"name": "Mira"}],
+        }
+
+    service.workflows = SimpleNamespace(update=_update)
+    service.session = SimpleNamespace(commit=_commit, rollback=_rollback)
+    service._execute_single_step = _execute_single_step
+    service._log_workflow_event = lambda *args, **kwargs: None
+
+    await service._execute_steps(
+        workflow,
+        [GenericStoryWorkflowStep.CHARACTER_EXTRACTION],
+        payload=GenericStoryWorkflowExecuteRequest(),
+        public_base_url="https://api.example.test",
+        event_name="workflow_started",
+        requested_step=GenericStoryWorkflowStep.CHARACTER_EXTRACTION.value,
+    )
+
+    step_record = service.steps.records[0]
+    assert step_record.status == StepStatus.COMPLETED
+    assert step_record.output_json["characters"][0]["name"] == "Mira"
+    assert step_record.input_json["actual_story_chars"] > 0
 
 
 def test_latest_workflow_lookup_uses_mysql_index_hint():
@@ -1984,29 +2172,26 @@ async def test_get_steps_returns_details_for_all_workflow_steps():
     )
     service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
 
-    async def _get_owned(user_id, requested_workflow_id):
+    async def _get_by_id(requested_workflow_id):
         assert requested_workflow_id == workflow_id
         return workflow
 
-    service._get_owned = _get_owned
+    service.workflows = SimpleNamespace(get_by_id=_get_by_id)
 
     steps = await service.get_steps(uuid4(), workflow_id)
     by_name = {step.step_name: step for step in steps}
 
     assert [step.step_name for step in steps] == [
-        "VISUAL_BIBLE_GENERATION",
-        "STORY_GENERATION",
         "IMAGE_GENERATION",
         "NARRATION_GENERATION",
     ]
     assert steps[0].genric_story_id == str(generic_story_id)
     assert "CHARACTER_EXTRACTION" not in by_name
     assert "SCENE_PLAN_GENERATION" not in by_name
+    assert "VISUAL_BIBLE_GENERATION" not in by_name
+    assert "STORY_GENERATION" not in by_name
     assert "IMAGE_PLAN_GENERATION" not in by_name
     assert "PUBLISH_GENERIC_STORY" not in by_name
-    assert by_name["VISUAL_BIBLE_GENERATION"].summary["character_count"] == 1
-    assert by_name["VISUAL_BIBLE_GENERATION"].output["characters"][0]["name"] == "Mira"
-    assert by_name["STORY_GENERATION"].output["title"] == "Journey to Mars"
     assert by_name["IMAGE_GENERATION"].summary["uses_dummy_images"] is True
     assert by_name["IMAGE_GENERATION"].output["visual_bible"]["characters"][0]["name"] == "Mira"
     assert by_name["IMAGE_GENERATION"].output["final_prompts"] == [
@@ -2024,13 +2209,13 @@ async def test_get_steps_returns_details_for_all_workflow_steps():
     assert image_steps[0].output["final_prompts"][0]["page"] == "cover"
 
     with pytest.raises(AppException) as exc_info:
-        await service.get_steps(uuid4(), workflow_id, step_name="CHARACTER_EXTRACTION")
+        await service.get_steps(uuid4(), workflow_id, step_name="VISUAL_BIBLE_GENERATION")
 
     assert exc_info.value.code == "GENERIC_STORY_STEP_NOT_EXPOSED"
 
 
 @pytest.mark.asyncio
-async def test_get_steps_uses_visual_bible_fallback_for_legacy_workflows():
+async def test_get_steps_rejects_unexposed_visual_bible_step():
     workflow_id = uuid4()
     workflow = SimpleNamespace(
         id=workflow_id,
@@ -2055,22 +2240,16 @@ async def test_get_steps_uses_visual_bible_fallback_for_legacy_workflows():
     )
     service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
 
-    async def _get_owned(user_id, requested_workflow_id):
+    async def _get_by_id(requested_workflow_id):
         assert requested_workflow_id == workflow_id
         return workflow
 
-    service._get_owned = _get_owned
+    service.workflows = SimpleNamespace(get_by_id=_get_by_id)
 
-    steps = await service.get_steps(uuid4(), workflow_id, step_name="VISUAL_BIBLE_GENERATION")
+    with pytest.raises(AppException) as exc_info:
+        await service.get_steps(uuid4(), workflow_id, step_name="VISUAL_BIBLE_GENERATION")
 
-    assert len(steps) == 1
-    assert steps[0].status == "COMPLETED"
-    assert steps[0].summary == {
-        "character_count": 1,
-        "location_count": 1,
-        "object_count": 1,
-    }
-    assert steps[0].output["characters"][0]["name"] == "Mira"
+    assert exc_info.value.code == "GENERIC_STORY_STEP_NOT_EXPOSED"
 
 
 @pytest.mark.asyncio

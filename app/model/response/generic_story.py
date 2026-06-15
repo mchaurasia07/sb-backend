@@ -85,6 +85,27 @@ class GenericStoryBatchNarrationSubmitResponse(GenericStoryBatchImageSubmitRespo
     language_code: str
 
 
+class GenericStoryBatchJobResponse(BaseModel):
+    id: UUID
+    generic_story_id: UUID | None
+    workflow_id: UUID
+    job_type: str
+    status: str
+    provider: str
+    provider_job_name: str | None
+    provider_model: str | None
+    provider_state: str | None
+    attempt: int
+    expected_item_count: int
+    completed_item_count: int
+    failed_item_count: int
+    request_keys: list[str] | None
+    missing_keys: list[str] | None
+    error_message: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
 class GenericStoryNarrationPromptPageResponse(BaseModel):
     page_number: int
     text: str

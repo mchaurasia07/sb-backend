@@ -16,6 +16,7 @@ from app.entity.generic_story_workflow import (
     GenericStoryWorkflow,
     GenericStoryWorkflowStatus,
     GenericStoryWorkflowStep,
+    GenericStoryWorkflowStepRecord,
 )
 from app.entity.notification import (
     Notification,
@@ -52,6 +53,7 @@ __all__ = [
     "GenericStoryWorkflow",
     "GenericStoryWorkflowStatus",
     "GenericStoryWorkflowStep",
+    "GenericStoryWorkflowStepRecord",
     "Notification",
     "NotificationAccountType",
     "NotificationAudience",

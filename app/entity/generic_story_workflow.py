@@ -1,11 +1,14 @@
 from enum import StrEnum
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, Index, Integer, JSON, String, Text
+from datetime import datetime
+
+from sqlalchemy import DateTime, Enum as SAEnum, ForeignKey, Index, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.entity.base import TimestampMixin, UUIDPrimaryKeyMixin
+from app.entity.story_step import StepStatus
 from app.entity.types import HyphenatedUUID
 
 
@@ -83,3 +86,36 @@ class GenericStoryWorkflow(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     user = relationship("User", foreign_keys=[user_id])
     generic_story = relationship("GenericStory", foreign_keys=[generic_story_id])
+    steps = relationship("GenericStoryWorkflowStepRecord", back_populates="workflow", cascade="all, delete-orphan")
+
+
+class GenericStoryWorkflowStepRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Audit trail for generic story workflow steps."""
+
+    __tablename__ = "generic_story_workflow_steps"
+    __table_args__ = (
+        Index("ix_generic_story_workflow_steps_workflow_id", "workflow_id"),
+        Index("ix_generic_story_workflow_steps_step_name", "step_name"),
+        Index("ix_generic_story_workflow_steps_status", "status"),
+        Index("ix_generic_story_workflow_steps_workflow_created_at", "workflow_id", "created_at"),
+        Index("ix_generic_story_workflow_steps_workflow_step_created_at", "workflow_id", "step_name", "created_at"),
+    )
+
+    workflow_id: Mapped[UUID] = mapped_column(
+        HyphenatedUUID(), ForeignKey("generic_story_workflows.id", ondelete="CASCADE"), nullable=False
+    )
+    step_name: Mapped[GenericStoryWorkflowStep] = mapped_column(
+        SAEnum(GenericStoryWorkflowStep, native_enum=False), nullable=False
+    )
+    status: Mapped[StepStatus] = mapped_column(
+        SAEnum(StepStatus, native_enum=False), nullable=False, default=StepStatus.PENDING
+    )
+    input_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    output_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    workflow = relationship("GenericStoryWorkflow", back_populates="steps", foreign_keys=[workflow_id])

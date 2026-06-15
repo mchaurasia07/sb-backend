@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -122,6 +123,74 @@ def _service(workflow, monkeypatch):
         staticmethod(lambda image_bytes, aspect_ratio: image_bytes),
     )
     return service
+
+
+@pytest.mark.asyncio
+async def test_list_batch_jobs_returns_paginated_jobs_with_filters():
+    generic_story_id = uuid4()
+    workflow_id = uuid4()
+    job_id = uuid4()
+    now = datetime.now(UTC)
+
+    class FakeBatchRepo:
+        def __init__(self):
+            self.kwargs = None
+
+        async def list_paginated(self, **kwargs):
+            self.kwargs = kwargs
+            return [
+                SimpleNamespace(
+                    id=job_id,
+                    generic_story_id=generic_story_id,
+                    workflow_id=workflow_id,
+                    job_type=StoryBatchJobType.IMAGE,
+                    status=StoryBatchJobStatus.RUNNING,
+                    provider="openai",
+                    provider_job_name="batch_123",
+                    provider_model="gpt-image-1",
+                    provider_state="in_progress",
+                    attempt=2,
+                    expected_item_count=4,
+                    completed_item_count=1,
+                    failed_item_count=0,
+                    request_keys=["page_1", "page_2"],
+                    missing_keys=["page_2"],
+                    error_message=None,
+                    created_at=now,
+                    updated_at=now,
+                )
+            ], 3
+
+    service = GenericStoryBatchService.__new__(GenericStoryBatchService)
+    service.batch_jobs = FakeBatchRepo()
+
+    response = await service.list_batch_jobs(
+        page=2,
+        page_size=1,
+        generic_story_id=generic_story_id,
+        workflow_id=workflow_id,
+        status_filter=StoryBatchJobStatus.RUNNING,
+        job_type=StoryBatchJobType.IMAGE,
+        provider="openai",
+    )
+
+    assert service.batch_jobs.kwargs == {
+        "page": 2,
+        "page_size": 1,
+        "generic_story_id": generic_story_id,
+        "workflow_id": workflow_id,
+        "status": StoryBatchJobStatus.RUNNING,
+        "job_type": StoryBatchJobType.IMAGE,
+        "provider": "openai",
+    }
+    assert response.total == 3
+    assert response.page == 2
+    assert response.page_size == 1
+    assert response.total_pages == 3
+    assert response.items[0].id == job_id
+    assert response.items[0].job_type == "IMAGE"
+    assert response.items[0].status == "RUNNING"
+    assert response.items[0].request_keys == ["page_1", "page_2"]
 
 
 @pytest.mark.asyncio

@@ -5,7 +5,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
 from sqlalchemy.orm.attributes import flag_modified
 
-from app.entity.generic_story_workflow import GenericStoryWorkflow
+from app.entity.generic_story_workflow import (
+    GenericStoryWorkflow,
+    GenericStoryWorkflowStep,
+    GenericStoryWorkflowStepRecord,
+)
+from app.entity.story_step import StepStatus
 
 
 class GenericStoryWorkflowRepository:
@@ -143,3 +148,74 @@ class GenericStoryWorkflowRepository:
     async def delete(self, workflow: GenericStoryWorkflow) -> None:
         await self.session.delete(workflow)
         await self.session.flush()
+
+
+class GenericStoryWorkflowStepRepository:
+    """Persistence operations for generic story workflow step details."""
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def create(
+        self,
+        workflow_id: UUID,
+        step_name: str,
+        retry_count: int = 0,
+    ) -> GenericStoryWorkflowStepRecord:
+        value = step_name.value if hasattr(step_name, "value") else str(step_name)
+        step = GenericStoryWorkflowStepRecord(
+            workflow_id=workflow_id,
+            step_name=GenericStoryWorkflowStep(value),
+            status=StepStatus.PENDING,
+            retry_count=retry_count,
+        )
+        self.session.add(step)
+        await self.session.flush()
+        return step
+
+    async def latest_for_workflow_step(
+        self,
+        workflow_id: UUID,
+        step_name: GenericStoryWorkflowStep,
+    ) -> GenericStoryWorkflowStepRecord | None:
+        value = step_name.value if hasattr(step_name, "value") else str(step_name)
+        id_result = await self.session.execute(
+            select(GenericStoryWorkflowStepRecord.id)
+            .where(
+                GenericStoryWorkflowStepRecord.workflow_id == workflow_id,
+                GenericStoryWorkflowStepRecord.step_name == GenericStoryWorkflowStep(value),
+            )
+            .order_by(GenericStoryWorkflowStepRecord.created_at.desc())
+            .limit(1)
+        )
+        step_id = id_result.scalar_one_or_none()
+        if step_id is None:
+            return None
+
+        result = await self.session.execute(
+            select(GenericStoryWorkflowStepRecord).where(GenericStoryWorkflowStepRecord.id == step_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def list_by_workflow(self, workflow_id: UUID) -> list[GenericStoryWorkflowStepRecord]:
+        id_result = await self.session.execute(
+            select(GenericStoryWorkflowStepRecord.id)
+            .where(GenericStoryWorkflowStepRecord.workflow_id == workflow_id)
+            .order_by(GenericStoryWorkflowStepRecord.created_at.asc())
+        )
+        step_ids = list(id_result.scalars().all())
+        if not step_ids:
+            return []
+
+        result = await self.session.execute(
+            select(GenericStoryWorkflowStepRecord).where(GenericStoryWorkflowStepRecord.id.in_(step_ids))
+        )
+        steps_by_id = {str(step.id): step for step in result.scalars().all()}
+        return [steps_by_id[str(step_id)] for step_id in step_ids if str(step_id) in steps_by_id]
+
+    async def update(self, step: GenericStoryWorkflowStepRecord) -> GenericStoryWorkflowStepRecord:
+        for field_name in ("input_json", "output_json"):
+            if getattr(step, field_name, None) is not None:
+                flag_modified(step, field_name)
+        await self.session.flush()
+        return step

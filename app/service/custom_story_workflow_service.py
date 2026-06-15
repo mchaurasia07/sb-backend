@@ -171,6 +171,11 @@ class CustomStoryWorkflowService:
         self.stories = StoryRepository(session)
         self.story_pages = StoryPageRepository(session)
 
+    @staticmethod
+    def _print_reconcile_event(event: str, **fields: Any) -> None:
+        details = " ".join(f"{key}={value}" for key, value in fields.items() if value is not None)
+        print(f"[CUSTOM_RECONCILE] {event}" + (f" {details}" if details else ""), flush=True)
+
     async def create(self, user_id: UUID, payload: StoryGenerationRequest) -> CustomStoryWorkflowResponse:
         child = await self.children.get_for_user(user_id, payload.child_id)
         if child is None:
@@ -765,6 +770,7 @@ class CustomStoryWorkflowService:
         jobs = await self.batch_jobs.list_reconcilable(limit=limit)
         results: list[dict[str, Any]] = []
         processed_count = 0
+        self._print_reconcile_event("started", job_count=len(jobs), limit=limit)
         for job in jobs:
             job_result = {
                 "workflow_id": job.workflow_id,
@@ -775,12 +781,42 @@ class CustomStoryWorkflowService:
                 "provider_state": job.provider_state,
             }
             try:
+                self._print_reconcile_event(
+                    "job_started",
+                    workflow_id=job.workflow_id,
+                    story_id=job.story_id,
+                    batch_job_id=job.id,
+                    job_type=self._status_value(job.job_type),
+                    status=self._status_value(job.status),
+                    provider_state=job.provider_state,
+                )
                 result = await self._reconcile_batch_job(job)
                 if result["action"] not in {"still_running", "skipped"}:
                     processed_count += 1
                 results.append(result)
+                self._print_reconcile_event(
+                    "job_completed",
+                    workflow_id=job.workflow_id,
+                    story_id=job.story_id,
+                    batch_job_id=job.id,
+                    job_type=self._status_value(job.job_type),
+                    action=result.get("action"),
+                    status=result.get("status"),
+                    provider_state=result.get("provider_state"),
+                    message=result.get("message"),
+                )
             except Exception as exc:
                 await self.session.rollback()
+                self._print_reconcile_event(
+                    "job_error",
+                    workflow_id=job.workflow_id,
+                    story_id=job.story_id,
+                    batch_job_id=job.id,
+                    job_type=self._status_value(job.job_type),
+                    status=self._status_value(job.status),
+                    provider_state=job.provider_state,
+                    error=str(exc),
+                )
                 results.append(
                     {
                         **job_result,
@@ -788,6 +824,7 @@ class CustomStoryWorkflowService:
                         "message": str(exc),
                     }
                 )
+        self._print_reconcile_event("completed", checked_count=len(jobs), processed_count=processed_count)
         return {"checked_count": len(jobs), "processed_count": processed_count, "results": results}
 
     async def _reconcile_batch_job(self, job: CustomStoryBatchJob) -> dict[str, Any]:
@@ -806,11 +843,32 @@ class CustomStoryWorkflowService:
         provider_job = await batch_runner.google_client.aio.batches.get(name=job.provider_job_name)
         state_name = batch_runner._job_state_name(provider_job)
         job.provider_state = state_name
+        self._print_reconcile_event(
+            "google_batch_status",
+            workflow_id=job.workflow_id,
+            story_id=job.story_id,
+            batch_job_id=job.id,
+            job_type=self._status_value(job.job_type),
+            provider_job_name=job.provider_job_name,
+            provider_state=state_name,
+        )
 
         if state_name in batch_runner.SUCCEEDED_STATES:
             if job.job_type == StoryBatchJobType.IMAGE:
+                self._print_reconcile_event(
+                    "processing_image_batch_started",
+                    workflow_id=workflow.id,
+                    story_id=job.story_id,
+                    batch_job_id=job.id,
+                )
                 await self._process_reconciled_image_job(workflow, job, provider_job, batch_runner)
             elif job.job_type == StoryBatchJobType.AUDIO:
+                self._print_reconcile_event(
+                    "processing_narration_batch_started",
+                    workflow_id=workflow.id,
+                    story_id=job.story_id,
+                    batch_job_id=job.id,
+                )
                 await self._process_reconciled_audio_job(workflow, job, provider_job, batch_runner)
 
             if self._status_value(job.status) == StoryBatchJobStatus.FAILED.value:
@@ -839,6 +897,14 @@ class CustomStoryWorkflowService:
         job.status = StoryBatchJobStatus.RUNNING
         await self.batch_jobs.update(job)
         await self.session.commit()
+        self._print_reconcile_event(
+            "job_still_running",
+            workflow_id=job.workflow_id,
+            story_id=job.story_id,
+            batch_job_id=job.id,
+            job_type=self._status_value(job.job_type),
+            provider_state=state_name,
+        )
         return self._batch_reconcile_result(job, "still_running", f"Provider state is {state_name}")
 
     async def _process_reconciled_image_job(
@@ -893,6 +959,15 @@ class CustomStoryWorkflowService:
             await self._mark_workflow_failed(workflow, job.error_message or "Image batch reconciliation failed")
         await self.workflows.update(workflow)
         await self.session.commit()
+        self._print_reconcile_event(
+            "image_batch_processed",
+            workflow_id=workflow.id,
+            story_id=job.story_id,
+            batch_job_id=job.id,
+            status=self._status_value(job.status),
+            completed=len(completed_keys),
+            failed=len(failed_keys),
+        )
 
     async def _process_reconciled_audio_job(
         self,
@@ -944,6 +1019,15 @@ class CustomStoryWorkflowService:
             await self._mark_workflow_failed(workflow, job.error_message or "Audio batch reconciliation failed")
         await self.workflows.update(workflow)
         await self.session.commit()
+        self._print_reconcile_event(
+            "narration_batch_processed",
+            workflow_id=workflow.id,
+            story_id=job.story_id,
+            batch_job_id=job.id,
+            status=self._status_value(job.status),
+            completed=len(completed_keys),
+            failed=len(failed_keys),
+        )
 
     async def _mark_workflow_failed(self, workflow: CustomStoryWorkflow, error_message: str | None) -> None:
         workflow.status = CustomStoryWorkflowStatus.FAILED

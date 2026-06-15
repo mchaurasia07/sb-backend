@@ -65,10 +65,17 @@ class GenericStoryWorkflowListResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 class GenericStoryWorkflowStepDetailResponse(BaseModel):
+    id: UUID | None = None
     workflow_id: UUID
     genric_story_id: str | None = None
     step_name: str
     status: str
     summary: dict[str, Any]
+    input: dict[str, Any] | None = None
+    prompt: str | None = None
     output: dict[str, Any] | None = None
     error_message: str | None = None
+    retry_count: int = 0
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    created_at: datetime | None = None

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import UTC, datetime
 import hashlib
 import io
 import json
@@ -26,6 +27,7 @@ from app.entity.generic_story_workflow import (
     GenericStoryWorkflowStep,
 )
 from app.entity.story_batch_job import StoryBatchJobStatus, StoryBatchJobType
+from app.entity.story_step import StepStatus
 from app.model.request.generic_story_workflow import (
     GenericStoryWorkflowCreateRequest,
     GenericStoryWorkflowExecuteRequest,
@@ -38,7 +40,10 @@ from app.model.response.generic_story_workflow import (
     GenericStoryWorkflowStepDetailResponse,
 )
 from app.repository.generic_story_repository import GenericStoryRepository
-from app.repository.generic_story_workflow_repository import GenericStoryWorkflowRepository
+from app.repository.generic_story_workflow_repository import (
+    GenericStoryWorkflowRepository,
+    GenericStoryWorkflowStepRepository,
+)
 from app.repository.child_book_repository import ChildBookRepository
 from app.repository.generic_story_batch_job_repository import GenericStoryBatchJobRepository
 from app.service.ai.google_provider import GoogleProvider
@@ -182,8 +187,6 @@ class GenericStoryWorkflowService:
         GenericStoryWorkflowStep.PUBLISH_GENERIC_STORY,
     ]
     DETAIL_STEPS = [
-        GenericStoryWorkflowStep.VISUAL_BIBLE_GENERATION,
-        GenericStoryWorkflowStep.STORY_GENERATION,
         GenericStoryWorkflowStep.IMAGE_GENERATION,
         GenericStoryWorkflowStep.NARRATION_GENERATION,
     ]
@@ -194,6 +197,7 @@ class GenericStoryWorkflowService:
         self.generic_stories = GenericStoryRepository(session)
         self.child_books = ChildBookRepository(session)
         self.batch_jobs = GenericStoryBatchJobRepository(session)
+        self.steps = GenericStoryWorkflowStepRepository(session)
         self.ai_provider = GoogleProvider(
             api_key=settings.GOOGLE_API_KEY,
             image_model=settings.GOOGLE_IMAGE_MODEL,
@@ -233,6 +237,7 @@ class GenericStoryWorkflowService:
             text_model=settings.GOOGLE_TEXT_MODEL,
             image_model=settings.GOOGLE_IMAGE_MODEL,
         )
+        await self._seed_step_records(workflow)
         await self.session.commit()
         return GenericStoryWorkflowResponse.model_validate(workflow)
 
@@ -371,7 +376,10 @@ class GenericStoryWorkflowService:
         *,
         step_name: str | None = None,
     ) -> list[GenericStoryWorkflowStepDetailResponse]:
-        workflow = await self._get_owned(user_id, workflow_id)
+        _ = user_id
+        workflow = await self.workflows.get_by_id(workflow_id)
+        if workflow is None:
+            raise NotFoundException("Generic story workflow not found", "GENERIC_STORY_WORKFLOW_NOT_FOUND")
         steps = self.DETAIL_STEPS
         if step_name:
             try:
@@ -387,6 +395,22 @@ class GenericStoryWorkflowService:
                     code="GENERIC_STORY_STEP_NOT_EXPOSED",
                 )
             steps = [requested_step]
+        step_records = await self._workflow_step_records(workflow.id)
+        if step_records:
+            if step_name:
+                step_records = [
+                    step_record
+                    for step_record in step_records
+                    if self._status_value(step_record.step_name) == requested_step.value
+                ]
+            else:
+                exposed_steps = {step.value for step in steps}
+                step_records = [
+                    step_record
+                    for step_record in step_records
+                    if self._status_value(step_record.step_name) in exposed_steps
+                ]
+            return [self._step_record_response(workflow, step_record) for step_record in step_records]
         return [
             GenericStoryWorkflowStepDetailResponse(
                 workflow_id=workflow.id,
@@ -443,7 +467,7 @@ class GenericStoryWorkflowService:
                 details={"status": workflow.status},
             )
 
-        retry_step = self._retry_start_step(workflow)
+        retry_step = await self._retry_start_step_for_workflow(workflow)
         steps = self.ORDERED_STEPS[self.ORDERED_STEPS.index(retry_step) :]
         execute_payload = self._stored_workflow_execute_request(workflow)
         execute_payload = self._apply_workflow_feature_flags(execute_payload)
@@ -550,6 +574,7 @@ class GenericStoryWorkflowService:
                 current_step_for_log = step.value
                 if step == GenericStoryWorkflowStep.IMAGE_GENERATION and payload.skip_image_generation:
                     workflow.current_step = step.value
+                    step_record = await self._start_step_record(workflow, step)
                     await self.workflows.update(workflow)
                     await self.session.commit()
                     self._log_workflow_event("step_skipped_started", workflow, step=step, reason="skip_image_generation")
@@ -559,6 +584,7 @@ class GenericStoryWorkflowService:
                         public_base_url=public_base_url,
                         copy_images=False,
                     )
+                    await self._complete_step_record(workflow, step, step_record, output=self._step_output(workflow, step))
                     await self.workflows.update(workflow)
                     await self.session.commit()
                     self._log_workflow_event(
@@ -571,6 +597,7 @@ class GenericStoryWorkflowService:
                     continue
                 if step == GenericStoryWorkflowStep.NARRATION_GENERATION and payload.skip_narration_generation:
                     workflow.current_step = step.value
+                    step_record = await self._start_step_record(workflow, step)
                     await self.workflows.update(workflow)
                     await self.session.commit()
                     self._log_workflow_event(
@@ -585,6 +612,7 @@ class GenericStoryWorkflowService:
                         public_base_url=public_base_url,
                         copy_images=False,
                     )
+                    await self._complete_step_record(workflow, step, step_record, output=self._step_output(workflow, step))
                     await self.workflows.update(workflow)
                     await self.session.commit()
                     self._log_workflow_event(
@@ -597,6 +625,7 @@ class GenericStoryWorkflowService:
                     continue
 
                 workflow.current_step = step.value
+                step_record = await self._start_step_record(workflow, step)
                 await self.workflows.update(workflow)
                 await self.session.commit()
                 self._log_workflow_event("step_started", workflow, step=step)
@@ -607,6 +636,7 @@ class GenericStoryWorkflowService:
                     payload=payload,
                     public_base_url=public_base_url,
                 )
+                await self._complete_step_record(workflow, step, step_record, output=self._step_output(workflow, step))
                 await self.workflows.update(workflow)
                 await self.session.commit()
                 if step == GenericStoryWorkflowStep.IMAGE_GENERATION:
@@ -640,6 +670,7 @@ class GenericStoryWorkflowService:
             workflow.status = GenericStoryWorkflowStatus.FAILED.value
             workflow.current_step = current_step_for_log
             workflow.error_message = str(exc)
+            await self._fail_step_record(workflow, current_step_for_log, str(exc))
             logger.error(
                 "generic_story_workflow event=workflow_failed workflow_id=%s generic_story_id=%s step=%s status=%s error=%s duration_ms=%s",
                 self._log_field_value(workflow_id_for_log),
@@ -653,6 +684,128 @@ class GenericStoryWorkflowService:
             await self.workflows.update(workflow)
             await self.session.commit()
             raise
+
+    async def _start_step_record(
+        self,
+        workflow: GenericStoryWorkflow,
+        step_name: GenericStoryWorkflowStep,
+    ):
+        steps_repo = getattr(self, "steps", None)
+        if steps_repo is None:
+            return None
+
+        latest = await steps_repo.latest_for_workflow_step(workflow.id, step_name)
+        retry_count = int(getattr(latest, "retry_count", 0) or 0)
+        reusable_statuses = {StepStatus.PENDING.value, StepStatus.IN_PROGRESS.value}
+        if latest is None or self._status_value(getattr(latest, "status", None)) not in reusable_statuses:
+            if latest is not None:
+                retry_count += 1
+            latest = await steps_repo.create(workflow.id, step_name.value, retry_count=retry_count)
+
+        latest.status = StepStatus.IN_PROGRESS
+        latest.started_at = latest.started_at or datetime.now(UTC)
+        latest.completed_at = None
+        latest.input_json = self._step_input(workflow, step_name)
+        latest.output_json = None
+        latest.error_message = None
+        await steps_repo.update(latest)
+        return latest
+
+    async def _complete_step_record(
+        self,
+        workflow: GenericStoryWorkflow,
+        step_name: GenericStoryWorkflowStep,
+        step_record,
+        *,
+        output: dict[str, Any] | None,
+    ) -> None:
+        steps_repo = getattr(self, "steps", None)
+        if steps_repo is None:
+            return
+        if step_record is None:
+            step_record = await steps_repo.latest_for_workflow_step(workflow.id, step_name)
+            if step_record is None:
+                step_record = await steps_repo.create(workflow.id, step_name.value)
+
+        step_record.status = (
+            StepStatus.SUBMITTED_BATCH_JOB
+            if step_name == GenericStoryWorkflowStep.IMAGE_GENERATION
+            and workflow.status == GenericStoryWorkflowStatus.IN_PROGRESS.value
+            and workflow.current_step == GenericStoryWorkflowStep.IMAGE_GENERATION.value
+            and not self._story_has_images(workflow.story_json or {})
+            else StepStatus.COMPLETED
+        )
+        step_record.started_at = step_record.started_at or datetime.now(UTC)
+        if step_record.status == StepStatus.COMPLETED:
+            step_record.completed_at = datetime.now(UTC)
+        step_record.output_json = output
+        step_record.error_message = None
+        await steps_repo.update(step_record)
+
+    async def _fail_step_record(
+        self,
+        workflow: GenericStoryWorkflow,
+        step_name: GenericStoryWorkflowStep | str | None,
+        error_message: str,
+    ) -> None:
+        steps_repo = getattr(self, "steps", None)
+        if steps_repo is None or not step_name:
+            return
+        try:
+            workflow_step = GenericStoryWorkflowStep(
+                step_name.value if hasattr(step_name, "value") else str(step_name)
+            )
+        except ValueError:
+            return
+        step_record = await steps_repo.latest_for_workflow_step(workflow.id, workflow_step)
+        if step_record is None:
+            step_record = await steps_repo.create(workflow.id, workflow_step.value)
+        step_record.status = StepStatus.FAILED
+        step_record.started_at = step_record.started_at or datetime.now(UTC)
+        step_record.completed_at = datetime.now(UTC)
+        step_record.error_message = error_message
+        await steps_repo.update(step_record)
+
+    async def _retry_start_step_for_workflow(self, workflow: GenericStoryWorkflow) -> GenericStoryWorkflowStep:
+        retry_step = await self._retry_start_step_from_records(workflow)
+        if retry_step is not None:
+            return retry_step
+        return self._retry_start_step(workflow)
+
+    async def _retry_start_step_from_records(
+        self,
+        workflow: GenericStoryWorkflow,
+    ) -> GenericStoryWorkflowStep | None:
+        step_records = await self._workflow_step_records(workflow.id)
+        if not step_records:
+            return None
+
+        latest_by_step: dict[str, Any] = {}
+        for step_record in step_records:
+            latest_by_step[self._status_value(step_record.step_name)] = step_record
+
+        if workflow.current_step:
+            try:
+                current_step = GenericStoryWorkflowStep(workflow.current_step)
+            except ValueError as exc:
+                raise AppException(
+                    f"Cannot retry generic story workflow from invalid current_step: {workflow.current_step}",
+                    code="GENERIC_STORY_WORKFLOW_RETRY_STEP_INVALID",
+                ) from exc
+            current_record = latest_by_step.get(current_step.value)
+            if current_record is not None and self._status_value(current_record.status) != StepStatus.COMPLETED.value:
+                return current_step
+
+        retry_statuses = {
+            StepStatus.FAILED.value,
+            StepStatus.IN_PROGRESS.value,
+            StepStatus.SUBMITTED_BATCH_JOB.value,
+        }
+        for step in self.ORDERED_STEPS:
+            step_record = latest_by_step.get(step.value)
+            if step_record is not None and self._status_value(step_record.status) in retry_statuses:
+                return step
+        return None
 
     def _retry_start_step(self, workflow: GenericStoryWorkflow) -> GenericStoryWorkflowStep:
         if workflow.current_step:
@@ -3573,6 +3726,113 @@ class GenericStoryWorkflowService:
     @staticmethod
     def _duration_ms(started_at: float) -> int:
         return int((perf_counter() - started_at) * 1000)
+
+    async def _workflow_step_records(self, workflow_id: UUID) -> list[Any]:
+        steps_repo = getattr(self, "steps", None)
+        if steps_repo is None:
+            return []
+        return await steps_repo.list_by_workflow(workflow_id)
+
+    async def _seed_step_records(self, workflow: GenericStoryWorkflow) -> None:
+        steps_repo = getattr(self, "steps", None)
+        if steps_repo is None:
+            return
+        existing = await steps_repo.list_by_workflow(workflow.id)
+        existing_names = {self._status_value(step.step_name) for step in existing}
+        for step_name in self.ORDERED_STEPS:
+            if step_name.value not in existing_names:
+                await steps_repo.create(workflow.id, step_name.value)
+
+    def _step_record_response(
+        self,
+        workflow: GenericStoryWorkflow,
+        step_record: Any,
+    ) -> GenericStoryWorkflowStepDetailResponse:
+        try:
+            workflow_step = GenericStoryWorkflowStep(self._status_value(step_record.step_name))
+        except ValueError:
+            workflow_step = None
+
+        output = step_record.output_json
+        summary = self._step_output_summary(output)
+        if workflow_step is not None and not summary:
+            summary = self._step_summary(workflow, workflow_step)
+        if output is None and workflow_step is not None:
+            output = self._step_output(workflow, workflow_step)
+
+        return GenericStoryWorkflowStepDetailResponse(
+            id=getattr(step_record, "id", None),
+            workflow_id=workflow.id,
+            genric_story_id=self._uuid_string(workflow.generic_story_id),
+            step_name=self._status_value(step_record.step_name),
+            status=self._status_value(step_record.status),
+            summary=summary,
+            input=getattr(step_record, "input_json", None),
+            prompt=getattr(step_record, "prompt", None),
+            output=output,
+            error_message=getattr(step_record, "error_message", None),
+            retry_count=int(getattr(step_record, "retry_count", 0) or 0),
+            started_at=getattr(step_record, "started_at", None),
+            completed_at=getattr(step_record, "completed_at", None),
+            created_at=getattr(step_record, "created_at", None),
+        )
+
+    def _step_input(
+        self,
+        workflow: GenericStoryWorkflow,
+        step: GenericStoryWorkflowStep,
+    ) -> dict[str, Any]:
+        base: dict[str, Any] = {
+            "workflow_id": self._uuid_string(getattr(workflow, "id", None)),
+            "generic_story_id": self._uuid_string(getattr(workflow, "generic_story_id", None)),
+            "age_group": getattr(workflow, "age_group", None),
+            "language": getattr(workflow, "language", None),
+            "requested_pages": getattr(workflow, "requested_pages", None),
+            "title": getattr(workflow, "title", None),
+        }
+        if step == GenericStoryWorkflowStep.CHARACTER_EXTRACTION:
+            base["actual_story_chars"] = len(str(getattr(workflow, "actual_story", "") or ""))
+        elif step == GenericStoryWorkflowStep.SCENE_PLAN_GENERATION:
+            base["character_analysis"] = self._step_output_summary(getattr(workflow, "character_analysis_json", None))
+        elif step == GenericStoryWorkflowStep.VISUAL_BIBLE_GENERATION:
+            base["character_analysis"] = self._step_output_summary(getattr(workflow, "character_analysis_json", None))
+            base["scene_plan"] = self._step_output_summary(getattr(workflow, "scene_plan_json", None))
+        elif step == GenericStoryWorkflowStep.STORY_GENERATION:
+            base["scene_plan"] = self._step_output_summary(getattr(workflow, "scene_plan_json", None))
+            base["visual_bible"] = self._step_output_summary(self._workflow_visual_bible(workflow))
+        elif step == GenericStoryWorkflowStep.IMAGE_PLAN_GENERATION:
+            base["story"] = self._step_output_summary(getattr(workflow, "story_json", None))
+            base["visual_bible"] = self._step_output_summary(self._workflow_visual_bible(workflow))
+        elif step == GenericStoryWorkflowStep.IMAGE_GENERATION:
+            base["story"] = self._step_output_summary(getattr(workflow, "story_json", None))
+            base["image_plan"] = self._step_output_summary(getattr(workflow, "image_plan_json", None))
+        elif step == GenericStoryWorkflowStep.NARRATION_GENERATION:
+            base["story"] = self._step_output_summary(getattr(workflow, "story_json", None))
+        elif step == GenericStoryWorkflowStep.PUBLISH_GENERIC_STORY:
+            base["story"] = self._step_output_summary(getattr(workflow, "story_json", None))
+            base["publish_status"] = (getattr(workflow, "input_request", None) or {}).get("status")
+        return {key: value for key, value in base.items() if value is not None}
+
+    @staticmethod
+    def _step_output_summary(output: Any) -> dict[str, Any]:
+        if not isinstance(output, dict):
+            return {}
+        summary: dict[str, Any] = {}
+        for key in ("title", "summary", "moral", "generic_story_id", "cover_image_url", "cover_image"):
+            value = output.get(key)
+            if value:
+                summary[key] = value
+        for key in ("characters", "locations", "important_objects", "pages", "final_prompts", "languages"):
+            value = output.get(key)
+            if isinstance(value, list):
+                summary[f"{key}_count"] = len(value)
+            elif isinstance(value, dict):
+                summary[f"{key}_count"] = len(value)
+        return summary
+
+    @staticmethod
+    def _status_value(status_value: Any) -> str:
+        return status_value.value if hasattr(status_value, "value") else str(status_value)
 
     def _step_status(self, workflow: GenericStoryWorkflow, step: GenericStoryWorkflowStep) -> str:
         if workflow.current_step == step.value and workflow.status == GenericStoryWorkflowStatus.IN_PROGRESS.value:

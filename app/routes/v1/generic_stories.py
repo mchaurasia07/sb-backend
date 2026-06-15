@@ -10,6 +10,7 @@ from app.core.config import settings
 from app.core.database import AsyncSessionLocal, get_db_session
 from app.core.dependencies import get_current_user, get_auth_context, AuthContext
 from app.core.exceptions import AppException
+from app.entity.story_batch_job import StoryBatchJobStatus, StoryBatchJobType
 from app.entity.notification import NotificationAudience
 from app.entity.user import User
 from app.model.request.generic_story import (
@@ -25,6 +26,7 @@ from app.model.request.generic_story_workflow import (
 from app.model.response.common import ApiResponse, PaginatedResponse, success_response
 from app.model.response.generic_story import (
     GenericStoryAudioUploadResponse,
+    GenericStoryBatchJobResponse,
     GenericStoryBatchJobCancelResponse,
     GenericStoryBatchImageSubmitResponse,
     GenericStoryBatchNarrationSubmitResponse,
@@ -438,6 +440,31 @@ async def regenerate_generic_story_page_image(
         page_numbers={page_number},
     )
     return success_response(data, f"Generic story page {page_number} image regeneration submitted")
+
+
+@router.get("/batch-jobs", response_model=ApiResponse[PaginatedResponse[GenericStoryBatchJobResponse]])
+async def list_generic_story_batch_jobs(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    generic_story_id: UUID | None = Query(default=None),
+    workflow_id: UUID | None = Query(default=None),
+    status_filter: StoryBatchJobStatus | None = Query(default=None, alias="status"),
+    job_type: StoryBatchJobType | None = Query(default=None),
+    provider: str | None = Query(default=None, min_length=1, max_length=32),
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[PaginatedResponse[GenericStoryBatchJobResponse]]:
+    _ = current_user
+    data = await GenericStoryBatchService(session).list_batch_jobs(
+        page=page,
+        page_size=page_size,
+        generic_story_id=generic_story_id,
+        workflow_id=workflow_id,
+        status_filter=status_filter,
+        job_type=job_type,
+        provider=provider,
+    )
+    return success_response(data, "Generic story batch jobs retrieved successfully")
 
 
 @router.post("/batch-jobs/reconcile", response_model=ApiResponse[dict])

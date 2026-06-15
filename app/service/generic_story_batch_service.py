@@ -7,6 +7,7 @@ import json
 import logging
 from copy import deepcopy
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from io import BytesIO
 from typing import Any
 from uuid import UUID
@@ -24,8 +25,11 @@ from app.core.exceptions import AppException, NotFoundException
 from app.entity.generic_story_batch_job import GenericStoryBatchJob
 from app.entity.generic_story_workflow import GenericStoryWorkflow, GenericStoryWorkflowStatus, GenericStoryWorkflowStep
 from app.entity.story_batch_job import StoryBatchJobStatus, StoryBatchJobType
+from app.entity.story_step import StepStatus
 from app.model.request.generic_story_workflow import GenericStoryWorkflowExecuteRequest
+from app.model.response.common import PaginatedResponse
 from app.model.response.generic_story import (
+    GenericStoryBatchJobResponse,
     GenericStoryBatchImageSubmitResponse,
     GenericStoryBatchNarrationSubmitResponse,
     GenericStoryNarrationPromptPageResponse,
@@ -33,7 +37,7 @@ from app.model.response.generic_story import (
 )
 from app.repository.generic_story_batch_job_repository import GenericStoryBatchJobRepository
 from app.repository.generic_story_repository import GenericStoryRepository
-from app.repository.generic_story_workflow_repository import GenericStoryWorkflowRepository
+from app.repository.generic_story_workflow_repository import GenericStoryWorkflowRepository, GenericStoryWorkflowStepRepository
 from app.service.ai.google_provider import GoogleProvider
 from app.service.generic_story_workflow_service import GenericStoryWorkflowService
 from app.service.image_storage_provider import get_image_storage_service
@@ -89,6 +93,7 @@ class GenericStoryBatchService:
         self.session = session
         self.generic_stories = GenericStoryRepository(session)
         self.workflows = GenericStoryWorkflowRepository(session)
+        self.steps = GenericStoryWorkflowStepRepository(session)
         self.batch_jobs = GenericStoryBatchJobRepository(session)
         self.image_storage = get_image_storage_service()
         self.audio_storage = get_story_audio_storage_service()
@@ -104,6 +109,38 @@ class GenericStoryBatchService:
     def _log_event(event: str, **fields: Any) -> None:
         details = " ".join(f"{key}={value}" for key, value in fields.items() if value is not None)
         logger.info("[generic_story_batch] event=%s %s", event, details)
+
+    @staticmethod
+    def _print_reconcile_event(event: str, **fields: Any) -> None:
+        details = " ".join(f"{key}={value}" for key, value in fields.items() if value is not None)
+        print(f"[GENERIC_RECONCILE] {event}" + (f" {details}" if details else ""), flush=True)
+
+    async def list_batch_jobs(
+        self,
+        *,
+        page: int,
+        page_size: int,
+        generic_story_id: UUID | None = None,
+        workflow_id: UUID | None = None,
+        status_filter: StoryBatchJobStatus | None = None,
+        job_type: StoryBatchJobType | None = None,
+        provider: str | None = None,
+    ) -> PaginatedResponse[GenericStoryBatchJobResponse]:
+        jobs, total = await self.batch_jobs.list_paginated(
+            page=page,
+            page_size=page_size,
+            generic_story_id=generic_story_id,
+            workflow_id=workflow_id,
+            status=status_filter,
+            job_type=job_type,
+            provider=provider,
+        )
+        return PaginatedResponse[GenericStoryBatchJobResponse].create(
+            items=[self._batch_job_response(job) for job in jobs],
+            total=total,
+            page=page,
+            page_size=page_size,
+        )
 
     async def cancel_batch_job(
         self,
@@ -414,6 +451,7 @@ class GenericStoryBatchService:
         processed_count = 0
 
         self._log_event("reconcile_started", job_count=len(jobs), limit=limit)
+        self._print_reconcile_event("started", job_count=len(jobs), limit=limit)
         for job in jobs:
             try:
                 self._log_event(
@@ -421,6 +459,15 @@ class GenericStoryBatchService:
                     batch_job_id=job.id,
                     generic_story_id=job.generic_story_id,
                     workflow_id=job.workflow_id,
+                    status=job.status.value,
+                    provider_state=job.provider_state,
+                )
+                self._print_reconcile_event(
+                    "job_started",
+                    workflow_id=job.workflow_id,
+                    generic_story_id=job.generic_story_id,
+                    batch_job_id=job.id,
+                    job_type=job.job_type.value,
                     status=job.status.value,
                     provider_state=job.provider_state,
                 )
@@ -438,12 +485,33 @@ class GenericStoryBatchService:
                     provider_state=result.get("provider_state"),
                     message=result.get("message"),
                 )
+                self._print_reconcile_event(
+                    "job_completed",
+                    workflow_id=job.workflow_id,
+                    generic_story_id=job.generic_story_id,
+                    batch_job_id=job.id,
+                    job_type=job.job_type.value,
+                    action=result.get("action"),
+                    status=result.get("status"),
+                    provider_state=result.get("provider_state"),
+                    message=result.get("message"),
+                )
             except Exception as exc:
                 self._log_event(
                     "reconcile_job_failed",
                     batch_job_id=job.id,
                     generic_story_id=job.generic_story_id,
                     workflow_id=job.workflow_id,
+                    status=job.status.value,
+                    provider_state=job.provider_state,
+                    error=str(exc),
+                )
+                self._print_reconcile_event(
+                    "job_error",
+                    workflow_id=job.workflow_id,
+                    generic_story_id=job.generic_story_id,
+                    batch_job_id=job.id,
+                    job_type=job.job_type.value,
                     status=job.status.value,
                     provider_state=job.provider_state,
                     error=str(exc),
@@ -462,6 +530,7 @@ class GenericStoryBatchService:
                 )
 
         self._log_event("reconcile_completed", checked_count=len(jobs), processed_count=processed_count)
+        self._print_reconcile_event("completed", checked_count=len(jobs), processed_count=processed_count)
         return {"checked_count": len(jobs), "processed_count": processed_count, "results": results}
 
     async def _reconcile_batch_job(self, job: GenericStoryBatchJob) -> dict[str, Any]:
@@ -474,14 +543,41 @@ class GenericStoryBatchService:
         provider_job = await self.google_client.aio.batches.get(name=job.provider_job_name)
         state_name = self._job_state_name(provider_job)
         job.provider_state = state_name
+        self._print_reconcile_event(
+            "google_batch_status",
+            workflow_id=job.workflow_id,
+            generic_story_id=job.generic_story_id,
+            batch_job_id=job.id,
+            job_type=job.job_type.value,
+            provider_job_name=job.provider_job_name,
+            provider_state=state_name,
+        )
 
         if state_name in self.SUCCEEDED_STATES:
             if self._job_request_mode(job) == self.WORKFLOW_MULTI_IMAGE_MODE:
+                self._print_reconcile_event(
+                    "processing_workflow_image_batch_started",
+                    workflow_id=job.workflow_id,
+                    generic_story_id=job.generic_story_id,
+                    batch_job_id=job.id,
+                )
                 await self._process_reconciled_workflow_multi_image_job(job, provider_job)
                 return self._reconcile_result(job, "processed", "Generic story workflow multi-image job processed")
             if job.job_type == StoryBatchJobType.AUDIO:
+                self._print_reconcile_event(
+                    "processing_narration_batch_started",
+                    workflow_id=job.workflow_id,
+                    generic_story_id=job.generic_story_id,
+                    batch_job_id=job.id,
+                )
                 await self._process_reconciled_audio_job(job, provider_job)
                 return self._reconcile_result(job, "processed", "Generic story narration audio job processed")
+            self._print_reconcile_event(
+                "processing_image_batch_started",
+                workflow_id=job.workflow_id,
+                generic_story_id=job.generic_story_id,
+                batch_job_id=job.id,
+            )
             await self._process_reconciled_image_job(job, provider_job)
             return self._reconcile_result(job, "processed", "Generic story image job processed")
 
@@ -524,6 +620,14 @@ class GenericStoryBatchService:
         job.status = StoryBatchJobStatus.RUNNING
         await self.batch_jobs.update(job)
         await self.session.commit()
+        self._print_reconcile_event(
+            "job_still_running",
+            workflow_id=job.workflow_id,
+            generic_story_id=job.generic_story_id,
+            batch_job_id=job.id,
+            job_type=job.job_type.value,
+            provider_state=state_name,
+        )
         return self._reconcile_result(job, "still_running", f"Provider state is {state_name}")
 
     async def _submit_image_batch_job_only(
@@ -592,7 +696,11 @@ class GenericStoryBatchService:
             job.error_message = str(exc)
             job.missing_keys = [item.key for item in items]
             await self.batch_jobs.update(job)
-            await self._mark_workflow_failed(workflow.id, str(exc))
+            await self._mark_workflow_failed(
+                workflow.id,
+                str(exc),
+                current_step=GenericStoryWorkflowStep.IMAGE_GENERATION.value,
+            )
             await self.session.commit()
             raise
 
@@ -755,7 +863,11 @@ class GenericStoryBatchService:
             job.error_message = str(exc)
             job.missing_keys = [item.key for item in items]
             await self.batch_jobs.update(job)
-            await self._mark_workflow_failed(workflow.id, str(exc))
+            await self._mark_workflow_failed(
+                workflow.id,
+                str(exc),
+                current_step=GenericStoryWorkflowStep.IMAGE_GENERATION.value,
+            )
             await self.session.commit()
             raise
 
@@ -772,7 +884,11 @@ class GenericStoryBatchService:
             job.status = StoryBatchJobStatus.CANCELLED
             job.error_message = self._openai_batch_error_message(provider_job) or f"OpenAI batch state {state_name}"
             await self.batch_jobs.update(job)
-            await self._mark_workflow_failed(job.workflow_id, job.error_message)
+            await self._mark_workflow_failed(
+                job.workflow_id,
+                job.error_message,
+                current_step=GenericStoryWorkflowStep.IMAGE_GENERATION.value,
+            )
             await self.session.commit()
             return self._reconcile_result(job, "cancelled", job.error_message)
 
@@ -780,7 +896,11 @@ class GenericStoryBatchService:
             job.status = StoryBatchJobStatus.FAILED
             job.error_message = self._openai_batch_error_message(provider_job) or f"OpenAI batch state {state_name}"
             await self.batch_jobs.update(job)
-            await self._mark_workflow_failed(job.workflow_id, job.error_message)
+            await self._mark_workflow_failed(
+                job.workflow_id,
+                job.error_message,
+                current_step=GenericStoryWorkflowStep.IMAGE_GENERATION.value,
+            )
             await self.session.commit()
             return self._reconcile_result(job, "failed", job.error_message)
 
@@ -827,6 +947,12 @@ class GenericStoryBatchService:
             workflow.status = GenericStoryWorkflowStatus.FAILED.value
             workflow.current_step = None
             workflow.error_message = job.error_message
+            await self._mark_step_failed(
+                workflow,
+                GenericStoryWorkflowStep.IMAGE_GENERATION,
+                job.error_message or "Image batch failed",
+                output=response_summary,
+            )
         else:
             workflow.status = GenericStoryWorkflowStatus.COMPLETED.value
             workflow.current_step = None
@@ -836,8 +962,22 @@ class GenericStoryBatchService:
                 story_json,
                 workflow=workflow,
             )
+            await self._mark_step_completed(
+                workflow,
+                GenericStoryWorkflowStep.IMAGE_GENERATION,
+                output=self._workflow_step_output(workflow, GenericStoryWorkflowStep.IMAGE_GENERATION),
+            )
         await self.workflows.update(workflow)
         await self.session.commit()
+        self._print_reconcile_event(
+            "image_batch_processed",
+            workflow_id=workflow.id,
+            generic_story_id=job.generic_story_id,
+            batch_job_id=job.id,
+            status=job.status.value,
+            completed=len(completed_keys),
+            failed=len(failed_keys),
+        )
 
     async def _process_reconciled_image_job(
         self,
@@ -877,6 +1017,12 @@ class GenericStoryBatchService:
             workflow.status = GenericStoryWorkflowStatus.FAILED.value
             workflow.current_step = None
             workflow.error_message = job.error_message
+            await self._mark_step_failed(
+                workflow,
+                GenericStoryWorkflowStep.IMAGE_GENERATION,
+                job.error_message or "Image batch failed",
+                output=response_summary,
+            )
         else:
             workflow.status = GenericStoryWorkflowStatus.COMPLETED.value
             workflow.current_step = None
@@ -886,8 +1032,22 @@ class GenericStoryBatchService:
                 story_json,
                 workflow=workflow,
             )
+            await self._mark_step_completed(
+                workflow,
+                GenericStoryWorkflowStep.IMAGE_GENERATION,
+                output=self._workflow_step_output(workflow, GenericStoryWorkflowStep.IMAGE_GENERATION),
+            )
         await self.workflows.update(workflow)
         await self.session.commit()
+        self._print_reconcile_event(
+            "image_batch_processed",
+            workflow_id=workflow.id,
+            generic_story_id=job.generic_story_id,
+            batch_job_id=job.id,
+            status=job.status.value,
+            completed=len(completed_keys),
+            failed=len(failed_keys),
+        )
 
     async def _process_reconciled_audio_job(
         self,
@@ -939,14 +1099,35 @@ class GenericStoryBatchService:
             workflow.status = GenericStoryWorkflowStatus.FAILED.value
             workflow.current_step = GenericStoryWorkflowStep.NARRATION_GENERATION.value
             workflow.error_message = job.error_message
+            await self._mark_step_failed(
+                workflow,
+                GenericStoryWorkflowStep.NARRATION_GENERATION,
+                job.error_message or "Narration batch failed",
+                output=response_summary,
+            )
         else:
             workflow.status = GenericStoryWorkflowStatus.COMPLETED.value
             workflow.current_step = None
             workflow.error_message = None
             content.story_json = story_json
             await self.generic_stories.update_content(content)
+            await self._mark_step_completed(
+                workflow,
+                GenericStoryWorkflowStep.NARRATION_GENERATION,
+                output=self._workflow_step_output(workflow, GenericStoryWorkflowStep.NARRATION_GENERATION),
+            )
         await self.workflows.update(workflow)
         await self.session.commit()
+        self._print_reconcile_event(
+            "narration_batch_processed",
+            workflow_id=workflow.id,
+            generic_story_id=job.generic_story_id,
+            batch_job_id=job.id,
+            language=language,
+            status=job.status.value,
+            completed=len(completed_keys),
+            failed=len(failed_keys),
+        )
 
     async def _process_reconciled_workflow_multi_image_job(
         self,
@@ -981,6 +1162,12 @@ class GenericStoryBatchService:
             workflow.status = GenericStoryWorkflowStatus.FAILED.value
             workflow.current_step = GenericStoryWorkflowStep.IMAGE_GENERATION.value
             workflow.error_message = job.error_message
+            await self._mark_step_failed(
+                workflow,
+                GenericStoryWorkflowStep.IMAGE_GENERATION,
+                job.error_message or "Workflow image batch failed",
+                output=response_summary,
+            )
             await self.batch_jobs.update(job)
             await self.workflows.update(workflow)
             await self.session.commit()
@@ -1000,6 +1187,11 @@ class GenericStoryBatchService:
             workflow.status = GenericStoryWorkflowStatus.IN_PROGRESS.value
             workflow.current_step = GenericStoryWorkflowStep.IMAGE_GENERATION.value
         workflow.error_message = None
+        await self._mark_step_completed(
+            workflow,
+            GenericStoryWorkflowStep.IMAGE_GENERATION,
+            output=self._workflow_step_output(workflow, GenericStoryWorkflowStep.IMAGE_GENERATION),
+        )
         await self.batch_jobs.update(job)
         await self.workflows.update(workflow)
         await self.session.commit()
@@ -1887,7 +2079,74 @@ class GenericStoryBatchService:
         workflow.status = GenericStoryWorkflowStatus.FAILED.value
         workflow.current_step = current_step
         workflow.error_message = error_message
+        if current_step:
+            try:
+                await self._mark_step_failed(workflow, GenericStoryWorkflowStep(current_step), error_message)
+            except ValueError:
+                pass
         await self.workflows.update(workflow)
+
+    async def _mark_step_completed(
+        self,
+        workflow: GenericStoryWorkflow,
+        step_name: GenericStoryWorkflowStep,
+        *,
+        output: dict[str, Any] | None = None,
+    ) -> None:
+        step_record = await self._latest_or_create_step(workflow, step_name)
+        if step_record is None:
+            return
+        step_record.status = StepStatus.COMPLETED
+        step_record.started_at = step_record.started_at or datetime.now(UTC)
+        step_record.completed_at = datetime.now(UTC)
+        step_record.output_json = output
+        step_record.error_message = None
+        await self.steps.update(step_record)
+
+    async def _mark_step_failed(
+        self,
+        workflow: GenericStoryWorkflow,
+        step_name: GenericStoryWorkflowStep,
+        error_message: str,
+        *,
+        output: dict[str, Any] | None = None,
+    ) -> None:
+        step_record = await self._latest_or_create_step(workflow, step_name)
+        if step_record is None:
+            return
+        step_record.status = StepStatus.FAILED
+        step_record.started_at = step_record.started_at or datetime.now(UTC)
+        step_record.completed_at = datetime.now(UTC)
+        step_record.output_json = output if output is not None else step_record.output_json
+        step_record.error_message = error_message
+        await self.steps.update(step_record)
+
+    async def _latest_or_create_step(
+        self,
+        workflow: GenericStoryWorkflow,
+        step_name: GenericStoryWorkflowStep,
+    ):
+        steps_repo = getattr(self, "steps", None)
+        if steps_repo is None:
+            return None
+        step_record = await steps_repo.latest_for_workflow_step(workflow.id, step_name)
+        if step_record is None:
+            step_record = await steps_repo.create(workflow.id, step_name.value)
+        return step_record
+
+    @staticmethod
+    def _workflow_step_output(
+        workflow: GenericStoryWorkflow,
+        step_name: GenericStoryWorkflowStep,
+    ) -> dict[str, Any] | None:
+        service = GenericStoryWorkflowService.__new__(GenericStoryWorkflowService)
+        try:
+            return service._step_output(workflow, step_name)
+        except AttributeError:
+            if step_name == GenericStoryWorkflowStep.IMAGE_GENERATION:
+                story_json = getattr(workflow, "story_json", None)
+                return story_json if isinstance(story_json, dict) else None
+            return None
 
     @staticmethod
     def _image_item_payload(item: GenericBatchImageItem) -> dict[str, Any]:
@@ -2103,6 +2362,29 @@ class GenericStoryBatchService:
             "workflow_status": workflow.status,
             "message": message,
         }
+
+    @staticmethod
+    def _batch_job_response(job: GenericStoryBatchJob) -> GenericStoryBatchJobResponse:
+        return GenericStoryBatchJobResponse(
+            id=job.id,
+            generic_story_id=job.generic_story_id,
+            workflow_id=job.workflow_id,
+            job_type=job.job_type.value if hasattr(job.job_type, "value") else str(job.job_type),
+            status=job.status.value if hasattr(job.status, "value") else str(job.status),
+            provider=job.provider,
+            provider_job_name=job.provider_job_name,
+            provider_model=job.provider_model,
+            provider_state=job.provider_state,
+            attempt=job.attempt,
+            expected_item_count=job.expected_item_count,
+            completed_item_count=job.completed_item_count,
+            failed_item_count=job.failed_item_count,
+            request_keys=job.request_keys,
+            missing_keys=job.missing_keys,
+            error_message=job.error_message,
+            created_at=job.created_at,
+            updated_at=job.updated_at,
+        )
 
     @staticmethod
     def _submit_response(
