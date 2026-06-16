@@ -49,6 +49,7 @@ from app.repository.generic_story_batch_job_repository import GenericStoryBatchJ
 from app.service.ai.google_provider import GoogleProvider
 from app.service.image_optimizer import optimize_display_image
 from app.service.image_storage_provider import get_image_storage_service
+from app.service.image_webp_converter import ImageWebPConverter
 from app.service.story_audio_storage_provider import get_story_audio_storage_service
 from app.service.story_narration_service import StoryNarrationService
 from app.service.story_narration_profile import build_page_narration, normalize_page_emotion
@@ -1272,10 +1273,11 @@ class GenericStoryWorkflowService:
                 cover_prompt,
                 aspect_ratio=settings.STORY_COVER_ASPECT_RATIO,
             )
+            webp_cover_bytes = ImageWebPConverter.convert_to_webp(cover_result.image_bytes, quality=85)
             workflow.cover_image = await image_storage.save_story_image(
                 workflow.id,
-                cover_result.image_bytes,
-                "cover.png",
+                webp_cover_bytes,
+                "cover.webp",
                 public_base_url,
             )
             story_json["cover_image_url"] = workflow.cover_image
@@ -1318,10 +1320,11 @@ class GenericStoryWorkflowService:
                 page_prompt,
                 aspect_ratio=settings.STORY_PAGE_ASPECT_RATIO,
             )
+            webp_page_bytes = ImageWebPConverter.convert_to_webp(result.image_bytes, quality=85)
             image_url = await image_storage.save_story_image(
                 workflow.id,
-                result.image_bytes,
-                f"page_{page_number}.png",
+                webp_page_bytes,
+                f"page_{page_number}.webp",
                 public_base_url,
             )
             story_page = story_pages_by_number.get(page_number)
@@ -2078,10 +2081,12 @@ class GenericStoryWorkflowService:
             return image_url
         try:
             image_bytes = await image_storage.get_image_bytes(image_url)
+            webp_bytes = ImageWebPConverter.convert_to_webp(image_bytes, quality=85)
+            webp_filename = filename.replace(".png", ".webp")
             return await image_storage.save_story_image(
                 generic_story_id,
-                image_bytes,
-                filename,
+                webp_bytes,
+                webp_filename,
                 public_base_url,
             )
         except Exception:
@@ -3238,10 +3243,12 @@ class GenericStoryWorkflowService:
                 "IMAGE_TOO_LARGE",
             )
         filename = f"{filename_stem}{extension}"
+        webp_content = ImageWebPConverter.convert_to_webp(content, quality=85)
+        webp_filename = f"{filename_stem}.webp"
         image_url = await image_storage.save_story_image(
             story_id,
-            content,
-            filename,
+            webp_content,
+            webp_filename,
             public_base_url,
         )
         reduced_content = optimize_display_image(content, filename)

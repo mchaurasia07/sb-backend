@@ -74,10 +74,34 @@ class PushDeviceTokenRepository:
         )
         return list(result.scalars().all())
 
+    async def active_for_parent_users(self, user_ids: list[UUID]) -> list[PushDeviceToken]:
+        if not user_ids:
+            return []
+        result = await self.session.execute(
+            select(PushDeviceToken).where(
+                PushDeviceToken.user_id.in_(user_ids),
+                PushDeviceToken.account_type == NotificationAccountType.PARENT,
+                PushDeviceToken.active.is_(True),
+            )
+        )
+        return list(result.scalars().all())
+
     async def active_for_child(self, child_id: UUID) -> list[PushDeviceToken]:
         result = await self.session.execute(
             select(PushDeviceToken).where(
                 PushDeviceToken.child_id == child_id,
+                PushDeviceToken.account_type == NotificationAccountType.CHILD,
+                PushDeviceToken.active.is_(True),
+            )
+        )
+        return list(result.scalars().all())
+
+    async def active_for_children(self, child_ids: list[UUID]) -> list[PushDeviceToken]:
+        if not child_ids:
+            return []
+        result = await self.session.execute(
+            select(PushDeviceToken).where(
+                PushDeviceToken.child_id.in_(child_ids),
                 PushDeviceToken.account_type == NotificationAccountType.CHILD,
                 PushDeviceToken.active.is_(True),
             )
@@ -99,6 +123,10 @@ class NotificationRepository:
 
     def __init__(self, session: AsyncSession):
         self.session = session
+
+    async def get_by_id(self, notification_id: UUID) -> Notification | None:
+        result = await self.session.execute(select(Notification).where(Notification.id == notification_id))
+        return result.scalar_one_or_none()
 
     async def create(
         self,

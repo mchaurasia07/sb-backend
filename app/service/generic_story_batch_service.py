@@ -41,6 +41,7 @@ from app.repository.generic_story_workflow_repository import GenericStoryWorkflo
 from app.service.ai.google_provider import GoogleProvider
 from app.service.generic_story_workflow_service import GenericStoryWorkflowService
 from app.service.image_storage_provider import get_image_storage_service
+from app.service.image_webp_converter import ImageWebPConverter
 from app.service.story_audio_storage_provider import get_story_audio_storage_service
 from app.service.story_narration_profile import build_page_narration
 from app.service.story_service import StoryService
@@ -1284,10 +1285,13 @@ class GenericStoryBatchService:
                 )
                 aspect_ratio = str(cover_item.get("aspect_ratio") or settings.STORY_COVER_ASPECT_RATIO)
                 cropped = StoryService._crop_image_bytes_to_aspect_ratio(image_bytes, aspect_ratio)
+                webp_bytes = ImageWebPConverter.convert_to_webp(cropped, quality=85)
+                filename = str(cover_item.get("filename") or "cover.png")
+                webp_filename = filename.replace(".png", ".webp")
                 image_url = await self.image_storage.save_story_image(
                     storage_story_id,
-                    cropped,
-                    str(cover_item.get("filename") or "cover.png"),
+                    webp_bytes,
+                    webp_filename,
                     "",
                 )
                 self._set_story_json_page_image_fields(story_json, cover_item, image_url)
@@ -1360,10 +1364,13 @@ class GenericStoryBatchService:
             try:
                 aspect_ratio = str(item.get("aspect_ratio") or settings.STORY_PAGE_ASPECT_RATIO)
                 cropped = StoryService._crop_image_bytes_to_aspect_ratio(image.image_bytes, aspect_ratio)
+                webp_bytes = ImageWebPConverter.convert_to_webp(cropped, quality=85)
+                filename = str(item.get("filename") or f"{key}.png")
+                webp_filename = filename.replace(".png", ".webp")
                 image_url = await self.image_storage.save_story_image(
                     storage_story_id,
-                    cropped,
-                    str(item.get("filename") or f"{key}.png"),
+                    webp_bytes,
+                    webp_filename,
                     "",
                 )
                 self._set_story_json_page_image_fields(story_json, item, image_url)
@@ -1510,7 +1517,9 @@ class GenericStoryBatchService:
                     inlined_response.response
                 )
                 cropped = StoryService._crop_image_bytes_to_aspect_ratio(image_bytes, item.aspect_ratio)
-                image_url = await self.image_storage.save_story_image(storage_story_id, cropped, item.file_name, "")
+                webp_bytes = ImageWebPConverter.convert_to_webp(cropped, quality=85)
+                webp_filename = item.file_name.replace(".png", ".webp")
+                image_url = await self.image_storage.save_story_image(storage_story_id, webp_bytes, webp_filename, "")
                 self._set_story_json_image_url(story_json, item, image_url)
                 completed_keys.add(item.key)
                 response_summary["items"].append(
@@ -1573,7 +1582,9 @@ class GenericStoryBatchService:
             try:
                 image_bytes, revised_prompt = self._extract_openai_image_bytes(response.get("body"))
                 cropped = StoryService._crop_image_bytes_to_aspect_ratio(image_bytes, item.aspect_ratio)
-                image_url = await self.image_storage.save_story_image(storage_story_id, cropped, item.file_name, "")
+                webp_bytes = ImageWebPConverter.convert_to_webp(cropped, quality=85)
+                webp_filename = item.file_name.replace(".png", ".webp")
+                image_url = await self.image_storage.save_story_image(storage_story_id, webp_bytes, webp_filename, "")
                 self._set_story_json_image_url(story_json, item, image_url)
                 completed_keys.add(item.key)
                 response_summary["items"].append(

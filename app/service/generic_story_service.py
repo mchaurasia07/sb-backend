@@ -27,6 +27,7 @@ from app.repository.child_book_repository import ChildBookRepository
 from app.repository.generic_story_repository import GenericStoryRepository
 from app.service.image_optimizer import optimize_display_image
 from app.service.image_storage_provider import get_image_storage_service
+from app.service.image_webp_converter import ImageWebPConverter
 from app.service.story_audio_storage_provider import get_story_audio_storage_service
 from app.utils.word_timestamps import generate_word_timestamps
 
@@ -485,9 +486,11 @@ class GenericStoryService:
             )
 
         filename = f"page_{page_number}{extension}"
-        image_url = await image_storage.save_story_image(story_id, content, filename, public_base_url)
-        reduced_content = optimize_display_image(content, filename)
-        await image_storage.save_story_reduced_image(story_id, reduced_content, filename, public_base_url)
+        webp_content = ImageWebPConverter.convert_to_webp(content, quality=85)
+        webp_filename = f"page_{page_number}.webp"
+        image_url = await image_storage.save_story_image(story_id, webp_content, webp_filename, public_base_url)
+        reduced_content = optimize_display_image(webp_content, webp_filename)
+        await image_storage.save_story_reduced_image(story_id, reduced_content, webp_filename, public_base_url)
         return image_url
 
     @staticmethod

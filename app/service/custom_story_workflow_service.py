@@ -42,6 +42,7 @@ from app.repository.custom_story_workflow_repository import (
 from app.repository.story_page_repository import StoryPageRepository
 from app.repository.story_repository import StoryRepository
 from app.service.image_storage_provider import get_image_storage_service
+from app.service.image_webp_converter import ImageWebPConverter
 from app.service.story_input_safety_service import StoryInputSafetyService
 from app.service.story_service import DEFAULT_STORY_LANGUAGE, StoryGenerationFlags, StoryService
 from app.service.story_completion_email_service import StoryCompletionEmailService
@@ -725,7 +726,9 @@ class CustomStoryWorkflowService:
             return image_url
         try:
             image_bytes = await image_storage.get_image_bytes(image_url)
-            return await image_storage.save_story_image(story_id, image_bytes, filename, "")
+            webp_bytes = ImageWebPConverter.convert_to_webp(image_bytes, quality=85)
+            webp_filename = filename.replace(".png", ".webp")
+            return await image_storage.save_story_image(story_id, webp_bytes, webp_filename, "")
         except Exception:
             return image_url
 

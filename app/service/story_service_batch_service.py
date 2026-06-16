@@ -28,6 +28,7 @@ from app.repository.story_batch_job_repository import StoryBatchJobRepository
 from app.repository.story_page_repository import StoryPageRepository
 from app.repository.story_repository import StoryRepository
 from app.repository.story_step_repository import StoryStepRepository
+from app.service.image_webp_converter import ImageWebPConverter
 from app.service.ai.google_provider import GoogleProvider
 from app.service.image_storage_provider import get_image_storage_service
 from app.service.story_audio_storage_provider import get_story_audio_storage_service
@@ -708,7 +709,9 @@ class StoryServiceBatchService:
                         inlined_response.response
                     )
                     cropped = StoryService._crop_image_bytes_to_aspect_ratio(image_bytes, item.aspect_ratio)
-                    image_url = await self.image_storage.save_story_image(story.id, cropped, item.file_name, "")
+                    webp_bytes = ImageWebPConverter.convert_to_webp(cropped, quality=85)
+                    webp_filename = item.file_name.replace(".png", ".webp")
+                    image_url = await self.image_storage.save_story_image(story.id, webp_bytes, webp_filename, "")
                     await self._save_image_item_result(story, story_json, item, image_url)
                     completed_keys.add(key)
                     response_summary["items"].append(
@@ -1150,7 +1153,9 @@ class StoryServiceBatchService:
                     inlined_response.response
                 )
                 cropped = StoryService._crop_image_bytes_to_aspect_ratio(image_bytes, item.aspect_ratio)
-                image_url = await self.image_storage.save_story_image(story.id, cropped, item.file_name, "")
+                webp_bytes = ImageWebPConverter.convert_to_webp(cropped, quality=85)
+                webp_filename = item.file_name.replace(".png", ".webp")
+                image_url = await self.image_storage.save_story_image(story.id, webp_bytes, webp_filename, "")
                 await self._save_image_item_result(story, story_json, item, image_url)
                 completed_keys.add(item.key)
                 response_summary["items"].append(

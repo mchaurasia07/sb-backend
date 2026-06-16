@@ -26,13 +26,15 @@ async def send_new_generic_audio_notification_background(*, audio_id: UUID, name
             await NotificationService(session).send_to_audience(
                 audience=NotificationAudience.CHILDREN,
                 event_type="new_generic_audio_added",
-                title="New audio available",
+                title="New audio is ready",
                 body=f"{name} is now available in the audio library.",
-                data={
-                    "event_type": "new_generic_audio_added",
-                    "audio_id": str(audio_id),
-                    "screen": "audio_library",
-                },
+                data=NotificationService._build_deep_link_data(
+                    event_type="new_generic_audio_added",
+                    route="audio_library",
+                    fallback_route="child_dashboard",
+                    params={"audio_id": str(audio_id)},
+                ),
+                delivery={"channelId": "library-updates", "priority": "high", "sound": "default"},
             )
         except Exception:
             await session.rollback()

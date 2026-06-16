@@ -1,0 +1,306 @@
+{
+  "info": {
+    "name": "Storybook Notification APIs",
+    "description": "Postman collection for legacy sync and new async flexible notification APIs.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000/api/v1",
+      "type": "string"
+    },
+    {
+      "key": "notification_admin_token",
+      "value": "CHANGE_ME",
+      "type": "string"
+    },
+    {
+      "key": "parent_user_id",
+      "value": "00000000-0000-0000-0000-000000000000",
+      "type": "string"
+    },
+    {
+      "key": "parent_user_id_2",
+      "value": "00000000-0000-0000-0000-000000000001",
+      "type": "string"
+    },
+    {
+      "key": "child_id",
+      "value": "00000000-0000-0000-0000-000000000002",
+      "type": "string"
+    },
+    {
+      "key": "child_id_2",
+      "value": "00000000-0000-0000-0000-000000000003",
+      "type": "string"
+    },
+    {
+      "key": "story_id",
+      "value": "00000000-0000-0000-0000-000000000004",
+      "type": "string"
+    },
+    {
+      "key": "child_book_id",
+      "value": "00000000-0000-0000-0000-000000000005",
+      "type": "string"
+    },
+    {
+      "key": "audio_id",
+      "value": "00000000-0000-0000-0000-000000000006",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Legacy Sync Notifications",
+      "item": [
+        {
+          "name": "Sync - Send To All",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Notification-Admin-Token",
+                "value": "{{notification_admin_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"audience\": \"all\",\n  \"title\": \"New story is ready\",\n  \"body\": \"Tap to read it now.\",\n  \"event_type\": \"manual_story_update\",\n  \"data\": {\n    \"route\": \"story_detail\",\n    \"fallback_route\": \"parent_dashboard\",\n    \"params\": {\n      \"story_id\": \"{{story_id}}\"\n    },\n    \"story_id\": \"{{story_id}}\",\n    \"screen\": \"story_detail\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/notifications/send",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "notifications",
+                "send"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Sync - Send To One Parent User",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Notification-Admin-Token",
+                "value": "{{notification_admin_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"audience\": \"parent_user\",\n  \"user_id\": \"{{parent_user_id}}\",\n  \"title\": \"Your story is ready\",\n  \"body\": \"Tap to read it now.\",\n  \"event_type\": \"manual_story_update\",\n  \"data\": {\n    \"route\": \"story_detail\",\n    \"fallback_route\": \"parent_dashboard\",\n    \"params\": {\n      \"story_id\": \"{{story_id}}\"\n    },\n    \"story_id\": \"{{story_id}}\",\n    \"screen\": \"story_detail\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/notifications/send",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "notifications",
+                "send"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Sync - Send To One Child",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Notification-Admin-Token",
+                "value": "{{notification_admin_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"audience\": \"child\",\n  \"child_id\": \"{{child_id}}\",\n  \"title\": \"New audio is ready\",\n  \"body\": \"Tap to listen now.\",\n  \"event_type\": \"manual_audio_update\",\n  \"data\": {\n    \"route\": \"child_audio_player\",\n    \"fallback_route\": \"child_dashboard\",\n    \"params\": {\n      \"audio_id\": \"{{audio_id}}\"\n    },\n    \"audio_id\": \"{{audio_id}}\",\n    \"screen\": \"child_audio_player\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/notifications/send",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "notifications",
+                "send"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Async Flexible Notifications",
+      "item": [
+        {
+          "name": "Async - Custom Parents And Children",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Notification-Admin-Token",
+                "value": "{{notification_admin_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"target\": {\n    \"type\": \"custom\",\n    \"user_ids\": [\n      \"{{parent_user_id}}\",\n      \"{{parent_user_id_2}}\"\n    ],\n    \"child_ids\": [\n      \"{{child_id}}\",\n      \"{{child_id_2}}\"\n    ]\n  },\n  \"notification\": {\n    \"title\": \"New story is ready\",\n    \"body\": \"Tap to read it now.\",\n    \"event_type\": \"manual_story_update\",\n    \"route\": \"story_detail\",\n    \"fallback_route\": \"parent_dashboard\",\n    \"params\": {\n      \"story_id\": \"{{story_id}}\"\n    },\n    \"data\": {\n      \"source\": \"admin_ui\"\n    }\n  },\n  \"delivery\": {\n    \"channel_id\": \"story-updates\",\n    \"priority\": \"high\",\n    \"sound\": \"default\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/notifications/send-async",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "notifications",
+                "send-async"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Async - All Parents",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Notification-Admin-Token",
+                "value": "{{notification_admin_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"target\": {\n    \"type\": \"parents\"\n  },\n  \"notification\": {\n    \"title\": \"Important update\",\n    \"body\": \"Open the app to see what is new.\",\n    \"event_type\": \"manual_parent_update\",\n    \"route\": \"parent_dashboard\",\n    \"fallback_route\": \"parent_dashboard\",\n    \"params\": {},\n    \"data\": {\n      \"source\": \"admin_ui\"\n    }\n  },\n  \"delivery\": {\n    \"channel_id\": \"library-updates\",\n    \"priority\": \"high\",\n    \"sound\": \"default\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/notifications/send-async",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "notifications",
+                "send-async"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Async - All Children",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Notification-Admin-Token",
+                "value": "{{notification_admin_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"target\": {\n    \"type\": \"children\"\n  },\n  \"notification\": {\n    \"title\": \"New story in the library\",\n    \"body\": \"A new story is ready to read.\",\n    \"event_type\": \"manual_child_story_update\",\n    \"route\": \"generic_story_detail\",\n    \"fallback_route\": \"child_dashboard\",\n    \"params\": {\n      \"generic_story_id\": \"{{story_id}}\"\n    },\n    \"data\": {\n      \"source\": \"admin_ui\"\n    }\n  },\n  \"delivery\": {\n    \"channel_id\": \"story-updates\",\n    \"priority\": \"high\",\n    \"sound\": \"default\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/notifications/send-async",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "notifications",
+                "send-async"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Async - One Parent User",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Notification-Admin-Token",
+                "value": "{{notification_admin_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"target\": {\n    \"type\": \"parent_user\",\n    \"user_id\": \"{{parent_user_id}}\"\n  },\n  \"notification\": {\n    \"title\": \"Your story is ready\",\n    \"body\": \"Tap to read it now.\",\n    \"event_type\": \"manual_story_update\",\n    \"route\": \"story_detail\",\n    \"fallback_route\": \"parent_dashboard\",\n    \"params\": {\n      \"story_id\": \"{{story_id}}\"\n    },\n    \"data\": {\n      \"source\": \"admin_ui\"\n    }\n  },\n  \"delivery\": {\n    \"channel_id\": \"story-updates\",\n    \"priority\": \"high\",\n    \"sound\": \"default\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/notifications/send-async",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "notifications",
+                "send-async"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Async - One Child",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Notification-Admin-Token",
+                "value": "{{notification_admin_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"target\": {\n    \"type\": \"child\",\n    \"child_id\": \"{{child_id}}\"\n  },\n  \"notification\": {\n    \"title\": \"New audio is ready\",\n    \"body\": \"Tap to listen now.\",\n    \"event_type\": \"manual_audio_update\",\n    \"route\": \"child_audio_player\",\n    \"fallback_route\": \"child_dashboard\",\n    \"params\": {\n      \"audio_id\": \"{{audio_id}}\"\n    },\n    \"data\": {\n      \"source\": \"admin_ui\"\n    }\n  },\n  \"delivery\": {\n    \"channel_id\": \"library-updates\",\n    \"priority\": \"high\",\n    \"sound\": \"default\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/notifications/send-async",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "notifications",
+                "send-async"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

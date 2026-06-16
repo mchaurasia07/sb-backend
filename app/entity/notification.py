@@ -20,6 +20,7 @@ class NotificationAudience(str, Enum):
     CHILDREN = "children"
     PARENT_USER = "parent_user"
     CHILD = "child"
+    CUSTOM = "custom"
 
 
 class NotificationDeliveryStatus(str, Enum):

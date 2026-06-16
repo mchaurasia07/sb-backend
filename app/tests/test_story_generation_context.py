@@ -160,6 +160,134 @@ def test_story_generation_prompt_aligns_with_story_plan_contract():
     assert '"moral": ""' in prompt
 
 
+def test_cast_mode_prompt_paths_are_split():
+    child_story = SimpleNamespace(use_child_character=True)
+    imagined_story = SimpleNamespace(use_child_character=False)
+
+    assert StoryService._story_plan_prompt_path(child_story).endswith("story_plan_child_hero_prompt.txt")
+    assert StoryService._story_plan_prompt_path(imagined_story).endswith("story_plan_imagined_cast_prompt.txt")
+    assert StoryService._story_generation_prompt_path(child_story).endswith("story_generation_child_hero_prompt.txt")
+    assert StoryService._story_generation_prompt_path(imagined_story).endswith(
+        "story_generation_imagined_cast_prompt.txt"
+    )
+
+
+def test_imagined_cast_story_plan_prompt_does_not_force_selected_child_as_hero():
+    template = load_prompt("prompts/story/story_plan_imagined_cast_prompt.txt")
+    story = SimpleNamespace(age_group=AgeGroup.EARLY_READER)
+    child = SimpleNamespace(
+        first_name="Mira",
+        gender="female",
+        age=6,
+        character_metadata={},
+    )
+
+    prompt = StoryService._render_story_plan_prompt(
+        template,
+        story=story,
+        child=child,
+        source_inputs={
+            "category": "space adventure",
+            "learning_goal": "problem solving",
+            "context": "A story about a rocket that loses its map.",
+        },
+        theme="space adventure",
+        hobby="reading",
+        pages=8,
+        character_context={
+            "use_child_character": False,
+            "cast_mode": StoryService.CAST_MODE_IMAGINED,
+            "character_description": "Invent the best story hero from the inputs.",
+            "child_age_label": "Early Reader",
+            "child_age_visual_guidance": "age-appropriate proportions for the reader band",
+            "cast_mode_instructions": "IMAGINED_CAST: create a named hero and complete recurring cast.",
+        },
+    )
+
+    assert "The hero is always the selected child" not in prompt
+    assert "The selected child solves the conflict" not in prompt
+    assert "Do NOT use the selected child profile as a story character" in prompt
+    assert 'visual_bible.hero.character_id must NOT be "hero_child"' in prompt
+    assert "Mira" not in prompt
+
+
+def test_story_generation_imagined_prompt_preserves_visual_bible_hero():
+    prompt = load_prompt("prompts/story/story_generation_imagined_cast_prompt.txt")
+
+    assert "Keep the selected child as the hero" not in prompt
+    assert "Use the hero in visual_bible.hero as the main character" in prompt
+    assert "The selected child profile is not introduced as a character" in prompt
+    assert "child_action means the invented hero's planned action" in prompt
+
+
+@pytest.mark.asyncio
+async def test_child_hero_image_plan_attaches_child_character_reference():
+    child = SimpleNamespace(first_name="Mira", character_image_url="https://cdn.test/mira.png")
+
+    class _Children:
+        async def get_for_user(self, user_id, child_id):
+            _ = user_id, child_id
+            return child
+
+    service = StoryService.__new__(StoryService)
+    service.children = _Children()
+    story = SimpleNamespace(
+        id="story-id",
+        user_id="user-id",
+        child_id="child-id",
+        use_child_character=True,
+        ai_provider="openai",
+        title="Mira's Map",
+    )
+    image_plan = {
+        "visual_bible": {"hero": {"name": "Mira", "character_id": "hero_child"}},
+        "cover": {"title_text": "Mira's Map"},
+        "character_reference_manifest": [],
+    }
+
+    result = await service._ensure_image_plan_character_references(story, image_plan)
+
+    manifest = result["character_reference_manifest"]
+    assert manifest[0]["character_id"] == "hero_child"
+    assert manifest[0]["reference_image_url"] == "https://cdn.test/mira.png"
+    assert result["visual_bible"]["hero"]["reference_image_url"] == "https://cdn.test/mira.png"
+
+
+@pytest.mark.asyncio
+async def test_imagined_cast_image_plan_does_not_attach_child_character_reference():
+    class _Children:
+        async def get_for_user(self, user_id, child_id):
+            _ = user_id, child_id
+            raise AssertionError("imagined cast should not load child character reference")
+
+    service = StoryService.__new__(StoryService)
+    service.children = _Children()
+    story = SimpleNamespace(
+        id="story-id",
+        user_id="user-id",
+        child_id="child-id",
+        use_child_character=False,
+        ai_provider="openai",
+        title="Robot Map",
+    )
+    image_plan = {
+        "visual_bible": {
+            "hero": {
+                "name": "Brave Blue Robot",
+                "character_id": "brave_blue_robot",
+                "appearance": "A small rounded blue robot.",
+            }
+        },
+        "cover": {"title_text": "Robot Map"},
+        "character_reference_manifest": [],
+    }
+
+    result = await service._ensure_image_plan_character_references(story, image_plan)
+
+    assert result["character_reference_manifest"] == []
+    assert "reference_image_url" not in result["visual_bible"]["hero"]
+
+
 def test_story_generation_context_softens_medical_harm_language():
     story_plan = {
         "title": "The Sparkling Park",

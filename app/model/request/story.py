@@ -125,3 +125,10 @@ class StoryGenerationRequest(BaseModel):
         if not self.execute_image and not self.execute_narration:
             raise ValueError("Delayed custom stories require image or narration execution")
         return self
+
+
+class BatchWebPConversionRequest(BaseModel):
+    """Batch PNG to WebP conversion request."""
+
+    story_ids: list[UUID] = Field(min_length=1, max_length=100, description="Story IDs to convert")
+    quality: int = Field(default=85, ge=1, le=100, description="WebP quality 1-100")

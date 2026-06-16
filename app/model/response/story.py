@@ -118,3 +118,25 @@ class StoryVideoResponse(BaseModel):
     total_seconds: float | None = None
     queued_seconds: float | None = None
     timing: dict[str, Any] | None = None
+
+
+class StoryWebPConversionResult(BaseModel):
+    """Result for single story WebP conversion."""
+
+    story_id: UUID
+    status: str
+    images_converted: int | None = None
+    languages_updated: list[str] | None = None
+    original_size_mb: float | None = None
+    converted_size_mb: float | None = None
+    compression_ratio: float | None = None
+    error: str | None = None
+
+
+class BatchWebPConversionResponse(BaseModel):
+    """Batch WebP conversion response."""
+
+    total_stories: int
+    successful: int
+    failed: int
+    results: list[StoryWebPConversionResult]

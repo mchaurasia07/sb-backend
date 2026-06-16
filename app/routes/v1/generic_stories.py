@@ -107,13 +107,15 @@ async def send_new_generic_story_notification_background(*, story_id: UUID, titl
             await NotificationService(session).send_to_audience(
                 audience=NotificationAudience.CHILDREN,
                 event_type="new_generic_story_added",
-                title="New story available",
-                body=f"{title} is now available in the story library.",
-                data={
-                    "event_type": "new_generic_story_added",
-                    "generic_story_id": str(story_id),
-                    "screen": "generic_story_detail",
-                },
+                title="New story in the library",
+                body=f"{title} is ready to read.",
+                data=NotificationService._build_deep_link_data(
+                    event_type="new_generic_story_added",
+                    route="generic_story_detail",
+                    fallback_route="child_dashboard",
+                    params={"generic_story_id": str(story_id)},
+                ),
+                delivery={"channelId": "story-updates", "priority": "high", "sound": "default"},
             )
         except Exception:
             await session.rollback()

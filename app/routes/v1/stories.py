@@ -8,7 +8,7 @@ from app.core.database import get_db_session, AsyncSessionLocal
 from app.core.dependencies import get_current_user
 from app.entity.story_batch_job import StoryBatchJobStatus
 from app.entity.user import User
-from app.model.request.story import StoryGenerationRequest
+from app.model.request.story import StoryGenerationRequest, BatchWebPConversionRequest
 from app.model.response.common import ApiResponse, PaginatedResponse, success_response
 from app.model.response.custom_story_workflow import (
     CustomStoryWorkflowBatchJobResponse,
@@ -22,8 +22,10 @@ from app.model.response.story import (
     StoryResponse,
     StoryStatusResponse,
     StoryStepResponse,
+    BatchWebPConversionResponse,
 )
 from app.service.custom_story_workflow_service import CustomStoryWorkflowService
+from app.service.image_webp_batch_service import ImageWebPBatchService
 from app.service.story_service import StoryService, StoryGenerationFlags
 from app.service.story_service_batch_service import StoryServiceBatchService
 
@@ -247,6 +249,39 @@ async def cancel_story_batch_job(
         batch_job_id=batch_job_id,
     )
     return success_response(StoryBatchJobCancelResponse(**data), data["message"])
+
+
+@router.post(
+    "/batch/convert-to-webp",
+    response_model=ApiResponse[BatchWebPConversionResponse],
+)
+async def batch_convert_stories_to_webp(
+    request: BatchWebPConversionRequest,
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[BatchWebPConversionResponse]:
+    """Batch convert PNG images to WebP and upload to Cloudflare R2.
+
+    Converts all PNG images (cover, pages, back cover) to WebP format for each story
+    (works for both custom and generic stories), uploads to Cloudflare R2, deletes
+    original PNGs, and updates story JSON for all language versions (en, hi, mr) with
+    new WebP URLs.
+
+    Input:
+    - story_ids: List of story IDs to convert (max 100) - custom or generic
+    - quality: WebP quality 1-100 (default: 85)
+
+    Returns:
+    - Per-story conversion results with compression metrics and image counts
+    """
+    data = await ImageWebPBatchService(session).convert_stories_to_webp_batch(
+        user_id=None,
+        story_ids=request.story_ids,
+        quality=request.quality,
+    )
+    return success_response(
+        BatchWebPConversionResponse(**data),
+        f"Converted {data['successful']}/{data['total_stories']} stories to WebP",
+    )
 
 
 @router.get("/{story_id}/status", response_model=ApiResponse[StoryStatusResponse])

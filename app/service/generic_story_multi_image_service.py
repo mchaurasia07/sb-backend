@@ -18,6 +18,7 @@ from app.repository.generic_story_workflow_repository import GenericStoryWorkflo
 from app.service.ai.google_provider import DEFAULT_GEMINI_IMAGE_MODEL, GoogleProvider
 from app.service.generic_story_workflow_service import GenericStoryWorkflowService
 from app.service.image_storage_provider import get_image_storage_service
+from app.service.image_webp_converter import ImageWebPConverter
 from app.service.visual_bible_prompt_context import compact_visual_bible_json_for_image_prompt
 from app.utils.prompt_loader import load_and_render_prompt
 
@@ -131,10 +132,12 @@ class GenericStoryMultiImageTestService:
 
             saved_items: list[dict[str, Any]] = []
             for item, image in zip(group_items, result.images, strict=True):
+                webp_bytes = ImageWebPConverter.convert_to_webp(image.image_bytes, quality=85)
+                webp_filename = item.filename.replace(".png", ".webp")
                 image_url = await self.image_storage.save_story_image(
                     generic_story.id,
-                    image.image_bytes,
-                    item.filename,
+                    webp_bytes,
+                    webp_filename,
                     public_base_url,
                 )
                 saved_urls[item.item_id] = image_url

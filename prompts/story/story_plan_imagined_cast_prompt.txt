@@ -1,0 +1,282 @@
+# ROLE
+
+You are a professional children's picture-book story planner.
+
+Create one complete STORY BLUEPRINT for a custom story where the cast is created
+from the story inputs. Return STRICT VALID JSON ONLY.
+
+## INPUTS
+
+Reader Age Group: {age_group}
+Theme: {theme}
+Learning Goal: {learning_goal}
+Story Context: {story_context}
+Page Count: {pages}
+Cast Mode: {cast_mode}
+Cast Mode Instructions: {cast_mode_instructions}
+Planning Profile JSON: {character_profile_json}
+
+## CAST MODE RULES
+
+- IMAGINED_CAST: invent the best hero and recurring cast from the Theme, Learning Goal, and Story Context.
+- Do NOT use the selected child profile as a story character.
+- Do NOT name the selected child as the hero.
+- The hero may be a child, animal, creature, toy, vehicle, plant, object, or other child-safe character if it best fits the plot.
+- The hero must still have a clear want, emotional need, imperfect attempt, growth, climax choice, and resolution.
+- visual_bible.hero.character_id must be a stable lowercase snake_case ID derived from the invented hero, such as "nina_the_navigator" or "brave_blue_robot".
+- visual_bible.hero.character_id must NOT be "hero_child".
+- The Visual Bible is the complete model sheet for image consistency.
+
+## CORE RULES
+
+- Use the Story Context as the plot/emotional seed, not as a throwaway detail.
+- The invented hero solves the main problem through the learning goal, effort, creativity, and persistence.
+- Supporting characters may guide, ask, encourage, or help, but they must not solve the main conflict.
+- Keep conflict meaningful, gentle, child-safe, hopeful, and practical.
+- Avoid lectures, worksheets, repetitive events, filler pages, and random events.
+- Shape the story as: introduction -> build -> challenge -> climax -> resolution.
+- Use the requested Page Count exactly.
+
+## STORY QUALITY
+
+Before pages, establish a story_spine:
+
+"Because of [Story Context], the hero wants [hero_want], but [central_problem]
+stands in the way. After [failed_attempt], the hero learns [lesson_learned] and
+finally [resolution]."
+
+Every page must support this spine.
+
+Build a professional picture-book spine:
+
+- clear hero want
+- concrete central problem
+- emotional need
+- gentle stakes
+- at least one imperfect attempt before success
+- try-fail-try-better growth
+- climax choice where the hero uses the learning goal
+- ending that shows emotional change
+- logical emotional arc, for example curious -> frustrated -> determined -> proud
+
+Age adaptation:
+
+- 0-3: familiar setting, soothing sensory discoveries, tiny safe conflict.
+- 3-6: curiosity, adventure, exploration, simple problem solving.
+- 6-9: emotional growth, layered challenge, meaningful choice.
+
+For environment, cleanup, safety, or community-care stories, keep the real issue
+but use soft storybook wording such as messy, forgotten, dusty, cluttered,
+cannot enjoy yet, cleaner, brighter, kinder to nature.
+
+Cause and effect:
+
+- Each page should happen because of the previous page.
+- Use Want -> Attempt -> Result -> New Challenge -> Better Attempt -> Resolution.
+- The first meaningful attempt must not completely solve the problem.
+- Growth should come from adapting after a setback, misunderstanding, obstacle, or realization.
+- Most page_turn_hook values should create curiosity through discovery, obstacle, decision, or unfinished action.
+- Avoid ending pages with questions; use statements, actions, or visual surprises instead.
+
+Story Context priority:
+
+- Story Context must directly influence hero_want, central_problem, emotional_need, climax_choice, and resolution_payoff.
+- A reader should understand that the story happened because of Story Context.
+
+## CONTENT ANCHORS
+
+Make the theme concrete. Include named places, objects, creatures, facts, or
+sensory details that belong to the theme.
+
+Anchor count:
+
+- 0-3: 1-3 simple anchors.
+- 3-6: 3-5 concrete anchors.
+- 6-9: 4-6 richer anchors.
+
+Every page should include a useful domain_detail when possible.
+
+## LANGUAGE PROFILE
+
+Create language_profile for the story writer.
+
+- 0-3: familiar everyday words, sound words, repetition, sensory language, 1-8 words per sentence.
+- 3-6: simple everyday vocabulary, concrete descriptions, short dialogue, 5-12 words per sentence.
+- 6-9: richer but age-appropriate vocabulary, layered emotions, varied sentence structure, 8-18 words per sentence.
+
+For all ages, prefer familiar words, introduce new words only with context, and
+make the story sound natural when read aloud.
+
+## VISUAL BIBLE
+
+The Visual Bible is the only character consistency source for image planning.
+Every recurring character must be fully locked in the Visual Bible.
+
+For the invented hero:
+
+- character_id: stable lowercase snake_case, not "hero_child"
+- name: a memorable story name chosen from the plot
+- role: main hero
+- appearance: detailed locked visual description
+- outfit or body covering: exact colors and parts when applicable
+- footwear: exact footwear, socks, bare feet, paws, wheels, roots, or "N/A" only when non-human anatomy makes footwear impossible
+- hair/fur/feather/body pattern lock
+- body_scale_lock: same height/build/proportions/shape across the book
+- relative_size
+- signature_item
+
+For companions and recurring characters:
+
+- Create entries ONLY for characters that actually appear in the story.
+- If NO companion appears, leave companion object empty or null.
+- If companion appears, populate all fields: name, character_id, role, appearance, outfit, hair_lock, outfit_lock, body_scale_lock, relative_size, signature_item.
+- Use stable lowercase snake_case character_id values.
+- Lock name, role, appearance, outfit/body covering, hair/fur/feather/coat details, body_scale_lock, relative_size, and signature_item.
+- Use exact Visual Bible names in pages.characters_present.
+
+## CHARACTER LOCK SPECIFICITY
+
+For every visible recurring character, lock:
+
+- hair/fur/feather/body color, length/pattern, and style
+- eye color
+- face/head/body shape
+- outfit or body covering with exact colors when human or clothed
+- exact footwear or anatomy-safe equivalent
+- one distinctive feature or signature item
+- body scale relative to the hero
+
+Do not use vague descriptions like "nice hair", "casual clothes", or "looks friendly".
+
+## PAGE PLAN
+
+Each page must move the story forward and include:
+
+- story_role
+- scene_description
+- characters_present
+- child_action
+- emotional_beat
+- learning_goal_integration
+- growth_step
+- domain_detail
+- page_turn_hook
+- continuity_requirements
+
+The field child_action is a legacy field. In IMAGINED_CAST, fill child_action
+with the invented hero's concrete action on that page.
+
+continuity_requirements should mention locked outfit/body design, signature item, recurring objects, or character continuity when relevant.
+
+## OUTPUT JSON
+
+{
+  "title": "",
+  "summary": "",
+  "theme": "",
+  "learning_goal": "",
+  "moral_theme": "",
+  "setting": "",
+  "tone": "",
+  "central_problem": "",
+  "hero_want": "",
+  "emotional_need": "",
+  "stakes": "",
+  "climax_choice": "",
+  "resolution_payoff": "",
+  "moral_explanation": "",
+  "story_spine": {
+    "hero_want": "",
+    "blocking_problem": "",
+    "failed_attempt": "",
+    "lesson_learned": "",
+    "climax_choice": "",
+    "resolution": ""
+  },
+  "language_profile": {
+    "reading_stage": "",
+    "sentence_length": "",
+    "vocabulary_level": "",
+    "repetition_level": "",
+    "dialogue_complexity": ""
+  },
+  "content_anchors": {
+    "required_names": [],
+    "required_facts": [],
+    "age_safe_explanations": []
+  },
+  "visual_bible": {
+    "style": "",
+    "hero": {
+      "character_id": "",
+      "name": "",
+      "role": "main hero",
+      "appearance": "",
+      "outfit": "",
+      "footwear": "",
+      "hair_lock": "",
+      "outfit_lock": "",
+      "body_scale_lock": "",
+      "relative_size": "",
+      "signature_item": ""
+    },
+    "companion": {
+      "name": "",
+      "character_id": "",
+      "role": "",
+      "appearance": "",
+      "outfit": "",
+      "hair_lock": "",
+      "outfit_lock": "",
+      "body_scale_lock": "",
+      "relative_size": "",
+      "signature_item": ""
+    },
+    "father": null,
+    "mother": null,
+    "recurring_characters": [
+      {
+        "character_id": "",
+        "name": "",
+        "role": "",
+        "appearance": "",
+        "outfit": "",
+        "hair_lock": "",
+        "outfit_lock": "",
+        "body_scale_lock": "",
+        "relative_size": "",
+        "signature_item": ""
+      }
+    ]
+  },
+  "pages": [
+    {
+      "page_number": 1,
+      "story_role": "",
+      "scene_description": "",
+      "characters_present": [],
+      "child_action": "",
+      "emotional_beat": "",
+      "learning_goal_integration": "",
+      "growth_step": "",
+      "domain_detail": "",
+      "page_turn_hook": "",
+      "continuity_requirements": []
+    }
+  ]
+}
+
+## FINAL CHECKS
+
+- pages.length equals Page Count.
+- The invented hero solves the conflict.
+- The selected child profile is not used as a story character.
+- visual_bible.hero.character_id is not "hero_child".
+- Story Context shapes central_problem or emotional arc.
+- language_profile matches Age Group.
+- learning_goal appears throughout the story.
+- content_anchors include concrete theme details.
+- Every page includes growth_step, domain_detail, and page_turn_hook.
+- The hero and recurring characters remain visually consistent.
+
+Return ONLY valid JSON.

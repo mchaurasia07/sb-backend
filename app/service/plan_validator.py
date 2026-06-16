@@ -22,6 +22,8 @@ class PlanValidator:
         *,
         age_group: str,
         source_inputs: dict[str, str] | None = None,
+        cast_mode: str | None = None,
+        selected_child_name: str | None = None,
     ) -> PlanValidationResult:
         errors: list[str] = []
 
@@ -49,8 +51,14 @@ class PlanValidator:
         if source_inputs is not None:
             self._validate_source_inputs(plan, source_inputs, errors)
 
+        normalized_cast_mode = self._normalize_cast_mode(cast_mode)
         self._validate_content_anchors(plan.get("content_anchors"), errors)
-        self._validate_visual_bible(plan.get("visual_bible"), errors)
+        self._validate_visual_bible(
+            plan.get("visual_bible"),
+            errors,
+            cast_mode=normalized_cast_mode,
+            selected_child_name=selected_child_name,
+        )
 
         pages = plan.get("pages")
         if not isinstance(pages, list) or not pages:
@@ -109,6 +117,18 @@ class PlanValidator:
                 self._validate_required_string(page, field, f"pages[{idx}]", errors)
             self._validate_string_array(page, "characters_present", f"pages[{idx}]", errors, allow_empty=True)
             self._validate_string_array(page, "continuity_requirements", f"pages[{idx}]", errors, allow_empty=True)
+            if normalized_cast_mode == "IMAGINED_CAST" and selected_child_name:
+                selected_key = self._name_key(selected_child_name)
+                characters_present = page.get("characters_present") if isinstance(page.get("characters_present"), list) else []
+                if any(self._name_key(value) == selected_key for value in characters_present):
+                    errors.append(
+                        f"pages[{idx}].characters_present must not include the selected child in IMAGINED_CAST mode."
+                    )
+                child_action = page.get("child_action")
+                if isinstance(child_action, str) and selected_key and selected_key in self._name_key(child_action):
+                    errors.append(
+                        f"pages[{idx}].child_action must describe the invented hero, not the selected child, in IMAGINED_CAST mode."
+                    )
 
         if page_numbers:
             expected = list(range(1, len(pages) + 1))
@@ -172,12 +192,20 @@ class PlanValidator:
         if total_values == 0:
             errors.append("content_anchors must include at least one concrete theme detail.")
 
-    def _validate_visual_bible(self, visual_bible: Any, errors: list[str]) -> None:
+    def _validate_visual_bible(
+        self,
+        visual_bible: Any,
+        errors: list[str],
+        *,
+        cast_mode: str | None = None,
+        selected_child_name: str | None = None,
+    ) -> None:
         if not isinstance(visual_bible, dict):
             errors.append("Missing or invalid `visual_bible` (must be an object).")
             return
 
         self._validate_required_string(visual_bible, "style", "visual_bible", errors)
+        normalized_cast_mode = self._normalize_cast_mode(cast_mode)
 
         hero = visual_bible.get("hero")
         if not isinstance(hero, dict):
@@ -185,6 +213,30 @@ class PlanValidator:
         else:
             for field in ("name", "appearance", "outfit"):
                 self._validate_required_string(hero, field, "visual_bible.hero", errors)
+            if normalized_cast_mode is not None:
+                self._validate_required_string(hero, "character_id", "visual_bible.hero", errors)
+                hero_id = str(hero.get("character_id") or "").strip()
+                hero_name = str(hero.get("name") or "").strip()
+                if normalized_cast_mode == "CHILD_HERO":
+                    if hero_id != "hero_child":
+                        errors.append('visual_bible.hero.character_id must be "hero_child" for CHILD_HERO mode.')
+                    if selected_child_name and self._name_key(hero_name) != self._name_key(selected_child_name):
+                        errors.append("visual_bible.hero.name must match the selected child name for CHILD_HERO mode.")
+                elif normalized_cast_mode == "IMAGINED_CAST":
+                    if hero_id == "hero_child":
+                        errors.append('visual_bible.hero.character_id must not be "hero_child" for IMAGINED_CAST mode.')
+                    if hero_id and not self._is_snake_case_id(hero_id):
+                        errors.append("visual_bible.hero.character_id must be stable lowercase snake_case.")
+                    if selected_child_name and self._name_key(hero_name) == self._name_key(selected_child_name):
+                        errors.append("visual_bible.hero.name must not be the selected child name in IMAGINED_CAST mode.")
+                    for field in (
+                        "hair_lock",
+                        "outfit_lock",
+                        "body_scale_lock",
+                        "relative_size",
+                        "signature_item",
+                    ):
+                        self._validate_required_string(hero, field, "visual_bible.hero", errors)
             signature_item = hero.get("signature_item")
             if signature_item is not None and not isinstance(signature_item, str):
                 errors.append("visual_bible.hero.signature_item must be a string or null.")
@@ -210,6 +262,27 @@ class PlanValidator:
                 continue
             for field in ("name", "role", "appearance"):
                 self._validate_required_string(character, field, f"visual_bible.recurring_characters[{idx}]", errors)
+            if normalized_cast_mode == "IMAGINED_CAST":
+                for field in (
+                    "character_id",
+                    "outfit",
+                    "hair_lock",
+                    "outfit_lock",
+                    "body_scale_lock",
+                    "relative_size",
+                    "signature_item",
+                ):
+                    self._validate_required_string(
+                        character,
+                        field,
+                        f"visual_bible.recurring_characters[{idx}]",
+                        errors,
+                    )
+                character_id = str(character.get("character_id") or "").strip()
+                if character_id and not self._is_snake_case_id(character_id):
+                    errors.append(
+                        f"visual_bible.recurring_characters[{idx}].character_id must be stable lowercase snake_case."
+                    )
 
     def _validate_optional_character_object(self, value: Any, label: str, errors: list[str]) -> None:
         if not isinstance(value, dict):
@@ -240,6 +313,25 @@ class PlanValidator:
         value = obj.get(field)
         if not isinstance(value, str) or not value.strip():
             errors.append(f"{label}.{field} must be a non-empty string.")
+
+    @staticmethod
+    def _normalize_cast_mode(value: str | None) -> str | None:
+        if not isinstance(value, str) or not value.strip():
+            return None
+        normalized = value.strip().upper()
+        if normalized in {"CHILD_HERO", "IMAGINED_CAST"}:
+            return normalized
+        return None
+
+    @staticmethod
+    def _name_key(value: str | None) -> str:
+        return " ".join(str(value or "").strip().lower().split())
+
+    @staticmethod
+    def _is_snake_case_id(value: str) -> bool:
+        if not value:
+            return False
+        return all(part.isalnum() and part == part.lower() for part in value.split("_")) and value == value.strip("_")
 
     @staticmethod
     def _enum_value(value: Any) -> str:

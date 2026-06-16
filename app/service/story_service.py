@@ -35,6 +35,7 @@ from app.repository.story_page_repository import StoryPageRepository
 from app.service.ai.base import AIProvider
 from app.service.ai.factory import get_ai_provider
 from app.service.image_storage_provider import get_image_storage_service
+from app.service.image_webp_converter import ImageWebPConverter
 from app.service.plan_validator import PlanValidator
 from app.service.image_plan_validator import ImagePlanValidator
 from app.service.story_input_safety_service import StoryInputSafetyService
@@ -884,8 +885,8 @@ class StoryService:
         if child is None:
             raise NotFoundException("Child profile not found during plan generation")
 
-        # Load prompt template
-        template = load_prompt("prompts/story/story_plan_prompt.txt")
+        # Load the cast-mode-specific planner prompt so the LLM receives no contradictory hero rules.
+        template = load_prompt(self._story_plan_prompt_path(story))
 
         # Prepare variables
         pages = self._get_page_count_for_age_group(story.age_group)
@@ -1010,6 +1011,7 @@ class StoryService:
         step.status = StepStatus.IN_PROGRESS
         step.started_at = datetime.utcnow()
         retry_usages: list[dict[str, Any]] = []
+        selected_child_name = await self._selected_child_name_for_plan_validation(story)
 
         for attempt in range(1, self.MAX_RETRIES + 1):
             step.retry_count = attempt - 1
@@ -1019,6 +1021,8 @@ class StoryService:
                 plan,
                 age_group=story.age_group,
                 source_inputs=_story_source_inputs(story),
+                cast_mode=self._cast_mode(story),
+                selected_child_name=selected_child_name,
             )
 
             if result.ok:
@@ -1060,6 +1064,8 @@ class StoryService:
             plan,
             age_group=story.age_group,
             source_inputs=_story_source_inputs(story),
+            cast_mode=self._cast_mode(story),
+            selected_child_name=selected_child_name,
         )
         error_details = "\n".join([f"  - {err}" for err in final_result.errors])
         error_msg = f"Plan validation failed after {self.MAX_RETRIES} attempts:\n{error_details}"
@@ -1092,7 +1098,7 @@ class StoryService:
         child = await self.children.get_for_user(story.user_id, story.child_id)
         if child is None:
             raise NotFoundException("Child profile not found during plan retry")
-        template = load_prompt("prompts/story/story_plan_prompt.txt")
+        template = load_prompt(self._story_plan_prompt_path(story))
 
         pages = self._get_page_count_for_age_group(story.age_group)
         source_inputs = _story_source_inputs(story)
@@ -1151,7 +1157,7 @@ class StoryService:
         step.status = StepStatus.IN_PROGRESS
         step.started_at = datetime.utcnow()
 
-        template = load_prompt("prompts/story/story_generation_prompt.txt")
+        template = load_prompt(self._story_generation_prompt_path(story))
         prompt_plan = self._build_story_generation_context(plan)
 
         # Convert to compact JSON - this ensures proper escaping of special characters
@@ -1279,21 +1285,35 @@ class StoryService:
         story_json: dict[str, Any],
         character_context: dict[str, Any],
     ) -> str:
+        use_child_character = bool(character_context.get("use_child_character", True))
+        hero = story_plan.get("visual_bible", {}).get("hero", {}) if isinstance(story_plan, dict) else {}
+        hero_id = "hero_child" if use_child_character else str(hero.get("character_id") or "").strip()
+        hero_name = character_context.get("child_name", "Child")
+        manifest = (
+            [{"character_id": "hero_child", "name": "", "role": "hero_child"}]
+            if use_child_character
+            else []
+        )
+        mode_rule = (
+            "Use hero_child as the selected child character_id whenever the hero appears."
+            if use_child_character
+            else "Do not use hero_child. Use the invented hero character_id from visual_bible.hero whenever the hero appears."
+        )
         return (
             "You are a children's picture-book illustration planner. Return only valid JSON.\n"
             "Create a concise visual plan from the sanitized story inputs. Use warm, family-friendly, "
             "school-and-home-safe wording. Avoid sensitive negative phrasing; state positive visual requirements only.\n"
             "Keep character identities stable. If water play appears, choose modest covered family-friendly outfits.\n"
-            "Use hero_child as the selected child character_id whenever the hero appears.\n\n"
+            f"{mode_rule}\n\n"
             "Return this exact JSON shape:\n"
-            '{"visual_bible":{"hero":{"character_id":"hero_child","name":"","appearance":"","outfit":"","footwear":"","signature_item":""},'
+            f'{{"visual_bible":{{"hero":{{"character_id":"{hero_id}","name":"","appearance":"","outfit":"","footwear":"","signature_item":""}},'
             '"companion":{"appearance":""},"recurring_characters":[]},'
-            '"character_reference_manifest":[{"character_id":"hero_child","name":"","role":"hero_child"}],'
+            f'"character_reference_manifest":{_compact_json(manifest)},'
             '"cover":{"title_text":"","visual_focus":"","emotion":"","characters_present":[],"reference_character_ids":[],"image_prompt":""},'
             '"pages":[{"page_number":1,"story_role":"","visual_importance":"medium","emotion":"","scene_action":"","environment":"",'
             '"characters_present":[],"reference_character_ids":[],"image_prompt":""}],'
             '"back_cover":{"emotion":"","characters_present":[],"reference_character_ids":[],"image_prompt":""}}\n\n'
-            f"Hero name: {character_context.get('child_name', 'Child')}\n"
+            f"Hero name: {hero_name}\n"
             f"Cast mode: {character_context.get('cast_mode', StoryService.CAST_MODE_CHILD_HERO)}\n"
             f"Character identity lock:\n{StoryService._format_prompt_character_identity_lock(character_context)}\n\n"
             f"STORY PLAN JSON:\n{_compact_json(story_plan)}\n\n"
@@ -1339,10 +1359,27 @@ class StoryService:
     ) -> str:
         story_plan = StoryService._custom_safe_image_plan_context(story_plan)
         story_json = StoryService._custom_safe_image_plan_context(story_json)
+        use_child_character = bool(character_context.get("use_child_character", True))
+        plan_visual_bible = story_plan.get("visual_bible") if isinstance(story_plan.get("visual_bible"), dict) else {}
+        plan_hero = plan_visual_bible.get("hero") if isinstance(plan_visual_bible.get("hero"), dict) else {}
+        hero_id = "hero_child" if use_child_character else str(plan_hero.get("character_id") or "").strip()
+        manifest = (
+            [{"character_id": "hero_child", "name": "", "role": "hero_child"}]
+            if use_child_character
+            else []
+        )
+        cast_rules = (
+            "- Use hero_child in reference_character_ids whenever the selected child appears.\n"
+            "- The final image step will attach the selected child's character reference image when the child hero is visible.\n"
+            if use_child_character
+            else "- Do not use hero_child or the selected child profile.\n"
+            "- Use the invented hero character_id from visual_bible.hero whenever the hero appears.\n"
+            "- The final image step will use the Visual Bible as the model sheet for the invented cast.\n"
+        )
         schema = {
             "visual_bible": {
                 "hero": {
-                    "character_id": "hero_child",
+                    "character_id": hero_id,
                     "name": "",
                     "appearance": "",
                     "outfit": "",
@@ -1354,9 +1391,7 @@ class StoryService:
                     {"character_id": "", "name": "", "role": "", "appearance": "", "outfit": ""}
                 ],
             },
-            "character_reference_manifest": [
-                {"character_id": "hero_child", "name": "", "role": "hero_child"}
-            ],
+            "character_reference_manifest": manifest,
             "cover": {
                 "title_text": "",
                 "visual_focus": "",
@@ -1397,13 +1432,12 @@ class StoryService:
             f"Cast Mode: {character_context.get('cast_mode', StoryService.CAST_MODE_CHILD_HERO)}\n\n"
             "## PLANNING RULES\n"
             "- Create a visual plan for cover, each page, and back cover.\n"
-            "- Use hero_child in reference_character_ids whenever the selected child appears.\n"
+            f"{cast_rules}"
             "- Identify recurring side characters and assign stable lowercase snake_case character_id values.\n"
             "- Include only visible recurring characters in characters_present and reference_character_ids.\n"
             "- Keep character names, hairstyles, outfits, accessories, and color palettes stable across pages.\n"
             "- Lock exact footwear for the hero in visual_bible.hero.footwear and include it in visual_bible.hero.outfit.\n"
             "- Never leave shoes/footwear implied; choose one concrete footwear state and repeat it in every image_prompt.\n"
-            "- The final image step will attach character reference images; do not request or describe uploaded photos.\n"
             "- Use modest, family-friendly outfits. For water-play scenes, use covered play clothing and water shoes.\n"
             "- Keep scenes warm, calm, age-appropriate, expressive, and easy for children to understand.\n"
             "- Avoid intense, scary, violent, or unsafe visual wording. State positive visual requirements only.\n"
@@ -1777,11 +1811,14 @@ class StoryService:
     def _character_reference_manifest(cls, image_plan: dict[str, Any]) -> list[dict[str, Any]]:
         manifest = image_plan.get("character_reference_manifest")
         if isinstance(manifest, list):
-            return [item for item in manifest if isinstance(item, dict)]
+            manifest[:] = [item for item in manifest if isinstance(item, dict)]
+            return manifest
         if isinstance(manifest, dict):
             characters = manifest.get("characters")
             if isinstance(characters, list):
-                return [item for item in characters if isinstance(item, dict)]
+                characters[:] = [item for item in characters if isinstance(item, dict)]
+                image_plan["character_reference_manifest"] = characters
+                return characters
         manifest = []
         image_plan["character_reference_manifest"] = manifest
         return manifest
@@ -1935,10 +1972,11 @@ class StoryService:
                 aspect_ratio="1:1",
             )
             image_bytes = self._crop_image_bytes_to_aspect_ratio(result.image_bytes, "1:1")
+            webp_bytes = ImageWebPConverter.convert_to_webp(image_bytes, quality=85)
             image_url = await image_storage.save_story_image(
                 story.id,
-                image_bytes,
-                f"character_ref_{character_id}.png",
+                webp_bytes,
+                f"character_ref_{character_id}.webp",
                 "",
             )
             character["reference_image_url"] = image_url
@@ -2137,10 +2175,11 @@ class StoryService:
                     cover_bytes.image_bytes,
                     settings.STORY_COVER_ASPECT_RATIO,
                 )
+                webp_cover_bytes = ImageWebPConverter.convert_to_webp(cover_image_bytes, quality=85)
                 cover_url = await image_storage.save_story_image(
                     story.id,
-                    cover_image_bytes,
-                    "cover.png",
+                    webp_cover_bytes,
+                    "cover.webp",
                     "",  # base_url will be added by storage service
                 )
                 await self.story_pages.upsert_page(
@@ -2222,10 +2261,11 @@ class StoryService:
                         image_bytes.image_bytes,
                         settings.STORY_PAGE_ASPECT_RATIO,
                     )
+                    webp_page_bytes = ImageWebPConverter.convert_to_webp(page_image_bytes, quality=85)
                     image_url = await image_storage.save_story_image(
                         story.id,
-                        page_image_bytes,
-                        f"page_{page_num}.png",
+                        webp_page_bytes,
+                        f"page_{page_num}.webp",
                         "",
                     )
 
@@ -2308,10 +2348,11 @@ class StoryService:
                     back_cover_bytes.image_bytes,
                     settings.STORY_BACK_COVER_ASPECT_RATIO,
                 )
+                webp_back_cover_bytes = ImageWebPConverter.convert_to_webp(back_cover_image_bytes, quality=85)
                 back_cover_url = await image_storage.save_story_image(
                     story.id,
-                    back_cover_image_bytes,
-                    "back_cover.png",
+                    webp_back_cover_bytes,
+                    "back_cover.webp",
                     "",
                 )
                 await self.story_pages.upsert_page(
@@ -2587,10 +2628,11 @@ class StoryService:
     ) -> str:
         safe_inputs = StoryService._story_plan_prompt_source_inputs(source_inputs)
         character_profile = StoryService._build_story_planner_character_profile(child, character_context)
+        use_child_character = bool(character_context.get("use_child_character", True))
         payload = {
-            "child_name": child.first_name or "Child",
+            "child_name": (child.first_name or "Child") if use_child_character else None,
             "age_group": age_group_label(story.age_group),
-            "gender": child.gender or "neutral",
+            "gender": (child.gender or "neutral") if use_child_character else "chosen by story",
             "page_count": pages,
             "theme": safe_inputs["category"],
             "learning_goal": safe_inputs["learning_goal"],
@@ -2620,11 +2662,47 @@ class StoryService:
             },
             "visual_bible": {
                 "style": "",
-                "hero": {"name": "", "appearance": "", "outfit": "", "signature_item": ""},
-                "companion": {"name": "", "appearance": ""},
+                "hero": {
+                    "character_id": "",
+                    "name": "",
+                    "role": "main hero",
+                    "appearance": "",
+                    "outfit": "",
+                    "footwear": "",
+                    "hair_lock": "",
+                    "outfit_lock": "",
+                    "body_scale_lock": "",
+                    "relative_size": "",
+                    "signature_item": "",
+                },
+                "companion": {
+                    "name": "",
+                    "character_id": "",
+                    "role": "",
+                    "appearance": "",
+                    "outfit": "",
+                    "hair_lock": "",
+                    "outfit_lock": "",
+                    "body_scale_lock": "",
+                    "relative_size": "",
+                    "signature_item": "",
+                },
                 "father": {"appearance": ""},
                 "mother": {"appearance": ""},
-                "recurring_characters": [{"name": "", "role": "", "appearance": ""}],
+                "recurring_characters": [
+                    {
+                        "character_id": "",
+                        "name": "",
+                        "role": "",
+                        "appearance": "",
+                        "outfit": "",
+                        "hair_lock": "",
+                        "outfit_lock": "",
+                        "body_scale_lock": "",
+                        "relative_size": "",
+                        "signature_item": "",
+                    }
+                ],
             },
             "pages": [
                 {
@@ -2649,6 +2727,8 @@ class StoryService:
             "clear hero want, gentle central problem, try-fail-try-better growth, meaningful climax choice, "
             "emotional payoff, concrete theme details, and stable visual bible. Use family-friendly language. "
             "Keep all conflict calm, practical, hopeful, and suitable for a children's picture book.\n\n"
+            f"Cast mode: {character_context.get('cast_mode', StoryService.CAST_MODE_CHILD_HERO)}. "
+            f"{character_context.get('cast_mode_instructions', '')}\n\n"
             "Return STRICT VALID JSON ONLY in this schema shape:\n"
             f"{_compact_json(schema)}\n\n"
             f"SAFE STORY REQUEST JSON:\n{_compact_json(payload)}"
@@ -3076,6 +3156,38 @@ class StoryService:
     @classmethod
     def _use_child_character(cls, story: Any) -> bool:
         return cls._cast_mode(story) == cls.CAST_MODE_CHILD_HERO
+
+    @classmethod
+    def _story_plan_prompt_path(cls, story: Any) -> str:
+        if cls._use_child_character(story):
+            return "prompts/story/story_plan_child_hero_prompt.txt"
+        return "prompts/story/story_plan_imagined_cast_prompt.txt"
+
+    @classmethod
+    def _story_generation_prompt_path(cls, story: Any) -> str:
+        if cls._use_child_character(story):
+            return "prompts/story/story_generation_child_hero_prompt.txt"
+        return "prompts/story/story_generation_imagined_cast_prompt.txt"
+
+    async def _selected_child_name_for_plan_validation(self, story: Any) -> str | None:
+        child_name = getattr(story, "child_name", None)
+        if isinstance(child_name, str) and child_name.strip():
+            return child_name.strip()
+        child = getattr(story, "child", None)
+        child_name = getattr(child, "first_name", None)
+        if isinstance(child_name, str) and child_name.strip():
+            return child_name.strip()
+        user_id = getattr(story, "user_id", None)
+        child_id = getattr(story, "child_id", None)
+        if user_id is None or child_id is None:
+            return None
+        try:
+            child = await self.children.get_for_user(user_id, child_id)
+        except Exception:
+            logger.warning("Story %s: unable to load child name for plan validation", getattr(story, "id", None))
+            return None
+        child_name = getattr(child, "first_name", None)
+        return child_name.strip() if isinstance(child_name, str) and child_name.strip() else None
 
     @classmethod
     def _build_story_cast_context(

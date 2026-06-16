@@ -187,6 +187,74 @@ def test_plan_validator_accepts_descriptive_roles_and_null_signature_item():
     assert plan["pages"][0]["story_role"] == "first_day_moment"
 
 
+def test_plan_validator_accepts_imagined_cast_hero():
+    plan = _story_plan(page_count=8)
+    plan["visual_bible"]["hero"] = {
+        "character_id": "brave_blue_robot",
+        "name": "Brave Blue Robot",
+        "role": "main hero",
+        "appearance": "A small rounded blue robot with warm amber eyes and a square silver head.",
+        "outfit": "painted blue metal body with a yellow chest star, red buttons, and tiny black wheels.",
+        "footwear": "tiny black wheels",
+        "hair_lock": "N/A smooth silver robot head",
+        "outfit_lock": "painted blue metal body with a yellow chest star, red buttons, and tiny black wheels.",
+        "body_scale_lock": "Same small rounded robot body, square head, and tiny wheels across the book.",
+        "relative_size": "shorter than an early-reader child",
+        "signature_item": "yellow chest star",
+    }
+    for page in plan["pages"]:
+        page["characters_present"] = ["Brave Blue Robot"]
+        page["child_action"] = "Brave Blue Robot studies the map carefully."
+
+    result = PlanValidator().validate(
+        plan,
+        age_group="3-6",
+        source_inputs={"category": "adventure", "learning_goal": "problem solving", "context": ""},
+        cast_mode="IMAGINED_CAST",
+        selected_child_name="Mira",
+    )
+
+    assert result.ok, result.errors
+
+
+def test_plan_validator_rejects_hero_child_id_for_imagined_cast():
+    plan = _story_plan(page_count=8)
+    plan["visual_bible"]["hero"]["character_id"] = "hero_child"
+    plan["visual_bible"]["hero"]["name"] = "Brave Blue Robot"
+    for page in plan["pages"]:
+        page["characters_present"] = ["Brave Blue Robot"]
+        page["child_action"] = "Brave Blue Robot studies the map carefully."
+
+    result = PlanValidator().validate(
+        plan,
+        age_group="3-6",
+        source_inputs={"category": "adventure", "learning_goal": "problem solving", "context": ""},
+        cast_mode="IMAGINED_CAST",
+        selected_child_name="Mira",
+    )
+
+    assert not result.ok
+    assert any('must not be "hero_child"' in error for error in result.errors)
+
+
+def test_plan_validator_rejects_selected_child_as_imagined_cast_hero():
+    plan = _story_plan(page_count=8)
+    plan["visual_bible"]["hero"]["character_id"] = "mira"
+    plan["visual_bible"]["hero"]["name"] = "Mira"
+
+    result = PlanValidator().validate(
+        plan,
+        age_group="3-6",
+        source_inputs={"category": "adventure", "learning_goal": "problem solving", "context": ""},
+        cast_mode="IMAGINED_CAST",
+        selected_child_name="Mira",
+    )
+
+    assert not result.ok
+    assert any("must not be the selected child name" in error for error in result.errors)
+    assert any("characters_present must not include the selected child" in error for error in result.errors)
+
+
 def test_plan_validator_accepts_theme_with_requested_theme_plus_extra_context():
     plan = _story_plan(page_count=8)
     plan["theme"] = "Adventure, Environmental Awareness"
