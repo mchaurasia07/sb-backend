@@ -46,3 +46,35 @@ class CustomStoryWorkflowStepResponse(BaseModel):
     started_at: datetime | None
     completed_at: datetime | None
     created_at: datetime
+
+
+class CustomStoryWorkflowBatchJobResponse(BaseModel):
+    id: UUID
+    workflow_id: UUID
+    story_id: UUID | None
+    job_type: str
+    status: str
+    provider: str
+    provider_job_name: str | None
+    provider_model: str | None
+    provider_state: str | None
+    attempt: int
+    expected_item_count: int
+    completed_item_count: int
+    failed_item_count: int
+    request_keys: list[str] | None
+    missing_keys: list[str] | None
+    error_message: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class CustomStoryWorkflowBatchJobCancelResponse(BaseModel):
+    workflow_id: UUID
+    batch_job_id: UUID
+    job_type: str
+    status: str
+    provider_job_name: str | None
+    provider_state: str | None
+    workflow_status: str
+    message: str

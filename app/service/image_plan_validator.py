@@ -138,9 +138,16 @@ class ImagePlanValidator:
             if not isinstance(companion, dict):
                 errors.append("visual_bible.companion must be an object.")
             else:
-                appearance = companion.get("appearance")
-                if appearance is not None and (not isinstance(appearance, str) or not appearance.strip()):
-                    errors.append("visual_bible.companion.appearance must be a non-empty string when provided.")
+                # Companion is optional in stories. Only validate if it has a name (meaning it exists in story)
+                name = companion.get("name")
+                if name and isinstance(name, str) and name.strip():
+                    # Companion is used in story - appearance must be provided and non-empty
+                    appearance = companion.get("appearance")
+                    if not appearance or (not isinstance(appearance, str) or not appearance.strip()):
+                        errors.append(
+                            f"visual_bible.companion.appearance must be a non-empty string. "
+                            f"Companion '{name}' requires detailed appearance description."
+                        )
 
         recurring = visual_bible.get("recurring_characters")
         if recurring is None:

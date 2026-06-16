@@ -128,6 +128,76 @@ def _step_by_name(steps: _StepRepo, step_name: CustomStoryWorkflowStep):
     return None
 
 
+def _batch_job(**overrides):
+    data = {
+        "id": uuid4(),
+        "workflow_id": uuid4(),
+        "story_id": uuid4(),
+        "job_type": StoryBatchJobType.IMAGE,
+        "status": StoryBatchJobStatus.SUBMITTED,
+        "provider": "google",
+        "provider_job_name": "batches/image",
+        "provider_model": "gemini-image",
+        "provider_state": "JOB_STATE_RUNNING",
+        "attempt": 1,
+        "expected_item_count": 10,
+        "completed_item_count": 3,
+        "failed_item_count": 1,
+        "request_keys": ["cover", "page_1"],
+        "missing_keys": ["page_1"],
+        "error_message": None,
+        "created_at": datetime.now(UTC),
+        "updated_at": datetime.now(UTC),
+    }
+    data.update(overrides)
+    return SimpleNamespace(**data)
+
+
+@pytest.mark.asyncio
+async def test_list_batch_jobs_returns_paginated_typed_response_with_filters():
+    user_id = uuid4()
+    workflow_id = uuid4()
+    job = _batch_job(workflow_id=workflow_id, status=StoryBatchJobStatus.RUNNING)
+    calls = {}
+
+    class _BatchJobs:
+        async def list_for_user(self, user_id_arg, *, page, page_size, workflow_id=None, status=None):
+            calls["user_id"] = user_id_arg
+            calls["page"] = page
+            calls["page_size"] = page_size
+            calls["workflow_id"] = workflow_id
+            calls["status"] = status
+            return [job], 1
+
+    service = CustomStoryWorkflowService.__new__(CustomStoryWorkflowService)
+    service.batch_jobs = _BatchJobs()
+
+    response = await service.list_batch_jobs(
+        user_id,
+        page=1,
+        page_size=20,
+        workflow_id=workflow_id,
+        status_filter=StoryBatchJobStatus.RUNNING,
+    )
+
+    assert calls == {
+        "user_id": user_id,
+        "page": 1,
+        "page_size": 20,
+        "workflow_id": workflow_id,
+        "status": StoryBatchJobStatus.RUNNING,
+    }
+    assert response.total == 1
+    assert response.page == 1
+    assert response.page_size == 20
+    assert response.total_pages == 1
+    assert response.items[0].id == job.id
+    assert response.items[0].workflow_id == workflow_id
+    assert response.items[0].status == "RUNNING"
+    assert response.items[0].request_keys == ["cover", "page_1"]
+    assert response.items[0].missing_keys == ["page_1"]
+
+
 def test_custom_story_workflow_step_order_includes_publish_last():
     assert CustomStoryWorkflowService.ORDERED_STEPS == [
         CustomStoryWorkflowStep.STORY_PLAN_GENERATION,

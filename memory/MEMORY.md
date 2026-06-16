@@ -1,0 +1,4 @@
+- [Character Consistency Issue](character_consistency_issue.md) — Daddy beard/mama hair inconsistency root cause and fix plan (story_plan_prompt improved)
+- [Character Reference Exact Matching](character_reference_exact_matching.md) — Hero face consistency: reference image IS used; data ALREADY extracted; needs structured constraint passing (IMPLEMENTED)
+- [Companion Validation Fix](companion_validation_fix.md) — Image plan validation failing on empty companion.appearance when no companion in story (FIXED)
+- [Name Pronunciation Consistency](name_pronunciation_fix.md) — Child name pronounced differently across pages in TTS; fixed with phonetic guidance in prompt (IMPLEMENTED)

@@ -70,8 +70,8 @@ show the child using the learning goal.
 
 Use page_turn_hook for gentle forward momentum. Most non-final pages should end
 with an unfinished action, new discovery, small decision, changed feeling, or
-visual surprise. Do not end every page with a question. Avoid artificial
-cliffhangers.
+visual surprise. AVOID ENDING PAGES WITH QUESTIONS (?). Avoid artificial
+cliffhangers. Let actions and discoveries propel the story forward naturally.
 
 ## SCENE IMMERSION
 
@@ -184,6 +184,43 @@ Return valid JSON only.
 "moral": ""
 }
 
+## VALID JSON REQUIREMENTS
+
+Return ONLY valid JSON that conforms to these rules:
+
+1. All strings must use double quotes (" not ')
+2. ALL quotes within string values must be escaped with backslash (\")
+   Example: "The child said \"hello\"" ✓
+   NOT: "The child said 'hello'" ✗
+
+3. Newlines in text must be represented as \n not literal newlines
+   Example: "Line 1\nLine 2" ✓
+   NOT: "Line 1
+        Line 2" ✗
+
+4. Backslashes must be escaped: \\ not \
+   Example: "path\\to\\file" ✓
+
+5. No trailing commas in objects or arrays
+
+6. Every { has matching }, every [ has matching ]
+
+7. No incomplete strings or objects
+
+EXAMPLE OF VALID JSON:
+{
+  "title": "Emma's Adventure",
+  "pages": [
+    {
+      "page_number": 1,
+      "text": "Emma said \"hello\" to her friend. She felt excited.",
+      "emotion": "excitement"
+    }
+  ]
+}
+
+Return only the JSON object. No markdown code blocks. No explanations.
+
 ## FINAL CHECK
 
 Before returning JSON, verify:
@@ -195,6 +232,8 @@ Before returning JSON, verify:
 5. The final page shows the lesson before the moral explains it.
 6. The narration sounds natural when read aloud.
 7. The output JSON shape exactly matches the required format.
+8. All strings properly escaped (double quotes, \n for newlines, \\ for backslashes).
+9. No markdown code blocks wrapping the JSON.
 
 Return ONLY the JSON object.
 

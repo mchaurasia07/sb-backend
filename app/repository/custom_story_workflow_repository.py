@@ -2,6 +2,7 @@ from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.entity.custom_story_workflow import (
@@ -235,6 +236,71 @@ class CustomStoryBatchJobRepository:
         )
         jobs_by_id = {str(job.id): job for job in result.scalars().all()}
         return [jobs_by_id[str(job_id)] for job_id in job_ids if str(job_id) in jobs_by_id]
+
+    async def list_for_user(
+        self,
+        user_id: UUID,
+        *,
+        page: int,
+        page_size: int,
+        workflow_id: UUID | None = None,
+        status: StoryBatchJobStatus | None = None,
+    ) -> tuple[list[CustomStoryBatchJob], int]:
+        """List batch jobs for user with optional filtering by workflow_id and status."""
+        filters = [CustomStoryWorkflow.user_id == user_id]
+
+        if workflow_id is not None:
+            filters.append(CustomStoryBatchJob.workflow_id == workflow_id)
+
+        if status is not None:
+            filters.append(CustomStoryBatchJob.status == status)
+
+        total = await self.session.scalar(
+            select(func.count(CustomStoryBatchJob.id))
+            .join(CustomStoryWorkflow, CustomStoryBatchJob.workflow_id == CustomStoryWorkflow.id)
+            .where(*filters)
+        )
+
+        id_result = await self.session.execute(
+            select(CustomStoryBatchJob.id)
+            .join(CustomStoryWorkflow, CustomStoryBatchJob.workflow_id == CustomStoryWorkflow.id)
+            .where(*filters)
+            .order_by(CustomStoryBatchJob.created_at.desc(), CustomStoryBatchJob.id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+        job_ids = list(id_result.scalars().all())
+        if not job_ids:
+            return [], int(total or 0)
+
+        result = await self.session.execute(
+            select(CustomStoryBatchJob)
+            .options(
+                load_only(
+                    CustomStoryBatchJob.id,
+                    CustomStoryBatchJob.workflow_id,
+                    CustomStoryBatchJob.story_id,
+                    CustomStoryBatchJob.job_type,
+                    CustomStoryBatchJob.status,
+                    CustomStoryBatchJob.provider,
+                    CustomStoryBatchJob.provider_job_name,
+                    CustomStoryBatchJob.provider_model,
+                    CustomStoryBatchJob.provider_state,
+                    CustomStoryBatchJob.attempt,
+                    CustomStoryBatchJob.expected_item_count,
+                    CustomStoryBatchJob.completed_item_count,
+                    CustomStoryBatchJob.failed_item_count,
+                    CustomStoryBatchJob.request_keys,
+                    CustomStoryBatchJob.missing_keys,
+                    CustomStoryBatchJob.error_message,
+                    CustomStoryBatchJob.created_at,
+                    CustomStoryBatchJob.updated_at,
+                )
+            )
+            .where(CustomStoryBatchJob.id.in_(job_ids))
+        )
+        jobs_by_id = {str(job.id): job for job in result.scalars().all()}
+        return [jobs_by_id[str(job_id)] for job_id in job_ids if str(job_id) in jobs_by_id], int(total or 0)
 
     async def list_reconcilable(self, limit: int = 50) -> list[CustomStoryBatchJob]:
         id_result = await self.session.execute(

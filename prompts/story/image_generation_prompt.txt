@@ -94,6 +94,27 @@ camera angle, or environment.
 
 ---
 
+## FACE LOCK CONSTRAINTS (Extracted from Child Profile Analysis)
+
+{face_lock_constraints}
+
+These constraints are STRUCTURAL LOCKS extracted from the generated Master
+Character Reference Portrait during character creation. They define the exact
+facial identity that must be preserved in every illustration.
+
+RENDERING VERIFICATION:
+Before rendering, state explicitly: "Rendering child with [face_lock details]"
+This prevents unconscious variation between pages.
+
+CONSTRAINT ENFORCEMENT:
+- Do not interpret these fields as guidelines
+- Do not add subtle variations "for artistic effect"
+- Do not change facial proportions for different camera angles (minor variations allowed for valid perspective, but underlying facial structure stays locked)
+- Distinctive features MUST be visible
+- These are NON-NEGOTIABLE constraints
+
+---
+
 # PRIORITY ORDER
 
 1. Attached Character Reference Images when present
@@ -424,7 +445,21 @@ Do not generate:
 
 * character redesign
 * age changes
-* hairstyle changes
+* hairstyle changes (locked in face lock constraints)
+* hair color changes (locked in face lock constraints)
+* hair length changes (locked in face lock constraints)
+* hair direction changes (locked in face lock constraints)
+* hair texture changes (locked in face lock constraints)
+* face shape changes (locked in face lock constraints)
+* eye color changes (locked in face lock constraints)
+* eye shape changes (locked in face lock constraints)
+* eye size changes (locked in face lock constraints)
+* nose shape changes (locked in face lock constraints)
+* mouth shape changes (locked in face lock constraints)
+* cheek shape changes (locked in face lock constraints)
+* jawline changes (locked in face lock constraints)
+* chin shape changes (locked in face lock constraints)
+* removal of distinctive features (locked in face lock constraints - MUST appear)
 * outfit changes
 * outdoor shoes on beds, bedding, temples, prayer rooms, sacred spaces, or
   no-shoe home areas
@@ -451,8 +486,31 @@ Do not generate:
 For water-play scenes, use modest covered family-friendly outfits for every
 visible person.
 
+CRITICAL: The face lock constraints above are non-negotiable. Every facial
+feature they specify must be preserved exactly in this illustration. Do not make
+artistic interpretations or variations of locked facial features.
+
+---
+
+# FACE LOCK VERIFICATION (Before Rendering)
+
+Before you begin rendering, verify you understand the face lock:
+
+1. **Face Structure:** The face shape, cheeks, jawline, and chin are [state from face lock]
+2. **Eyes:** Color is [state], shape is [state], size is [state]
+3. **Hair:** Color is [state], length is [state], style is [state], direction is [state]
+4. **Other:** Nose is [state], mouth is [state]
+5. **Distinctive Features:** [List any] MUST be visible in this image
+6. **Reference Image:** The attached Master Character Reference Image shows all these locks
+
+Statement: "I will render this child with [face structure lock], [eyes lock], [hair lock], and ensure [distinctive features] are visible. These are exact constraints, not artistic suggestions."
+
 ---
 
 # FINAL INSTRUCTION
 
-Generate ONE premium cinematic children's storybook illustration that faithfully depicts the Current Page Data while preserving complete consistency with the attached Master Character Reference Image when present and always with the Visual Bible. If Page Type is cover, render the exact Story Title visibly and correctly on the cover.
+Generate ONE premium cinematic children's storybook illustration that faithfully depicts the Current Page Data while preserving complete consistency with the attached Master Character Reference Image when present and always with the Visual Bible.
+
+CRITICAL: Use the FACE LOCK CONSTRAINTS as exact structural requirements for the hero child's face. The attached reference image and face lock constraints are your authority—do not vary from them.
+
+If Page Type is cover, render the exact Story Title visibly and correctly on the cover.

@@ -9,6 +9,8 @@ Page emotion: {emotion}
 Tone: {tone}
 Pace: {pace}
 
+{pronunciation_guide}
+
 Performance Guidelines:
 
 * Read only the story text. Never read labels, instructions, metadata, tags, placeholders, or markup.

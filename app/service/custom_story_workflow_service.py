@@ -29,6 +29,7 @@ from app.model.request.story import (
 )
 from app.model.response.common import PaginatedResponse
 from app.model.response.custom_story_workflow import (
+    CustomStoryWorkflowBatchJobResponse,
     CustomStoryWorkflowResponse,
     CustomStoryWorkflowStepResponse,
 )
@@ -813,6 +814,90 @@ class CustomStoryWorkflowService:
             self._step_output_summary(output),
         )
 
+    async def list_batch_jobs(
+        self,
+        user_id: UUID,
+        *,
+        page: int,
+        page_size: int,
+        workflow_id: UUID | None = None,
+        status_filter: StoryBatchJobStatus | None = None,
+    ) -> PaginatedResponse[CustomStoryWorkflowBatchJobResponse]:
+        """List batch jobs for user with optional filtering by workflow and status."""
+        jobs, total = await self.batch_jobs.list_for_user(
+            user_id,
+            page=page,
+            page_size=page_size,
+            workflow_id=workflow_id,
+            status=status_filter,
+        )
+        return PaginatedResponse[CustomStoryWorkflowBatchJobResponse].create(
+            items=[self._batch_job_response(job) for job in jobs],
+            total=total,
+            page=page,
+            page_size=page_size,
+        )
+
+    async def cancel_batch_job(
+        self,
+        *,
+        user_id: UUID,
+        workflow_id: UUID,
+        batch_job_id: UUID,
+    ) -> dict[str, Any]:
+        """Cancel a submitted Google Batch job for custom workflow and update local tracking."""
+        workflow = await self._get_owned(user_id, workflow_id)
+        job = await self.batch_jobs.get_by_id(batch_job_id)
+        if job is None:
+            raise NotFoundException("Batch job not found", "BATCH_JOB_NOT_FOUND")
+        if job.workflow_id != workflow_id:
+            raise NotFoundException("Batch job does not belong to this workflow", "BATCH_JOB_NOT_FOUND")
+
+        if job.status == StoryBatchJobStatus.SUCCEEDED:
+            raise AppException(
+                "Completed batch jobs cannot be cancelled",
+                status.HTTP_409_CONFLICT,
+                "BATCH_JOB_ALREADY_COMPLETED",
+            )
+
+        if job.status == StoryBatchJobStatus.CANCELLED:
+            return self._batch_job_cancel_response(workflow, job, "Batch job was already cancelled")
+
+        if not job.provider_job_name:
+            raise AppException(
+                "Batch job has not been submitted to Google yet",
+                status.HTTP_409_CONFLICT,
+                "BATCH_JOB_NOT_SUBMITTED",
+            )
+
+        try:
+            batch_runner = self._batch_runner(workflow)
+            await batch_runner.google_client.aio.batches.cancel(name=job.provider_job_name)
+            provider_job = await batch_runner.google_client.aio.batches.get(name=job.provider_job_name)
+            provider_state = batch_runner._job_state_name(provider_job)
+        except Exception as exc:
+            raise AppException(
+                f"Failed to cancel Google batch job: {exc}",
+                status.HTTP_502_BAD_GATEWAY,
+                "GOOGLE_BATCH_CANCEL_FAILED",
+            ) from exc
+
+        job.status = StoryBatchJobStatus.CANCELLED
+        job.provider_state = provider_state or "CANCEL_REQUESTED"
+        job.error_message = "Cancelled by user request"
+        if job.request_keys:
+            job.missing_keys = job.request_keys
+        await self.batch_jobs.update(job)
+
+        if workflow.status == CustomStoryWorkflowStatus.IN_PROGRESS:
+            workflow.status = CustomStoryWorkflowStatus.FAILED
+            workflow.current_step = None
+            workflow.error_message = f"Batch {self._status_value(job.job_type)} job cancelled by user request"
+            await self.workflows.update(workflow)
+
+        await self.session.commit()
+        return self._batch_job_cancel_response(workflow, job, "Batch job cancelled successfully")
+
     async def reconcile_batch_jobs(self, *, limit: int = 50) -> dict[str, Any]:
         jobs = await self.batch_jobs.list_reconcilable(limit=limit)
         results: list[dict[str, Any]] = []
@@ -1164,6 +1249,45 @@ class CustomStoryWorkflowService:
             "status": self._status_value(job.status),
             "provider_state": job.provider_state,
             "action": action,
+            "message": message,
+        }
+
+    def _batch_job_response(self, job: CustomStoryBatchJob) -> CustomStoryWorkflowBatchJobResponse:
+        return CustomStoryWorkflowBatchJobResponse(
+            id=job.id,
+            workflow_id=job.workflow_id,
+            story_id=job.story_id,
+            job_type=self._status_value(job.job_type),
+            status=self._status_value(job.status),
+            provider=job.provider,
+            provider_job_name=job.provider_job_name,
+            provider_model=job.provider_model,
+            provider_state=job.provider_state,
+            attempt=job.attempt,
+            expected_item_count=job.expected_item_count,
+            completed_item_count=job.completed_item_count,
+            failed_item_count=job.failed_item_count,
+            request_keys=job.request_keys,
+            missing_keys=job.missing_keys,
+            error_message=job.error_message,
+            created_at=job.created_at,
+            updated_at=job.updated_at,
+        )
+
+    def _batch_job_cancel_response(
+        self,
+        workflow: CustomStoryWorkflow,
+        job: CustomStoryBatchJob,
+        message: str,
+    ) -> dict[str, Any]:
+        return {
+            "workflow_id": workflow.id,
+            "batch_job_id": job.id,
+            "job_type": self._status_value(job.job_type),
+            "status": self._status_value(job.status),
+            "provider_job_name": job.provider_job_name,
+            "provider_state": job.provider_state,
+            "workflow_status": self._status_value(workflow.status),
             "message": message,
         }
 

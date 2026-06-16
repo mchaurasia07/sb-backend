@@ -108,6 +108,7 @@ class GoogleTTSProvider:
         voice_style: str = "storybook narrator",
         tone: str = "warm, magical, gentle",
         emotion: str = "wonder",
+        pronunciation_guide: str = "",
     ) -> str:
         normalized_language = language.lower()
         return load_and_render_prompt(
@@ -120,6 +121,7 @@ class GoogleTTSProvider:
                 "tone": tone,
                 "pace": pace,
                 "emotion": emotion,
+                "pronunciation_guide": pronunciation_guide,
                 "narration_text": text,
             },
         )

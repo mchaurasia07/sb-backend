@@ -6,12 +6,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session, AsyncSessionLocal
 from app.core.dependencies import get_current_user
+from app.entity.story_batch_job import StoryBatchJobStatus
 from app.entity.user import User
 from app.model.request.story import StoryGenerationRequest
 from app.model.response.common import ApiResponse, PaginatedResponse, success_response
 from app.model.response.custom_story_workflow import (
+    CustomStoryWorkflowBatchJobResponse,
     CustomStoryWorkflowResponse,
     CustomStoryWorkflowStepResponse,
+    CustomStoryWorkflowBatchJobCancelResponse,
 )
 from app.model.response.story import (
     StoryBatchJobCancelResponse,
@@ -118,6 +121,29 @@ async def list_custom_story_workflows(
     return success_response(data, "Custom story workflows retrieved successfully")
 
 
+@router.get(
+    "/workflows/batch-jobs",
+    response_model=ApiResponse[PaginatedResponse[CustomStoryWorkflowBatchJobResponse]],
+)
+async def list_custom_workflow_batch_jobs(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    workflow_id: UUID | None = Query(default=None),
+    status_filter: StoryBatchJobStatus | None = Query(default=None, alias="status"),
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[PaginatedResponse[CustomStoryWorkflowBatchJobResponse]]:
+    """List batch jobs for custom workflows with optional filtering."""
+    data = await CustomStoryWorkflowService(session).list_batch_jobs(
+        current_user.id,
+        page=page,
+        page_size=page_size,
+        workflow_id=workflow_id,
+        status_filter=status_filter,
+    )
+    return success_response(data, "Batch jobs retrieved successfully")
+
+
 @router.get("/workflows/{workflow_id}", response_model=ApiResponse[CustomStoryWorkflowResponse])
 async def get_custom_story_workflow(
     workflow_id: UUID,
@@ -162,6 +188,25 @@ async def retry_custom_story_workflow(
     data = await CustomStoryWorkflowService(session).retry(current_user.id, workflow_id)
     background_tasks.add_task(execute_custom_story_workflow_background, workflow_id)
     return success_response(data, "Custom story workflow retry started successfully")
+
+
+@router.post(
+    "/workflows/{workflow_id}/batch-jobs/{batch_job_id}/cancel",
+    response_model=ApiResponse[CustomStoryWorkflowBatchJobCancelResponse],
+)
+async def cancel_custom_workflow_batch_job(
+    workflow_id: UUID,
+    batch_job_id: UUID,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[CustomStoryWorkflowBatchJobCancelResponse]:
+    """Cancel a submitted Google Batch job for a custom story workflow."""
+    data = await CustomStoryWorkflowService(session).cancel_batch_job(
+        user_id=current_user.id,
+        workflow_id=workflow_id,
+        batch_job_id=batch_job_id,
+    )
+    return success_response(CustomStoryWorkflowBatchJobCancelResponse(**data), "Batch job cancelled successfully")
 
 
 @router.post("/batch-jobs/reconcile", response_model=ApiResponse[StoryBatchJobReconcileResponse])

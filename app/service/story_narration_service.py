@@ -35,6 +35,29 @@ class StoryNarrationService:
         self.tts_provider = GoogleTTSProvider()
         self.audio_storage = get_story_audio_storage_service()
 
+    # Phonetic pronunciation guide for proper names
+    PRONUNCIATION_GUIDES = {
+        "en": {
+            "archiv": "AR-kiv",
+            "aarushi": "AH-roo-shee",
+            "aditya": "ah-DEET-yuh",
+            "arjun": "AR-jun",
+            "divya": "DIV-yuh",
+            "esha": "AY-shuh",
+            "priya": "PREE-yuh",
+            "rahul": "RAH-hool",
+            "kavya": "KAV-yuh",
+            "anaya": "ah-NAY-uh",
+        },
+        "hi": {
+            "archiv": "AR-kiv",
+            "aarushi": "AA-roo-shee",
+        },
+        "mr": {
+            "archiv": "AR-kiv",
+        },
+    }
+
     async def generate_narration(
         self,
         story_id: UUID,
@@ -197,6 +220,8 @@ class StoryNarrationService:
         default_speech_narration = (
             moral.get("speech_narration", {}) if isinstance(moral.get("speech_narration"), dict) else {}
         )
+        # Extract child name for pronunciation consistency
+        child_name = story_json.get("child_name") or story_json.get("hero_name")
 
         if not pages:
             logger.warning("Story JSON has no pages: source=%s story_id=%s language=%s", source, story_id, language)
@@ -236,6 +261,7 @@ class StoryNarrationService:
                 language=language,
                 age_group=story_age_group,
                 default_speech_narration=default_speech_narration,
+                child_name=child_name,
             )
             pages[i] = enriched_page
             logger.info(
@@ -255,6 +281,7 @@ class StoryNarrationService:
         language: str,
         age_group: str | None = None,
         default_speech_narration: dict | None = None,
+        child_name: str | None = None,
     ) -> dict:
         page_number = page_dict.get("page_number", 1)
         text = page_dict.get("text", "").strip()
@@ -285,6 +312,15 @@ class StoryNarrationService:
             len(text),
         )
 
+        # Build pronunciation guide for proper names (e.g., child name)
+        pronunciation_guide = self._build_pronunciation_guide(child_name, language)
+        if pronunciation_guide:
+            logger.debug(
+                "Adding pronunciation guide for child_name=%s language=%s",
+                child_name,
+                language,
+            )
+
         tts_prompt = self.tts_provider.build_prompt(
             text,
             pace=pace,
@@ -292,6 +328,7 @@ class StoryNarrationService:
             voice_style=voice_style,
             tone=tone,
             emotion=emotion,
+            pronunciation_guide=pronunciation_guide,
         )
         logger.debug("Built TTS prompt for story_id=%s language=%s page=%s", story_id, language, page_number)
 
@@ -359,3 +396,50 @@ class StoryNarrationService:
         word_count = len(text.split())
         timestamp_count = len(timestamps)
         return timestamp_count < max(2, word_count // 2)
+
+    def _build_pronunciation_guide(self, child_name: str | None, language: str) -> str:
+        """Build pronunciation guidance for ANY child name in narration.
+
+        Returns a formatted guide that ensures consistent pronunciation throughout all pages.
+        Works for any child name, whether it's in the predefined guide or not.
+        """
+        if not child_name or not isinstance(child_name, str):
+            return ""
+
+        name = child_name.strip()
+        if not name:
+            return ""
+
+        # Normalize language code
+        lang = language.lower()
+        if lang not in self.PRONUNCIATION_GUIDES:
+            lang = "en"  # Default to English
+
+        # Try to find exact pronunciation in predefined guide (case-insensitive lookup)
+        name_lower = name.lower()
+        lang_guide = self.PRONUNCIATION_GUIDES.get(lang, {})
+        phonetic = lang_guide.get(name_lower)
+
+        if phonetic:
+            # If name is in guide, use exact pronunciation
+            guide = (
+                f"PRONUNCIATION GUIDE:\n"
+                f"The child's name '{name}' should be pronounced exactly as: {phonetic}\n"
+                f"Use this pronunciation consistently and identically throughout the entire story.\n"
+                f"Every page must pronounce '{name}' the same way.\n"
+                f"\n"
+            )
+            return guide
+
+        # For ANY name not in guide, use universal consistency instruction
+        # This ensures even unknown names are pronounced consistently across pages
+        guide = (
+            f"PRONUNCIATION CONSISTENCY GUIDE:\n"
+            f"The child's name is '{name}'.\n"
+            f"When narrating this story, pronounce '{name}' consistently throughout.\n"
+            f"Determine the pronunciation from the name's spelling and use EXACTLY that same "
+            f"pronunciation every single time the name appears, regardless of context, emotion, or position in the sentence.\n"
+            f"The child's name must sound identical on every page of the story.\n"
+            f"\n"
+        )
+        return guide

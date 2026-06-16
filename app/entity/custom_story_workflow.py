@@ -152,6 +152,7 @@ class CustomStoryBatchJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Index("ix_custom_story_batch_jobs_story_id", "story_id"),
         Index("ix_custom_story_batch_jobs_status", "status"),
         Index("ix_custom_story_batch_jobs_provider_job_name", "provider_job_name"),
+        Index("ix_custom_story_batch_jobs_created_id", "created_at", "id"),
         Index("ix_custom_story_batch_jobs_workflow_created_at", "workflow_id", "created_at"),
         Index("ix_custom_story_batch_jobs_workflow_type_created_at", "workflow_id", "job_type", "created_at"),
         UniqueConstraint("provider_job_name", name="uq_custom_story_batch_jobs_provider_job_name"),

@@ -88,6 +88,125 @@ def _compact_json(data: Any) -> str:
     return json.dumps(data, ensure_ascii=False, separators=(",", ":"))
 
 
+def _repair_json_from_llm(text: str) -> str:
+    """Repair common JSON parsing errors from LLM output.
+
+    Handles markdown wrapping, unterminated strings, unescaped quotes, and other issues.
+    Uses multiple repair strategies to handle various malformations.
+    """
+    if not text or not isinstance(text, str):
+        return text
+
+    text = text.strip()
+    if not text:
+        return text
+
+    # Step 1: Remove markdown code block wrappers
+    if text.startswith("```json"):
+        text = text[7:]
+    elif text.startswith("```"):
+        text = text[3:]
+
+    if text.endswith("```"):
+        text = text[:-3]
+
+    text = text.strip()
+
+    # Step 2: Try to parse as-is first
+    try:
+        json.loads(text)
+        return text
+    except json.JSONDecodeError:
+        pass
+
+    # Step 3: Fix unescaped quotes within string values
+    # Pattern: "key": "value with "internal" quotes"
+    # Need to escape internal quotes
+    result = []
+    in_string = False
+    i = 0
+
+    while i < len(text):
+        char = text[i]
+
+        if char == '"':
+            # Check if it's escaped
+            if i > 0 and text[i-1] == '\\':
+                # Already escaped
+                result.append(char)
+            else:
+                # Check context to see if this should be escaped
+                # If we're inside a string and encounter another unescaped quote
+                if in_string:
+                    # Look ahead to see if this looks like an unterminated quote
+                    # (i.e., followed by non-quote characters, not a closing bracket/brace/comma)
+                    remaining = text[i+1:].lstrip() if i+1 < len(text) else ""
+                    if remaining and not remaining[0] in (',' , '}', ']', ':'):
+                        # This looks like an unescaped quote inside a string - escape it
+                        result.append('\\"')
+                        i += 1
+                        continue
+                    else:
+                        # This is probably a closing quote
+                        in_string = False
+                else:
+                    # Opening quote
+                    in_string = True
+
+                result.append(char)
+        else:
+            result.append(char)
+
+        i += 1
+
+    text = ''.join(result)
+
+    # Step 4: Ensure all arrays and objects are closed
+    open_braces = text.count('{') - text.count('}')
+    open_brackets = text.count('[') - text.count(']')
+
+    if open_braces > 0:
+        text += '}' * open_braces
+    if open_brackets > 0:
+        text += ']' * open_brackets
+
+    # Step 5: Try parsing again
+    try:
+        json.loads(text)
+        return text
+    except json.JSONDecodeError:
+        pass
+
+    # Step 6: Find and close unterminated strings at the end
+    # This is a last resort - find the last quote and see if it's closed
+    if text.count('"') % 2 != 0:
+        # Odd number of quotes
+        # Find the position of the last unclosed quote
+        last_open_quote = -1
+        i = 0
+        while i < len(text):
+            if text[i] == '"' and (i == 0 or text[i-1] != '\\'):
+                last_open_quote = i
+            i += 1
+
+        # If we found an unclosed quote, close it
+        if last_open_quote != -1:
+            # Check if there's content after the last quote
+            after_quote = text[last_open_quote + 1:]
+            # Find a good place to close the quote
+            # Look for the next structural character or end of string
+            close_pos = len(text)
+            for j, char in enumerate(after_quote):
+                if char in (',', ']', '}', '\n'):
+                    close_pos = last_open_quote + 1 + j
+                    break
+
+            # Insert closing quote
+            text = text[:close_pos] + '"' + text[close_pos:]
+
+    return text
+
+
 def _workflow_usage(result: Any, *, output_text: str | None = None) -> dict[str, Any]:
     metadata = result.metadata or {}
     usage = {
@@ -1034,7 +1153,15 @@ class StoryService:
 
         template = load_prompt("prompts/story/story_generation_prompt.txt")
         prompt_plan = self._build_story_generation_context(plan)
-        prompt = template.replace("{story_plan_json}", _compact_json(prompt_plan))
+
+        # Convert to compact JSON - this ensures proper escaping of special characters
+        try:
+            plan_json_str = _compact_json(prompt_plan)
+        except (TypeError, ValueError) as e:
+            logger.error("Failed to serialize story plan to JSON: %s", str(e))
+            raise AppException(f"Failed to serialize story plan: {str(e)}", code="STORY_PLAN_SERIALIZATION_ERROR")
+
+        prompt = template.replace("{story_plan_json}", plan_json_str)
         step.prompt = prompt
         await self.story_steps.update(step)
         await self.session.commit()
@@ -1066,9 +1193,47 @@ class StoryService:
                 )
 
             try:
-                raw_story_json = json.loads(result.text)
+                # Repair common JSON issues before parsing
+                cleaned_json = _repair_json_from_llm(result.text)
+                raw_story_json = json.loads(cleaned_json)
             except json.JSONDecodeError as e:
-                raise AppException(f"Invalid JSON from story generation: {str(e)}", code="INVALID_LLM_JSON")
+                # Log detailed error information for debugging
+                logger.error(
+                    "Failed to parse story JSON after repair attempt. Error: %s at line %s column %s",
+                    str(e),
+                    e.lineno,
+                    e.colno,
+                )
+                logger.error(
+                    "Original LLM response length: %s chars",
+                    len(result.text),
+                )
+                logger.error(
+                    "Original response (first 500 chars): %s",
+                    result.text[:500],
+                )
+                logger.error(
+                    "Cleaned response (first 500 chars): %s",
+                    cleaned_json[:500],
+                )
+
+                # Try to show the problematic area
+                if hasattr(e, 'pos') and e.pos is not None:
+                    start = max(0, e.pos - 50)
+                    end = min(len(cleaned_json), e.pos + 50)
+                    logger.error(
+                        "Context around error (chars %s-%s): ...%s[ERROR HERE]%s...",
+                        start,
+                        end,
+                        cleaned_json[start:e.pos],
+                        cleaned_json[e.pos:end],
+                    )
+
+                raise AppException(
+                    f"Invalid JSON from story generation: {str(e)} at line {e.lineno}, column {e.colno}. "
+                    f"The LLM response contains malformed JSON that couldn't be automatically repaired.",
+                    code="INVALID_LLM_JSON",
+                )
 
             story_json = _normalize_story_output(raw_story_json, plan, story)
 
@@ -2281,6 +2446,11 @@ class StoryService:
         rendered_page_data = dict(page_data or {"image_prompt": image_prompt})
         if page_type == "cover" and story_title:
             rendered_page_data.setdefault("title_text", story_title)
+
+        # Format face lock constraints for the prompt
+        face_lock_constraints = character_context.get("face_lock_constraints", {})
+        face_lock_text = StoryService._format_face_lock_constraints(face_lock_constraints)
+
         return render_prompt(
             template,
             {
@@ -2290,6 +2460,7 @@ class StoryService:
                 "character_reference_metadata": character_context["character_description"],
                 "identity_summary": character_context.get("identity_summary") or character_context["character_description"],
                 "character_identity_lock": StoryService._format_prompt_character_identity_lock(character_context),
+                "face_lock_constraints": face_lock_text,
                 "child_name": character_context.get("child_name", "Child"),
                 "story_title": story_title,
                 "child_age_label": character_context["child_age_label"],
@@ -2961,12 +3132,14 @@ class StoryService:
     @staticmethod
     def _build_character_reference_context(child) -> dict[str, Any]:
         character_description = StoryService._extract_character_analysis(child)
+        face_lock_constraints = StoryService._extract_face_lock_constraints(child)
         return {
             "cast_mode": StoryService.CAST_MODE_CHILD_HERO,
             "use_child_character": True,
             "child_name": (child.first_name or "Child") if child else "Child",
             "character_description": character_description,
             "identity_summary": StoryService._extract_identity_summary(child) or character_description,
+            "face_lock_constraints": face_lock_constraints,
             "child_age_label": StoryService._child_age_label(child),
             "child_age_visual_guidance": StoryService._age_visual_guidance(child.age if child else None),
             "character_reference_mode": (
@@ -2991,6 +3164,98 @@ class StoryService:
             return ""
         value = identity_profile.get("identity_summary")
         return value.strip() if isinstance(value, str) and value.strip() else ""
+
+    @staticmethod
+    def _extract_face_lock_constraints(child) -> dict[str, Any]:
+        """Extract structured face lock constraints from child profile identity analysis.
+
+        Returns a dict with all facial identity features that must be preserved exactly
+        across all story page generations.
+        """
+        if not child or not isinstance(child.character_metadata, dict):
+            return {}
+
+        identity_profile = child.character_metadata.get("identity_profile")
+        if not isinstance(identity_profile, dict):
+            return {}
+
+        # Map of identity_profile keys to their display names
+        face_structure_fields = {
+            "face_shape": "Face shape",
+            "cheek_shape": "Cheek shape",
+            "jawline_shape": "Jawline shape",
+            "chin_shape": "Chin shape",
+        }
+
+        eye_fields = {
+            "eye_color": "Eye color",
+            "eye_shape": "Eye shape",
+            "eye_size": "Eye size",
+            "eyebrow_shape": "Eyebrow shape",
+            "eyebrow_thickness": "Eyebrow thickness",
+        }
+
+        hair_fields = {
+            "hair_color": "Hair color",
+            "hair_length": "Hair length",
+            "hair_texture": "Hair texture",
+            "hair_style": "Hair style",
+            "hair_direction": "Hair direction",
+        }
+
+        other_fields = {
+            "nose_shape": "Nose shape",
+            "mouth_shape": "Mouth shape",
+            "smile_characteristics": "Smile characteristics",
+            "skin_tone": "Skin tone",
+        }
+
+        constraints = {}
+
+        # Face structure lock
+        face_structure = {}
+        for key, label in face_structure_fields.items():
+            value = identity_profile.get(key)
+            if isinstance(value, str) and value.strip():
+                face_structure[label] = value.strip()
+        if face_structure:
+            constraints["face_structure"] = face_structure
+
+        # Eyes lock
+        eyes = {}
+        for key, label in eye_fields.items():
+            value = identity_profile.get(key)
+            if isinstance(value, str) and value.strip():
+                eyes[label] = value.strip()
+        if eyes:
+            constraints["eyes"] = eyes
+
+        # Hair lock
+        hair = {}
+        for key, label in hair_fields.items():
+            value = identity_profile.get(key)
+            if isinstance(value, str) and value.strip():
+                hair[label] = value.strip()
+        if hair:
+            constraints["hair"] = hair
+
+        # Other features
+        other = {}
+        for key, label in other_fields.items():
+            value = identity_profile.get(key)
+            if isinstance(value, str) and value.strip():
+                other[label] = value.strip()
+        if other:
+            constraints["other_features"] = other
+
+        # Distinctive features (must appear in every page)
+        distinctive_features = identity_profile.get("distinctive_features")
+        if isinstance(distinctive_features, list):
+            clean_features = [f.strip() for f in distinctive_features if isinstance(f, str) and f.strip()]
+            if clean_features:
+                constraints["distinctive_features"] = clean_features
+
+        return constraints
 
     @staticmethod
     def _extract_character_analysis(child) -> str:
@@ -3034,6 +3299,71 @@ class StoryService:
         )
 
         return "\n".join(parts) if parts else f"A friendly {age_str} child named {child.first_name}."
+
+    @staticmethod
+    def _format_face_lock_constraints(constraints: dict[str, Any]) -> str:
+        """Format face lock constraints from identity analysis for use in image generation prompt.
+
+        This creates an explicit constraint section that locks all facial identity features
+        so they remain consistent across all story page generations.
+        """
+        if not constraints:
+            return ""
+
+        lines = []
+
+        # Face structure lock
+        face_structure = constraints.get("face_structure", {})
+        if face_structure:
+            lines.append("## FACE STRUCTURE LOCK (EXACT - do not vary)")
+            for key, value in face_structure.items():
+                lines.append(f"- {key}: {value}")
+            lines.append("")
+
+        # Eyes lock
+        eyes = constraints.get("eyes", {})
+        if eyes:
+            lines.append("## EYES LOCK (EXACT - do not vary)")
+            for key, value in eyes.items():
+                lines.append(f"- {key}: {value}")
+            lines.append("")
+
+        # Hair lock
+        hair = constraints.get("hair", {})
+        if hair:
+            lines.append("## HAIR LOCK (EXACT - do not vary)")
+            for key, value in hair.items():
+                lines.append(f"- {key}: {value}")
+            lines.append("")
+
+        # Other features lock
+        other_features = constraints.get("other_features", {})
+        if other_features:
+            lines.append("## OTHER FEATURES LOCK (EXACT - do not vary)")
+            for key, value in other_features.items():
+                lines.append(f"- {key}: {value}")
+            lines.append("")
+
+        # Distinctive features (MUST include in every page)
+        distinctive_features = constraints.get("distinctive_features", [])
+        if distinctive_features:
+            lines.append("## DISTINCTIVE FEATURES (MUST APPEAR in every page - do not remove)")
+            lines.append("These specific features MUST be visible in the character across all pages:")
+            for feature in distinctive_features:
+                lines.append(f"- {feature}")
+            lines.append("")
+
+        # Add rendering instruction
+        lines.append("## RENDERING INSTRUCTION")
+        lines.append(
+            "These face lock constraints are extracted from the Master Character Reference Portrait. "
+            "Do not interpret them as guidelines or suggestions. "
+            "Render the character matching EVERY detail above exactly. "
+            "Do not add, remove, or modify any facial features between pages. "
+            "Distinctive features MUST be visible in this illustration."
+        )
+
+        return "\n".join(lines)
 
     @staticmethod
     def _format_character_identity_profile(profile: dict[str, Any]) -> str:
