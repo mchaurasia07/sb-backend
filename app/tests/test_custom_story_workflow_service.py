@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, date, datetime
 from types import SimpleNamespace
 from uuid import uuid4
@@ -16,6 +17,7 @@ from app.model.response.custom_story_workflow import CustomStoryWorkflowResponse
 from app.routes.v1 import stories as story_routes
 from app.service import custom_story_workflow_service
 from app.service.custom_story_workflow_service import CustomStoryWorkflowService
+from app.service.story_input_safety_service import StoryInputSafetyInspection, StoryInputSafetyResult
 
 
 def _workflow(**overrides):
@@ -324,7 +326,126 @@ async def test_first_incomplete_step_uses_persisted_outputs():
 
 
 @pytest.mark.asyncio
-async def test_create_persists_workflow_before_safety_llm(monkeypatch):
+async def test_first_incomplete_step_does_not_skip_partial_audio():
+    service = CustomStoryWorkflowService.__new__(CustomStoryWorkflowService)
+
+    async def _latest_for_workflow_type(*args, **kwargs):
+        _ = args, kwargs
+        return None
+
+    service.batch_jobs = SimpleNamespace(latest_for_workflow_type=_latest_for_workflow_type)
+    workflow = _workflow(
+        processing_mode="delayed",
+        execute_image=False,
+        execute_narration=True,
+        story_plan_json={"pages": [{"page": 1}]},
+        story_plan_validated=True,
+        story_json={
+            "pages": [
+                {
+                    "page_number": 1,
+                    "text": "Mira listened.",
+                    "audio_url": "https://cdn.test/page-1.wav",
+                    "duration": 2.5,
+                    "word_timestamps": [{"word": "Mira", "start": 0, "end": 1}],
+                },
+                {"page_number": 2, "text": "Mira tried again."},
+            ]
+        },
+    )
+
+    assert await service._first_incomplete_step(workflow) == CustomStoryWorkflowStep.NARRATION_GENERATION
+
+
+@pytest.mark.asyncio
+async def test_first_incomplete_step_requires_audio_even_if_latest_audio_job_succeeded():
+    service = CustomStoryWorkflowService.__new__(CustomStoryWorkflowService)
+
+    async def _latest_for_workflow_type(*args, **kwargs):
+        _ = args, kwargs
+        return SimpleNamespace(status=StoryBatchJobStatus.SUCCEEDED)
+
+    service.batch_jobs = SimpleNamespace(latest_for_workflow_type=_latest_for_workflow_type)
+    workflow = _workflow(
+        processing_mode="delayed",
+        execute_image=False,
+        execute_narration=True,
+        story_plan_json={"pages": [{"page": 1}]},
+        story_plan_validated=True,
+        story_json={"pages": [{"page_number": 1, "text": "Mira listened."}]},
+    )
+
+    assert await service._first_incomplete_step(workflow) == CustomStoryWorkflowStep.NARRATION_GENERATION
+
+
+@pytest.mark.asyncio
+async def test_publish_story_rejects_incomplete_audio():
+    service = CustomStoryWorkflowService.__new__(CustomStoryWorkflowService)
+    workflow = _workflow(
+        execute_narration=True,
+        story_json={
+            "pages": [
+                {
+                    "page_number": 1,
+                    "text": "Mira listened.",
+                    "audio_url": "https://cdn.test/page-1.wav",
+                    "duration": 2.5,
+                    "word_timestamps": [{"word": "Mira", "start": 0, "end": 1}],
+                },
+                {"page_number": 2, "text": "Mira tried again."},
+            ]
+        },
+    )
+
+    with pytest.raises(AppException) as exc_info:
+        await service._publish_story(workflow)
+
+    assert exc_info.value.code == "CUSTOM_STORY_AUDIO_INCOMPLETE"
+    assert workflow.story_id is None
+
+
+def _safety_inspection(*, safe: bool, provider: str = "google", model: str = "gemini-2.5-flash"):
+    result = StoryInputSafetyResult(
+        safe=safe,
+        risk_level="LOW" if safe else "HIGH",
+        blocked_categories=[] if safe else ["ADULT_THEME"],
+        reason="Valid age-appropriate children's story idea." if safe else "Contains adult themes unsuitable for children.",
+        safe_rewrite=None if safe else "A child-friendly version focusing on a bedtime routine.",
+    )
+    response_json = {
+        "safe": result.safe,
+        "risk_level": result.risk_level,
+        "blocked_categories": result.blocked_categories,
+        "reason": result.reason,
+        "safe_rewrite": result.safe_rewrite,
+    }
+    return StoryInputSafetyInspection(
+        request_json={
+            "child_id": "child-1",
+            "reader_category": "Growing Reader",
+            "age_group": "6-9",
+            "category": "adventure",
+            "learning_goal": "kindness",
+            "context": "A gentle story about helping.",
+            "use_child_character": False,
+            "cast_mode": "IMAGINED_CAST",
+            "execute_image": False,
+            "skip_image_generation": True,
+            "execute_narration": True,
+            "skip_validation": False,
+            "execute_workflow": False,
+        },
+        prompt="safety prompt",
+        provider=provider,
+        model=model,
+        result=result,
+        response_text=json.dumps(response_json),
+        response_json=response_json,
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_runs_input_safety_before_creating_workflow(monkeypatch):
     payload = StoryGenerationRequest(
         child_id=uuid4(),
         reader_category="Growing Reader",
@@ -334,17 +455,19 @@ async def test_create_persists_workflow_before_safety_llm(monkeypatch):
         skip_image_generation=True,
     )
     service = CustomStoryWorkflowService.__new__(CustomStoryWorkflowService)
-    created = {}
+    calls = []
 
-    async def _validate_should_not_run(_self, _payload):
-        raise AssertionError("safety LLM should run in background workflow, not create API")
+    async def _inspect(_self, _payload):
+        calls.append("inspect")
+        return _safety_inspection(safe=True)
 
     async def _get_child(user_id, child_id):
+        calls.append("get_child")
         return SimpleNamespace(id=child_id, dob=date(2018, 1, 1), character_image_url="https://cdn.test/child.png")
 
     async def _create_workflow(**kwargs):
+        calls.append("create_workflow")
         kwargs.setdefault("request_number", 1)
-        created.update(kwargs)
         return _workflow(
             id=uuid4(),
             user_id=kwargs["user_id"],
@@ -366,35 +489,40 @@ async def test_create_persists_workflow_before_safety_llm(monkeypatch):
             reference_image_model=kwargs["reference_image_model"],
         )
 
+    async def _audit_create(**kwargs):
+        calls.append("audit_create")
+        data = dict(kwargs)
+        data.setdefault("workflow_id", None)
+        data.setdefault("id", uuid4())
+        return SimpleNamespace(**data)
+
+    async def _audit_update(audit):
+        calls.append("audit_update")
+        return audit
+
     async def _commit():
-        created["committed"] = True
+        calls.append("commit")
 
     monkeypatch.setattr(custom_story_workflow_service.settings, "CUSTOM_STORY_EXECUTE_WORKFLOW_DEFAULT", False)
-    monkeypatch.setattr(custom_story_workflow_service.StoryInputSafetyService, "validate", _validate_should_not_run)
+    monkeypatch.setattr(custom_story_workflow_service.StoryInputSafetyService, "inspect", _inspect)
     service.children = SimpleNamespace(get_for_user=_get_child)
     service.workflows = SimpleNamespace(create=_create_workflow)
+    service.input_safety_audits = SimpleNamespace(create=_audit_create, update=_audit_update)
     service.session = SimpleNamespace(commit=_commit)
 
     response = await service.create(uuid4(), payload)
 
     assert response.workflow_id
     assert response.request_number == 1
-    assert created["committed"] is True
-    assert created["request_number"] == 1
-    assert created["age_group"] == "6-9"
-    assert created["reader_category"] == "Growing Reader"
-    assert created["use_child_character"] is False
-    assert created["execute_image"] is False
-    assert created["execute_narration"] is True
-    assert created["skip_validation"] is False
-    assert created["execute_workflow"] is False
-    assert created["context"] == "A gentle story about helping."
+    assert calls[:5] == ["get_child", "inspect", "audit_create", "audit_update", "commit"]
+    assert "create_workflow" in calls
+    assert calls.count("commit") == 2
     assert response.reader_category == "Growing Reader"
     assert response.age_group == "6-9"
 
 
 @pytest.mark.asyncio
-async def test_create_allows_imagined_cast_without_child_character_image():
+async def test_create_allows_imagined_cast_without_child_character_image(monkeypatch):
     payload = StoryGenerationRequest(
         child_id=uuid4(),
         reader_category="Early Reader",
@@ -405,6 +533,9 @@ async def test_create_allows_imagined_cast_without_child_character_image():
 
     async def _get_child(user_id, child_id):
         return SimpleNamespace(id=child_id, dob=date(2019, 1, 1), character_image_url=None)
+
+    async def _inspect(_self, _payload):
+        return _safety_inspection(safe=True)
 
     async def _create_workflow(**kwargs):
         kwargs.setdefault("request_number", 1)
@@ -433,15 +564,78 @@ async def test_create_allows_imagined_cast_without_child_character_image():
     async def _commit():
         return None
 
+    async def _audit_create(**kwargs):
+        data = dict(kwargs)
+        data.setdefault("workflow_id", None)
+        data.setdefault("id", uuid4())
+        return SimpleNamespace(**data)
+
+    async def _audit_update(audit):
+        return audit
+
+    service.input_safety_audits = SimpleNamespace(create=_audit_create, update=_audit_update)
     service.children = SimpleNamespace(get_for_user=_get_child)
     service.workflows = SimpleNamespace(create=_create_workflow)
     service.session = SimpleNamespace(commit=_commit)
+    monkeypatch.setattr(custom_story_workflow_service.StoryInputSafetyService, "inspect", _inspect)
 
     response = await service.create(uuid4(), payload)
 
     assert response.workflow_id
     assert created["processing_mode"] == "delayed"
     assert created["use_child_character"] is False
+
+
+@pytest.mark.asyncio
+async def test_create_blocks_unsafe_input_without_creating_workflow(monkeypatch):
+    payload = StoryGenerationRequest(
+        child_id=uuid4(),
+        reader_category="Early Reader",
+        category="adventure",
+        learning_goal="kindness",
+        context="A story about adult parties.",
+        skip_image_generation=True,
+    )
+    service = CustomStoryWorkflowService.__new__(CustomStoryWorkflowService)
+    calls = []
+
+    async def _get_child(user_id, child_id):
+        calls.append("get_child")
+        return SimpleNamespace(id=child_id, dob=date(2019, 1, 1), character_image_url="https://cdn.test/child.png")
+
+    async def _inspect(_self, _payload):
+        calls.append("inspect")
+        return _safety_inspection(safe=False)
+
+    async def _create_workflow(**kwargs):
+        calls.append("create_workflow")
+        raise AssertionError("workflow must not be created when safety fails")
+
+    async def _audit_create(**kwargs):
+        calls.append("audit_create")
+        return SimpleNamespace(id=uuid4(), workflow_id=None, **kwargs)
+
+    async def _audit_update(audit):
+        calls.append("audit_update")
+        return audit
+
+    async def _commit():
+        calls.append("commit")
+
+    monkeypatch.setattr(custom_story_workflow_service.StoryInputSafetyService, "inspect", _inspect)
+    service.children = SimpleNamespace(get_for_user=_get_child)
+    service.workflows = SimpleNamespace(create=_create_workflow)
+    service.input_safety_audits = SimpleNamespace(create=_audit_create, update=_audit_update)
+    service.session = SimpleNamespace(commit=_commit)
+
+    with pytest.raises(AppException) as exc_info:
+        await service.create(uuid4(), payload)
+
+    assert exc_info.value.code == "STORY_INPUT_UNSAFE"
+    assert "workflow must not be created" not in str(exc_info.value)
+    assert calls[:5] == ["get_child", "inspect", "audit_create", "audit_update", "commit"]
+    assert "create_workflow" not in calls
+    assert calls.count("commit") == 1
 
 
 @pytest.mark.asyncio
@@ -654,7 +848,16 @@ async def test_publish_story_creates_final_story_and_sets_workflow_story_id():
         moral="Listening helps.",
         story_json={
             "cover_image_url": "https://cdn.test/cover.png",
-            "pages": [{"page_number": 1, "text": "Mira listened.", "image_url": "https://cdn.test/page.png"}],
+            "pages": [
+                {
+                    "page_number": 1,
+                    "text": "Mira listened.",
+                    "image_url": "https://cdn.test/page.png",
+                    "audio_url": "https://cdn.test/page.wav",
+                    "duration": 2.5,
+                    "word_timestamps": [{"word": "Mira", "start": 0, "end": 1}],
+                }
+            ],
         },
     )
     service = CustomStoryWorkflowService.__new__(CustomStoryWorkflowService)
@@ -831,7 +1034,17 @@ async def test_delayed_image_generation_reuses_active_batch_on_retry():
 async def test_delayed_narration_generation_records_submitted_batch_job():
     workflow = _workflow(
         processing_mode="delayed",
-        story_json={"pages": [{"page_number": 1, "text": "Mira listened."}]},
+        story_json={
+            "pages": [
+                {
+                    "page_number": 1,
+                    "text": "Mira listened.",
+                    "audio_url": "https://cdn.test/page.wav",
+                    "duration": 2.5,
+                    "word_timestamps": [{"word": "Mira", "start": 0, "end": 1}],
+                }
+            ]
+        },
     )
     audio_job = SimpleNamespace(
         id=uuid4(),
@@ -1030,6 +1243,190 @@ async def test_process_reconciled_image_job_updates_matching_step_response():
 
 
 @pytest.mark.asyncio
+async def test_process_reconciled_audio_job_retries_only_missing_keys(monkeypatch):
+    workflow = _workflow(
+        processing_mode="delayed",
+        story_json={
+            "pages": [
+                {"page_number": 1, "text": "Mira listened."},
+                {"page_number": 2, "text": "Mira tried again."},
+            ]
+        },
+        status=CustomStoryWorkflowStatus.IN_PROGRESS,
+        current_step=CustomStoryWorkflowStep.NARRATION_GENERATION.value,
+    )
+    job = SimpleNamespace(
+        id=uuid4(),
+        workflow_id=workflow.id,
+        story_id=None,
+        status=StoryBatchJobStatus.RUNNING,
+        attempt=1,
+        request_keys=["page_1", "page_2"],
+        response_payload=None,
+        error_message=None,
+        completed_item_count=0,
+        failed_item_count=0,
+        missing_keys=[],
+    )
+    retry_job = SimpleNamespace(
+        id=uuid4(),
+        provider_job_name="batches/audio-retry",
+        attempt=2,
+    )
+    service = CustomStoryWorkflowService.__new__(CustomStoryWorkflowService)
+    service.steps = _StepRepo()
+    calls = {"retry_items": None}
+
+    async def _update_job(job_arg):
+        calls["job"] = job_arg
+        return job_arg
+
+    async def _update_workflow(workflow_arg):
+        calls["workflow"] = workflow_arg
+        return workflow_arg
+
+    async def _commit():
+        calls["committed"] = True
+
+    async def _fail_workflow(*args, **kwargs):
+        raise AssertionError("workflow should not fail when missing audio retry is submitted")
+
+    class _BatchRunner:
+        def _build_audio_items(self, story_json, *, age_group):
+            _ = story_json, age_group
+            return [
+                SimpleNamespace(key="page_1", page_number=1),
+                SimpleNamespace(key="page_2", page_number=2),
+            ]
+
+        async def _process_audio_batch_responses(self, story, story_json, items, provider_job):
+            _ = story, provider_job
+            story_json["pages"][0]["audio_url"] = "https://cdn.test/page-1.wav"
+            assert [item.key for item in items] == ["page_1", "page_2"]
+            return {"page_1"}, {"page_2"}, {"items": [{"key": "page_2", "status": "missing_response"}]}
+
+        async def _submit_audio_batch_job_only(self, story, items, *, attempt):
+            _ = story
+            calls["retry_items"] = [item.key for item in items]
+            calls["retry_attempt"] = attempt
+            return retry_job
+
+    monkeypatch.setattr(custom_story_workflow_service.settings, "STORY_BATCH_MAX_AUDIO_RETRIES", 3)
+    service.batch_jobs = SimpleNamespace(update=_update_job)
+    service.workflows = SimpleNamespace(update=_update_workflow)
+    service.session = SimpleNamespace(commit=_commit)
+    service._mark_workflow_failed = _fail_workflow
+
+    retry_submitted = await service._process_reconciled_audio_job(
+        workflow,
+        job,
+        SimpleNamespace(),
+        _BatchRunner(),
+    )
+
+    step = _step_by_name(service.steps, CustomStoryWorkflowStep.NARRATION_GENERATION)
+    assert retry_submitted is True
+    assert job.status == StoryBatchJobStatus.FAILED
+    assert job.completed_item_count == 1
+    assert job.failed_item_count == 1
+    assert job.missing_keys == ["page_2"]
+    assert calls["retry_items"] == ["page_2"]
+    assert calls["retry_attempt"] == 2
+    assert step.status == StepStatus.SUBMITTED_BATCH_JOB
+    assert step.error_message is None
+    assert step.completed_at is None
+    assert step.output_json["retry_submitted"] is True
+    assert step.output_json["retry_batch_job_id"] == str(retry_job.id)
+    assert workflow.status == CustomStoryWorkflowStatus.IN_PROGRESS
+    assert workflow.current_step == CustomStoryWorkflowStep.NARRATION_GENERATION.value
+    assert workflow.error_message is None
+    assert workflow.story_json["pages"][0]["audio_url"] == "https://cdn.test/page-1.wav"
+    assert calls["committed"] is True
+
+
+@pytest.mark.asyncio
+async def test_process_reconciled_audio_job_fails_after_retry_limit(monkeypatch):
+    workflow = _workflow(
+        processing_mode="delayed",
+        story_json={
+            "pages": [
+                {
+                    "page_number": 1,
+                    "text": "Mira listened.",
+                    "audio_url": "https://cdn.test/page.wav",
+                    "duration": 2.5,
+                    "word_timestamps": [{"word": "Mira", "start": 0, "end": 1}],
+                }
+            ]
+        },
+        status=CustomStoryWorkflowStatus.IN_PROGRESS,
+        current_step=CustomStoryWorkflowStep.NARRATION_GENERATION.value,
+    )
+    job = SimpleNamespace(
+        id=uuid4(),
+        workflow_id=workflow.id,
+        story_id=None,
+        status=StoryBatchJobStatus.RUNNING,
+        attempt=3,
+        request_keys=["page_1"],
+        response_payload=None,
+        error_message=None,
+        completed_item_count=0,
+        failed_item_count=0,
+        missing_keys=[],
+    )
+    service = CustomStoryWorkflowService.__new__(CustomStoryWorkflowService)
+    service.steps = _StepRepo()
+    calls = {"retry_called": False}
+
+    async def _update_job(job_arg):
+        return job_arg
+
+    async def _update_workflow(workflow_arg):
+        calls["workflow"] = workflow_arg
+        return workflow_arg
+
+    async def _commit():
+        calls["committed"] = True
+
+    class _BatchRunner:
+        def _build_audio_items(self, story_json, *, age_group):
+            _ = story_json, age_group
+            return [SimpleNamespace(key="page_1", page_number=1)]
+
+        async def _process_audio_batch_responses(self, story, story_json, items, provider_job):
+            _ = story, story_json, items, provider_job
+            return set(), {"page_1"}, {"items": [{"key": "page_1", "status": "missing_response"}]}
+
+        async def _submit_audio_batch_job_only(self, story, items, *, attempt):
+            _ = story, items, attempt
+            calls["retry_called"] = True
+            raise AssertionError("retry should not be submitted after max attempts")
+
+    monkeypatch.setattr(custom_story_workflow_service.settings, "STORY_BATCH_MAX_AUDIO_RETRIES", 3)
+    service.batch_jobs = SimpleNamespace(update=_update_job)
+    service.workflows = SimpleNamespace(update=_update_workflow)
+    service.session = SimpleNamespace(commit=_commit)
+
+    retry_submitted = await service._process_reconciled_audio_job(
+        workflow,
+        job,
+        SimpleNamespace(),
+        _BatchRunner(),
+    )
+
+    step = _step_by_name(service.steps, CustomStoryWorkflowStep.NARRATION_GENERATION)
+    assert retry_submitted is False
+    assert calls["retry_called"] is False
+    assert job.status == StoryBatchJobStatus.FAILED
+    assert job.missing_keys == ["page_1"]
+    assert step.status == StepStatus.FAILED
+    assert workflow.status == CustomStoryWorkflowStatus.FAILED
+    assert workflow.error_message == "Missing audio keys: page_1"
+    assert calls["committed"] is True
+
+
+@pytest.mark.asyncio
 async def test_reconcile_failed_batch_job_marks_matching_step_and_workflow_failed():
     workflow = _workflow(processing_mode="delayed")
     job = SimpleNamespace(
@@ -1095,7 +1492,17 @@ async def test_reconcile_failed_batch_job_marks_matching_step_and_workflow_faile
 async def test_delayed_outputs_wait_for_out_of_order_batch_completion():
     workflow = _workflow(
         processing_mode="delayed",
-        story_json={"pages": [{"page_number": 1, "text": "Mira listened."}]},
+        story_json={
+            "pages": [
+                {
+                    "page_number": 1,
+                    "text": "Mira listened.",
+                    "audio_url": "https://cdn.test/page.wav",
+                    "duration": 2.5,
+                    "word_timestamps": [{"word": "Mira", "start": 0, "end": 1}],
+                }
+            ]
+        },
     )
     service = CustomStoryWorkflowService.__new__(CustomStoryWorkflowService)
     batches = _BatchRepo()
@@ -1120,14 +1527,16 @@ async def test_delayed_run_publishes_after_enabled_batch_jobs_complete():
         story_json={
             "cover_image_url": "https://cdn.test/cover.png",
             "pages": [
-                {
-                    "page_number": 1,
-                    "text": "Mira listened.",
-                    "image_url": "https://cdn.test/page.png",
-                    "audio_url": "https://cdn.test/page.wav",
-                }
-            ],
-        },
+                    {
+                        "page_number": 1,
+                        "text": "Mira listened.",
+                        "image_url": "https://cdn.test/page.png",
+                        "audio_url": "https://cdn.test/page.wav",
+                        "duration": 2.5,
+                        "word_timestamps": [{"word": "Mira", "start": 0, "end": 1}],
+                    }
+                ],
+            },
         image_plan_json={"cover": {"image_prompt": "cover"}, "pages": [{"page_number": 1, "image_prompt": "page"}]},
         image_plan_validated=True,
     )

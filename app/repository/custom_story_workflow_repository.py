@@ -11,6 +11,7 @@ from app.entity.custom_story_workflow import (
     CustomStoryWorkflowStep,
     CustomStoryWorkflowStepRecord,
 )
+from app.entity.custom_story_input_safety_audit import CustomStoryInputSafetyAudit, CustomStoryInputSafetyAuditStatus
 from app.entity.story_batch_job import StoryBatchJobStatus, StoryBatchJobType
 from app.entity.story_step import StepStatus
 
@@ -159,6 +160,70 @@ class CustomStoryWorkflowStepRepository:
                 flag_modified(step, field_name)
         await self.session.flush()
         return step
+
+
+class CustomStoryInputSafetyAuditRepository:
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def create(
+        self,
+        *,
+        user_id: UUID,
+        child_id: UUID,
+        provider: str,
+        model: str | None,
+        request_json: dict,
+        request_idea_json: dict,
+        prompt: str,
+        status: CustomStoryInputSafetyAuditStatus = CustomStoryInputSafetyAuditStatus.IN_PROGRESS,
+        workflow_id: UUID | None = None,
+        response_text: str | None = None,
+        response_json: dict | None = None,
+        safe: bool | None = None,
+        risk_level: str | None = None,
+        blocked_categories: list[str] | None = None,
+        reason: str | None = None,
+        safe_rewrite: str | None = None,
+        error_code: str | None = None,
+        error_message: str | None = None,
+    ) -> CustomStoryInputSafetyAudit:
+        audit = CustomStoryInputSafetyAudit(
+            user_id=user_id,
+            child_id=child_id,
+            workflow_id=workflow_id,
+            status=status,
+            provider=provider,
+            model=model,
+            request_json=request_json,
+            request_idea_json=request_idea_json,
+            prompt=prompt,
+            response_text=response_text,
+            response_json=response_json,
+            safe=safe,
+            risk_level=risk_level,
+            blocked_categories=blocked_categories,
+            reason=reason,
+            safe_rewrite=safe_rewrite,
+            error_code=error_code,
+            error_message=error_message,
+        )
+        self.session.add(audit)
+        await self.session.flush()
+        return audit
+
+    async def update(self, audit: CustomStoryInputSafetyAudit) -> CustomStoryInputSafetyAudit:
+        for field_name in (
+            "request_json",
+            "request_idea_json",
+            "response_json",
+            "response_text",
+            "blocked_categories",
+        ):
+            if getattr(audit, field_name, None) is not None:
+                flag_modified(audit, field_name)
+        await self.session.flush()
+        return audit
 
 
 class CustomStoryBatchJobRepository:

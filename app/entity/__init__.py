@@ -2,6 +2,7 @@ from app.entity.child_activity import ChildActivity
 from app.entity.child_audio import ChildAudio
 from app.entity.child_book import ChildBook
 from app.entity.child_profile import ChildProfile
+from app.entity.custom_story_input_safety_audit import CustomStoryInputSafetyAudit, CustomStoryInputSafetyAuditStatus
 from app.entity.custom_story_workflow import (
     CustomStoryBatchJob,
     CustomStoryWorkflow,
@@ -39,6 +40,8 @@ __all__ = [
     "ChildAudio",
     "ChildBook",
     "ChildProfile",
+    "CustomStoryInputSafetyAudit",
+    "CustomStoryInputSafetyAuditStatus",
     "CustomStoryBatchJob",
     "CustomStoryWorkflow",
     "CustomStoryWorkflowStatus",

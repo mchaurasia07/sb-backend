@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.exceptions import AppException, NotFoundException
+from app.entity.custom_story_input_safety_audit import CustomStoryInputSafetyAuditStatus
 from app.entity.custom_story_workflow import (
     CustomStoryBatchJob,
     CustomStoryWorkflow,
@@ -35,6 +36,7 @@ from app.model.response.custom_story_workflow import (
 )
 from app.repository.child_repository import ChildRepository
 from app.repository.custom_story_workflow_repository import (
+    CustomStoryInputSafetyAuditRepository,
     CustomStoryBatchJobRepository,
     CustomStoryWorkflowRepository,
     CustomStoryWorkflowStepRepository,
@@ -170,6 +172,7 @@ class CustomStoryWorkflowService:
         self.session = session
         self.workflows = CustomStoryWorkflowRepository(session)
         self.steps = CustomStoryWorkflowStepRepository(session)
+        self.input_safety_audits = CustomStoryInputSafetyAuditRepository(session)
         self.batch_jobs = CustomStoryBatchJobRepository(session)
         self.children = ChildRepository(session)
         self.stories = StoryRepository(session)
@@ -191,8 +194,60 @@ class CustomStoryWorkflowService:
             )
 
         story_service = StoryService(self.session)
+        safety_service = StoryInputSafetyService()
         age_group = age_group_for_reader_category(payload.reader_category)
         execute_workflow = self._effective_execute_workflow(payload)
+        inspection = await safety_service.inspect(payload)
+        audit = await self.input_safety_audits.create(
+            user_id=user_id,
+            child_id=payload.child_id,
+            provider=inspection.provider,
+            model=inspection.model,
+            request_json=inspection.request_json,
+            request_idea_json=self._input_safety_idea_json(payload),
+            prompt=inspection.prompt,
+            status=CustomStoryInputSafetyAuditStatus.IN_PROGRESS,
+            response_text=inspection.response_text,
+            response_json=inspection.response_json,
+            safe=inspection.result.safe if inspection.result is not None else None,
+            risk_level=inspection.result.risk_level if inspection.result is not None else None,
+            blocked_categories=inspection.result.blocked_categories if inspection.result is not None else None,
+            reason=inspection.result.reason if inspection.result is not None else None,
+            safe_rewrite=inspection.result.safe_rewrite if inspection.result is not None else None,
+            error_code=inspection.error_code,
+            error_message=inspection.error_message,
+        )
+        if inspection.error_message:
+            audit.status = CustomStoryInputSafetyAuditStatus.ERROR
+            await self.input_safety_audits.update(audit)
+            await self.session.commit()
+            raise AppException(
+                inspection.error_message,
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                inspection.error_code or "STORY_INPUT_SAFETY_UNAVAILABLE",
+            )
+        if inspection.result is None:
+            audit.status = CustomStoryInputSafetyAuditStatus.ERROR
+            audit.error_code = "STORY_INPUT_SAFETY_UNAVAILABLE"
+            audit.error_message = "Story safety validation returned an unexpected response. Please try again."
+            await self.input_safety_audits.update(audit)
+            await self.session.commit()
+            raise AppException(
+                "Story safety validation returned an unexpected response. Please try again.",
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "STORY_INPUT_SAFETY_UNAVAILABLE",
+            )
+
+        audit.status = (
+            CustomStoryInputSafetyAuditStatus.SAFE
+            if inspection.result.safe
+            else CustomStoryInputSafetyAuditStatus.UNSAFE
+        )
+        await self.input_safety_audits.update(audit)
+        await self.session.commit()
+        if not inspection.result.safe:
+            self._raise_input_safety_failure(inspection.result, audit)
+
         workflow = await self.workflows.create(
             user_id=user_id,
             child_id=payload.child_id,
@@ -212,6 +267,8 @@ class CustomStoryWorkflowService:
             status=CustomStoryWorkflowStatus.PENDING,
             **story_service._current_ai_config(),
         )
+        audit.workflow_id = workflow.id
+        await self.input_safety_audits.update(audit)
         await self.session.commit()
         return self._response(workflow)
 
@@ -220,6 +277,32 @@ class CustomStoryWorkflowService:
         if "execute_workflow" in payload.model_fields_set:
             return bool(payload.execute_workflow)
         return bool(settings.CUSTOM_STORY_EXECUTE_WORKFLOW_DEFAULT)
+
+    @staticmethod
+    def _input_safety_idea_json(payload: StoryGenerationRequest) -> dict[str, str]:
+        return {
+            "category": payload.category or "",
+            "learning_goal": payload.learning_goal or "",
+            "context": payload.context or "",
+        }
+
+    @staticmethod
+    def _raise_input_safety_failure(
+        result: Any,
+        audit: Any | None = None,
+    ) -> None:
+        _ = audit
+        raise AppException(
+            "Story idea is not safe for children. Please revise the prompt and try again.",
+            status.HTTP_400_BAD_REQUEST,
+            "STORY_INPUT_UNSAFE",
+            details={
+                "risk_level": getattr(result, "risk_level", None),
+                "blocked_categories": getattr(result, "blocked_categories", None),
+                "reason": getattr(result, "reason", None),
+                "safe_rewrite": getattr(result, "safe_rewrite", None),
+            },
+        )
 
     async def list(
         self,
@@ -299,18 +382,6 @@ class CustomStoryWorkflowService:
             runner = self._story_runner(workflow)
             await runner._ensure_story_ai_config(workflow)
             start_step = await self._first_incomplete_step(workflow)
-            if start_step == self.ORDERED_STEPS[0]:
-                logger.info(
-                    "[CUSTOM_WORKFLOW_STEP] workflow=%s step=INPUT_SAFETY_VALIDATION action=llm_start",
-                    workflow.id,
-                )
-                await StoryInputSafetyService().validate(
-                    StoryGenerationRequest.model_validate(self._input_request_for_validation(workflow))
-                )
-                logger.info(
-                    "[CUSTOM_WORKFLOW_STEP] workflow=%s step=INPUT_SAFETY_VALIDATION action=completed",
-                    workflow.id,
-                )
             for step in self.ORDERED_STEPS[self.ORDERED_STEPS.index(start_step) :]:
                 if self._step_disabled_by_request(workflow, step):
                     if not await self._step_has_completed_record(workflow, step):
@@ -428,6 +499,7 @@ class CustomStoryWorkflowService:
             try:
                 story_json = await runner._step_generate_story(workflow, workflow.story_plan_json or {}, flags)
                 runner._apply_story_metadata(workflow, workflow.story_plan_json or {}, story_json)
+                story_json["use_child_character"] = workflow.use_child_character
                 workflow.story_json = story_json
                 await self._annotate_latest_step(workflow, step, step_input, story_json)
                 return
@@ -609,6 +681,11 @@ class CustomStoryWorkflowService:
         if workflow.story_id is not None:
             return
         story_json = workflow.story_json if isinstance(workflow.story_json, dict) else {}
+        if self._execute_narration_enabled(workflow) and not self._story_has_audio(story_json):
+            raise AppException(
+                "Cannot publish custom story before narration audio is complete for every page.",
+                code="CUSTOM_STORY_AUDIO_INCOMPLETE",
+            )
         story = await self.stories.create(
             user_id=workflow.user_id,
             child_id=workflow.child_id,
@@ -1004,7 +1081,18 @@ class CustomStoryWorkflowService:
                     story_id=job.story_id,
                     batch_job_id=job.id,
                 )
-                await self._process_reconciled_audio_job(workflow, job, provider_job, batch_runner)
+                audio_retry_submitted = await self._process_reconciled_audio_job(
+                    workflow,
+                    job,
+                    provider_job,
+                    batch_runner,
+                )
+                if audio_retry_submitted:
+                    return self._batch_reconcile_result(
+                        job,
+                        "retry_submitted",
+                        "Audio batch had missing pages; submitted a retry for missing keys only",
+                    )
 
             if self._status_value(job.status) == StoryBatchJobStatus.FAILED.value:
                 return self._batch_reconcile_result(job, "failed", job.error_message)
@@ -1110,7 +1198,7 @@ class CustomStoryWorkflowService:
         job: CustomStoryBatchJob,
         provider_job: Any,
         batch_runner: StoryServiceBatchService,
-    ) -> None:
+    ) -> bool:
         story_json = workflow.story_json if isinstance(workflow.story_json, dict) else None
         if story_json is None:
             raise AppException("Story JSON is missing during audio batch reconciliation", code="STORY_JSON_MISSING")
@@ -1136,9 +1224,28 @@ class CustomStoryWorkflowService:
         step = await self.steps.latest_for_workflow_step(workflow.id, CustomStoryWorkflowStep.NARRATION_GENERATION)
         if step is None:
             step = await self.steps.create(workflow.id, CustomStoryWorkflowStep.NARRATION_GENERATION.value)
-        step.status = StepStatus.COMPLETED if not failed_keys else StepStatus.FAILED
+        retry_job = None
+        retry_keys = set(job.missing_keys or sorted(failed_keys))
+        next_attempt = int(getattr(job, "attempt", 1) or 1) + 1
+        can_retry_missing = bool(retry_keys) and next_attempt <= int(settings.STORY_BATCH_MAX_AUDIO_RETRIES)
+        if can_retry_missing:
+            retry_items = [item for item in items if item.key in retry_keys]
+            if retry_items:
+                retry_job = await batch_runner._submit_audio_batch_job_only(
+                    workflow,
+                    retry_items,
+                    attempt=next_attempt,
+                )
+
+        step.status = (
+            StepStatus.COMPLETED
+            if not failed_keys
+            else StepStatus.SUBMITTED_BATCH_JOB
+            if retry_job is not None
+            else StepStatus.FAILED
+        )
         step.started_at = step.started_at or datetime.now(UTC)
-        step.error_message = job.error_message
+        step.error_message = None if retry_job is not None else job.error_message
         step.output_json = {
             "mode": "google_batch_reconcile",
             "batch_job_id": str(job.id),
@@ -1146,11 +1253,28 @@ class CustomStoryWorkflowService:
             "failed_keys": sorted(failed_keys),
             "response_summary": response_summary,
         }
-        step.completed_at = datetime.now(UTC)
+        if retry_job is not None:
+            step.output_json.update(
+                {
+                    "retry_submitted": True,
+                    "retry_batch_job_id": str(retry_job.id),
+                    "retry_provider_job_name": retry_job.provider_job_name,
+                    "retry_attempt": retry_job.attempt,
+                    "retry_keys": [item.key for item in retry_items],
+                }
+            )
+            step.retry_count = max(int(getattr(step, "retry_count", 0) or 0), next_attempt - 1)
+            step.completed_at = None
+        else:
+            step.completed_at = datetime.now(UTC)
         await self.steps.update(step)
 
         workflow.story_json = story_json
-        if failed_keys:
+        if retry_job is not None:
+            workflow.status = CustomStoryWorkflowStatus.IN_PROGRESS
+            workflow.current_step = CustomStoryWorkflowStep.NARRATION_GENERATION.value
+            workflow.error_message = None
+        elif failed_keys:
             await self._mark_workflow_failed(workflow, job.error_message or "Audio batch reconciliation failed")
         await self.workflows.update(workflow)
         await self.session.commit()
@@ -1162,7 +1286,9 @@ class CustomStoryWorkflowService:
             status=self._status_value(job.status),
             completed=len(completed_keys),
             failed=len(failed_keys),
+            retry_batch_job_id=getattr(retry_job, "id", None),
         )
+        return retry_job is not None
 
     async def _mark_workflow_failed(self, workflow: CustomStoryWorkflow, error_message: str | None) -> None:
         workflow.status = CustomStoryWorkflowStatus.FAILED
@@ -1402,10 +1528,7 @@ class CustomStoryWorkflowService:
             if not self._execute_narration_enabled(workflow):
                 return True
             if workflow.processing_mode == "delayed":
-                if self._story_has_audio(workflow.story_json or {}):
-                    return True
-                latest = await self.batch_jobs.latest_for_workflow_type(workflow.id, self._job_type_for_step(step))
-                return latest is not None and self._status_value(latest.status) == "SUCCEEDED"
+                return self._story_has_audio(workflow.story_json or {})
             return self._story_has_audio(workflow.story_json or {})
         if step == CustomStoryWorkflowStep.PUBLISH_STORY:
             return workflow.story_id is not None
@@ -1419,10 +1542,19 @@ class CustomStoryWorkflowService:
 
     @staticmethod
     def _story_has_audio(story_json: dict[str, Any]) -> bool:
-        return any(
-            isinstance(page, dict) and (page.get("audio_url") or page.get("tts_skipped"))
-            for page in story_json.get("pages") or []
+        pages = story_json.get("pages") if isinstance(story_json.get("pages"), list) else []
+        if not pages:
+            return False
+        return all(
+            isinstance(page, dict) and CustomStoryWorkflowService._page_has_audio(page)
+            for page in pages
         )
+
+    @staticmethod
+    def _page_has_audio(page: dict[str, Any]) -> bool:
+        if page.get("tts_skipped"):
+            return True
+        return bool(page.get("audio_url") and page.get("duration") and page.get("word_timestamps"))
 
     @staticmethod
     def _flags(workflow: CustomStoryWorkflow) -> StoryGenerationFlags:
@@ -1507,10 +1639,6 @@ class CustomStoryWorkflowService:
         if output.get("story_id"):
             summary["story_id"] = output.get("story_id")
         return summary
-
-    @staticmethod
-    def _input_request_for_validation(workflow: CustomStoryWorkflow) -> dict[str, Any]:
-        return CustomStoryWorkflowService._request_snapshot_from_columns(workflow)
 
     @staticmethod
     def _request_snapshot_from_columns(workflow: CustomStoryWorkflow) -> dict[str, Any]:

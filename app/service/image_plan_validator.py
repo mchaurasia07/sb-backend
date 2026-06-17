@@ -45,7 +45,13 @@ class ImagePlanValidator:
         "image_prompt",
     }
 
-    def validate(self, image_plan: dict[str, Any], *, story_json: dict[str, Any]) -> ImagePlanValidationResult:
+    def validate(
+        self,
+        image_plan: dict[str, Any],
+        *,
+        story_json: dict[str, Any],
+        skip_footwear_validation: bool = False,
+    ) -> ImagePlanValidationResult:
         errors: list[str] = []
 
         if not isinstance(image_plan, dict):
@@ -59,7 +65,7 @@ class ImagePlanValidator:
             )
 
         expected_page_numbers = self._story_page_numbers(story_pages, errors)
-        self._validate_visual_bible(image_plan.get("visual_bible"), errors)
+        self._validate_visual_bible(image_plan.get("visual_bible"), errors, skip_footwear_validation=skip_footwear_validation)
         self._validate_cover(image_plan.get("cover"), errors)
         self._validate_back_cover(image_plan.get("back_cover"), errors)
 
@@ -118,7 +124,12 @@ class ImagePlanValidator:
             return page_numbers
         return list(range(1, len(story_pages) + 1))
 
-    def _validate_visual_bible(self, visual_bible: Any, errors: list[str]) -> None:
+    def _validate_visual_bible(
+        self,
+        visual_bible: Any,
+        errors: list[str],
+        skip_footwear_validation: bool = False,
+    ) -> None:
         if not isinstance(visual_bible, dict):
             errors.append("Missing or invalid `visual_bible` (must be an object).")
             return
@@ -131,7 +142,8 @@ class ImagePlanValidator:
                 self._validate_required_string(hero, field, "visual_bible.hero", errors)
             self._validate_detailed_string(hero, "appearance", "visual_bible.hero", errors)
             self._validate_detailed_string(hero, "outfit", "visual_bible.hero", errors, min_words=4)
-            self._validate_footwear_lock(hero, "visual_bible.hero", errors)
+            if not skip_footwear_validation:
+                self._validate_footwear_lock(hero, "visual_bible.hero", errors)
 
         companion = visual_bible.get("companion")
         if companion is not None:

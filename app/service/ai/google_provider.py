@@ -2,6 +2,7 @@ import logging
 import mimetypes
 import json
 import asyncio
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,7 @@ from app.service.mock_llm_responses import (
 )
 
 logger = logging.getLogger(__name__)
+_google_text_step_name: ContextVar[str | None] = ContextVar("google_text_step_name", default=None)
 
 DEFAULT_IMAGEN_MODEL = "imagen-4.0-generate-001"
 DEFAULT_GEMINI_IMAGE_MODEL = "gemini-3.1-flash-image"
@@ -41,6 +43,20 @@ IMAGE_MODEL_ALIASES = {
 }
 
 SUPPORTED_REFERENCE_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
+
+
+class _GoogleGenAIStepLogFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        step_name = _google_text_step_name.get()
+        if step_name and isinstance(record.msg, str) and "step=" not in record.msg:
+            record.msg = f"step={step_name} {record.msg}"
+        return True
+
+
+def _install_google_genai_step_log_filter() -> None:
+    sdk_logger = logging.getLogger("google.genai.models")
+    if not any(isinstance(item, _GoogleGenAIStepLogFilter) for item in sdk_logger.filters):
+        sdk_logger.addFilter(_GoogleGenAIStepLogFilter())
 
 
 def _normalize_model_name(model: str | None, default: str) -> str:
@@ -419,7 +435,13 @@ Format your response as a clear visual identity list."""
                 metadata={"mock_mode": True, "provider": "google"},
             )
 
-        logger.info(f"Generating text with text model: {self.text_model}")
+        step_name = str(kwargs.get("step_name") or "").strip() or None
+        _install_google_genai_step_log_filter()
+        step_token = _google_text_step_name.set(step_name) if step_name else None
+        if step_name:
+            logger.info("Generating text with text model: %s step=%s", self.text_model, step_name)
+        else:
+            logger.info("Generating text with text model: %s", self.text_model)
 
         try:
             # Use unified generation method for standard text requests
@@ -458,6 +480,7 @@ Format your response as a clear visual identity list."""
                         model=self.text_model,
                         metadata={
                             "provider": "google",
+                            "step_name": step_name,
                             "finish_reason": debug["finish_reason"],
                             "usage": usage,
                         },
@@ -476,6 +499,9 @@ Format your response as a clear visual identity list."""
         except Exception as e:
             logger.error(f"Google text generation failed: {e}")
             raise AppException(f"Text generation failed: {str(e)}", code="GOOGLE_ERROR")
+        finally:
+            if step_token is not None:
+                _google_text_step_name.reset(step_token)
 
     async def describe_character_image(
         self,

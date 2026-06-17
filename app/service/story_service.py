@@ -668,6 +668,8 @@ class StoryService:
                 logger.info(f"Story {story_id}: Starting step 3 - Story Generation")
                 story_json = await self._step_generate_story(story, story_plan, flags)
                 self._apply_story_metadata(story, story_plan, story_json)
+                input_request = story.input_request or {}
+                story_json["use_child_character"] = input_request.get("use_child_character", False)
                 await self.stories.update(story)
                 await self._persist_story_content(story, story_json)
 
@@ -924,6 +926,7 @@ class StoryService:
                     prompt,
                     max_tokens=self.PLAN_MAX_TOKENS,
                     temperature=0.4,
+                    step_name=StoryStepName.STORY_PLAN_GENERATION.value,
                     response_format={"type": "json_object"},
                 )
             except AppException as exc:
@@ -947,6 +950,7 @@ class StoryService:
                     fallback_prompt,
                     max_tokens=self.PLAN_MAX_TOKENS,
                     temperature=0.35,
+                    step_name=StoryStepName.STORY_PLAN_GENERATION.value,
                     response_format={"type": "json_object"},
                 )
 
@@ -1123,6 +1127,7 @@ class StoryService:
             enhanced_prompt,
             max_tokens=self.PLAN_MAX_TOKENS,
             temperature=0.4,
+            step_name=StoryStepName.STORY_PLAN_GENERATION.value,
             response_format={"type": "json_object"},
         )
 
@@ -1178,6 +1183,7 @@ class StoryService:
                     prompt,
                     max_tokens=self._story_max_tokens(story.age_group),
                     temperature=0.7,
+                    step_name=StoryStepName.STORY_GENERATION.value,
                     response_format={"type": "json_object"},
                 )
             except AppException as exc:
@@ -1195,6 +1201,7 @@ class StoryService:
                     fallback_prompt,
                     max_tokens=self._story_max_tokens(story.age_group),
                     temperature=0.45,
+                    step_name=StoryStepName.STORY_GENERATION.value,
                     response_format={"type": "json_object"},
                 )
 
@@ -1203,43 +1210,52 @@ class StoryService:
                 cleaned_json = _repair_json_from_llm(result.text)
                 raw_story_json = json.loads(cleaned_json)
             except json.JSONDecodeError as e:
-                # Log detailed error information for debugging
-                logger.error(
-                    "Failed to parse story JSON after repair attempt. Error: %s at line %s column %s",
-                    str(e),
-                    e.lineno,
-                    e.colno,
-                )
-                logger.error(
-                    "Original LLM response length: %s chars",
-                    len(result.text),
-                )
-                logger.error(
-                    "Original response (first 500 chars): %s",
-                    result.text[:500],
-                )
-                logger.error(
-                    "Cleaned response (first 500 chars): %s",
-                    cleaned_json[:500],
-                )
-
-                # Try to show the problematic area
-                if hasattr(e, 'pos') and e.pos is not None:
-                    start = max(0, e.pos - 50)
-                    end = min(len(cleaned_json), e.pos + 50)
+                repaired_json = await self._repair_story_generation_json_response(result.text, e, story)
+                if repaired_json is not None:
+                    cleaned_json = repaired_json
+                    raw_story_json = json.loads(cleaned_json)
+                    logger.warning(
+                        "Story %s: recovered malformed story generation JSON using repair LLM call",
+                        story.id,
+                    )
+                else:
+                    # Log detailed error information for debugging
                     logger.error(
-                        "Context around error (chars %s-%s): ...%s[ERROR HERE]%s...",
-                        start,
-                        end,
-                        cleaned_json[start:e.pos],
-                        cleaned_json[e.pos:end],
+                        "Failed to parse story JSON after repair attempt. Error: %s at line %s column %s",
+                        str(e),
+                        e.lineno,
+                        e.colno,
+                    )
+                    logger.error(
+                        "Original LLM response length: %s chars",
+                        len(result.text),
+                    )
+                    logger.error(
+                        "Original response (first 500 chars): %s",
+                        result.text[:500],
+                    )
+                    logger.error(
+                        "Cleaned response (first 500 chars): %s",
+                        cleaned_json[:500],
                     )
 
-                raise AppException(
-                    f"Invalid JSON from story generation: {str(e)} at line {e.lineno}, column {e.colno}. "
-                    f"The LLM response contains malformed JSON that couldn't be automatically repaired.",
-                    code="INVALID_LLM_JSON",
-                )
+                    # Try to show the problematic area
+                    if hasattr(e, 'pos') and e.pos is not None:
+                        start = max(0, e.pos - 50)
+                        end = min(len(cleaned_json), e.pos + 50)
+                        logger.error(
+                            "Context around error (chars %s-%s): ...%s[ERROR HERE]%s...",
+                            start,
+                            end,
+                            cleaned_json[start:e.pos],
+                            cleaned_json[e.pos:end],
+                        )
+
+                    raise AppException(
+                        f"Invalid JSON from story generation: {str(e)} at line {e.lineno}, column {e.colno}. "
+                        f"The LLM response contains malformed JSON that couldn't be automatically repaired.",
+                        code="INVALID_LLM_JSON",
+                    )
 
             story_json = _normalize_story_output(raw_story_json, plan, story)
 
@@ -1261,6 +1277,71 @@ class StoryService:
             await self.story_steps.update(step)
             await self.session.commit()
             raise
+
+    async def _repair_story_generation_json_response(
+        self,
+        malformed_json: str,
+        parse_error: json.JSONDecodeError,
+        story: Story,
+    ) -> str | None:
+        if settings.STORY_MOCK_LLM_RESPONSES:
+            return None
+
+        prompt = f"""
+You are a strict JSON repair tool.
+
+Repair the malformed JSON below into one valid JSON object only.
+
+Rules:
+- Do not rewrite the story.
+- Do not add, remove, or reorder pages.
+- Do not change character names, plot events, wording, title, summary, or moral except the minimum required to make valid JSON.
+- Escape quotes inside string values with backslash.
+- Convert literal line breaks inside strings to \\n.
+- Remove trailing commas if present.
+- Close any incomplete string, object, or array only when required.
+- Return ONLY the repaired JSON object. No markdown. No explanation.
+
+Expected schema:
+{{
+  "title": "",
+  "summary": "",
+  "pages": [
+    {{
+      "page_number": 1,
+      "emotion": "",
+      "text": ""
+    }}
+  ],
+  "moral": ""
+}}
+
+Original parse error:
+line {parse_error.lineno}, column {parse_error.colno}: {parse_error.msg}
+
+Malformed JSON:
+{malformed_json}
+""".strip()
+
+        try:
+            result = await self.ai_provider.generate_text(
+                prompt,
+                max_tokens=self._story_max_tokens(story.age_group),
+                temperature=0,
+                step_name="STORY_GENERATION_JSON_REPAIR",
+                response_format={"type": "json_object"},
+                empty_response_retries=1,
+            )
+            repaired_json = _repair_json_from_llm(result.text)
+            json.loads(repaired_json)
+            return repaired_json
+        except Exception as exc:
+            logger.warning(
+                "Story %s: failed to repair malformed story generation JSON with LLM: %s",
+                story.id,
+                exc,
+            )
+            return None
 
     @staticmethod
     def _is_google_prompt_safety_block(exc: AppException) -> bool:
@@ -1549,6 +1630,7 @@ class StoryService:
                     prompt,
                     max_tokens=self._image_plan_max_tokens(story.age_group),
                     temperature=0.2,
+                    step_name=StoryStepName.IMAGE_PLAN_GENERATION.value,
                     response_format={"type": "json_object"},
                 )
             except AppException as exc:
@@ -1573,6 +1655,7 @@ class StoryService:
                     fallback_prompt,
                     max_tokens=self._image_plan_max_tokens(story.age_group),
                     temperature=0.1,
+                    step_name=StoryStepName.IMAGE_PLAN_GENERATION.value,
                     response_format={"type": "json_object"},
                 )
 
@@ -1645,7 +1728,11 @@ class StoryService:
         step.started_at = datetime.utcnow()
 
         image_plan = self._normalize_image_plan(image_plan)
-        result = self.image_plan_validator.validate(image_plan, story_json=story_json)
+        result = self.image_plan_validator.validate(
+            image_plan,
+            story_json=story_json,
+            skip_footwear_validation=True,
+        )
 
         if result.ok:
             step.status = StepStatus.COMPLETED

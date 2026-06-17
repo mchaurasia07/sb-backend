@@ -1146,7 +1146,11 @@ class GenericStoryWorkflowService:
                 "learning_goal": workflow.learning_goal or "",
             },
         )
-        return await self._generate_json(prompt, max_tokens=6000)
+        return await self._generate_json(
+            prompt,
+            max_tokens=6000,
+            step_name=GenericStoryWorkflowStep.CHARACTER_EXTRACTION.value,
+        )
 
     async def _generate_scene_plan(self, workflow: GenericStoryWorkflow) -> dict[str, Any]:
         if settings.STORY_MOCK_LLM_RESPONSES:
@@ -1161,7 +1165,11 @@ class GenericStoryWorkflowService:
             },
         )
         plan = self._normalize_scene_plan_metadata(
-            await self._generate_json(prompt, max_tokens=12000),
+            await self._generate_json(
+                prompt,
+                max_tokens=12000,
+                step_name=GenericStoryWorkflowStep.SCENE_PLAN_GENERATION.value,
+            ),
             age_group=workflow.age_group,
         )
         min_pages, max_pages = self._scene_plan_page_count_range(workflow.age_group)
@@ -1190,7 +1198,11 @@ class GenericStoryWorkflowService:
                 "visual_diversity_seed": visual_diversity_seed,
             },
         )
-        visual_bible = await self._generate_json(prompt, max_tokens=12000)
+        visual_bible = await self._generate_json(
+            prompt,
+            max_tokens=12000,
+            step_name=GenericStoryWorkflowStep.VISUAL_BIBLE_GENERATION.value,
+        )
         visual_bible["style"] = self._workflow_illustration_style(workflow)
         visual_bible["age_group"] = workflow.age_group
         visual_bible["visual_diversity_seed"] = visual_diversity_seed
@@ -1225,7 +1237,11 @@ class GenericStoryWorkflowService:
                 "visual_bible_json": _compact_json(self._workflow_visual_bible(workflow)),
             },
         )
-        raw = await self._generate_json(prompt, max_tokens=24000)
+        raw = await self._generate_json(
+            prompt,
+            max_tokens=24000,
+            step_name=GenericStoryWorkflowStep.STORY_GENERATION.value,
+        )
         return self._normalize_story_json(raw, workflow)
 
     async def _generate_image_plan(self, workflow: GenericStoryWorkflow) -> dict[str, Any]:
@@ -1245,7 +1261,11 @@ class GenericStoryWorkflowService:
                 "illustration_style": self._workflow_illustration_style(workflow),
             },
         )
-        image_plan = await self._generate_json(prompt, max_tokens=16000)
+        image_plan = await self._generate_json(
+            prompt,
+            max_tokens=16000,
+            step_name=GenericStoryWorkflowStep.IMAGE_PLAN_GENERATION.value,
+        )
         image_plan["style"] = self._workflow_illustration_style(workflow)
         story_pages = (workflow.story_json or {}).get("pages") or []
         self._normalize_image_plan_pages(image_plan, story_pages)
@@ -2097,11 +2117,12 @@ class GenericStoryWorkflowService:
             )
             return image_url
 
-    async def _generate_json(self, prompt: str, *, max_tokens: int) -> dict[str, Any]:
+    async def _generate_json(self, prompt: str, *, max_tokens: int, step_name: str | None = None) -> dict[str, Any]:
         result = await self.ai_provider.generate_text(
             prompt,
             max_tokens=max_tokens,
             temperature=0.4,
+            step_name=step_name,
             response_format={"type": "json_object"},
         )
         try:
