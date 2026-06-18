@@ -1,15 +1,19 @@
+from datetime import datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.entity.custom_story_workflow import (
     CustomStoryBatchJob,
+    CustomStoryWorkflowEvent,
+    CustomStoryWorkflowEventStatus,
     CustomStoryWorkflow,
     CustomStoryWorkflowStep,
     CustomStoryWorkflowStepRecord,
+    CustomStoryWorkflowType,
 )
 from app.entity.custom_story_input_safety_audit import CustomStoryInputSafetyAudit, CustomStoryInputSafetyAuditStatus
 from app.entity.story_batch_job import StoryBatchJobStatus, StoryBatchJobType
@@ -69,12 +73,25 @@ class CustomStoryWorkflowRepository:
         page_size: int,
         child_id: UUID | None = None,
         status_filter: str | None = None,
+        story_type: CustomStoryWorkflowType | str | None = CustomStoryWorkflowType.CUSTOM,
+        title: str | None = None,
     ) -> tuple[list[CustomStoryWorkflow], int]:
         filters = [CustomStoryWorkflow.user_id == user_id]
+        if story_type is not None:
+            filters.append(CustomStoryWorkflow.story_type == story_type)
         if child_id is not None:
             filters.append(CustomStoryWorkflow.child_id == child_id)
         if status_filter:
             filters.append(CustomStoryWorkflow.status == status_filter)
+        if title:
+            normalized_title = title.strip().lower()
+            if normalized_title:
+                filters.append(
+                    or_(
+                        func.lower(CustomStoryWorkflow.title).like(f"%{normalized_title}%"),
+                        func.lower(CustomStoryWorkflow.source_title).like(f"%{normalized_title}%"),
+                    )
+                )
         total = await self.session.scalar(select(func.count()).select_from(CustomStoryWorkflow).where(*filters))
         result = await self.session.execute(
             select(CustomStoryWorkflow)
@@ -86,7 +103,7 @@ class CustomStoryWorkflowRepository:
         return list(result.scalars().all()), int(total or 0)
 
     async def update(self, workflow: CustomStoryWorkflow) -> CustomStoryWorkflow:
-        for field_name in ("story_plan_json", "story_json", "image_plan_json"):
+        for field_name in ("story_plan_json", "story_json", "image_plan_json", "input_request", "languages"):
             if getattr(workflow, field_name, None) is not None:
                 flag_modified(workflow, field_name)
         await self.session.flush()
@@ -162,6 +179,150 @@ class CustomStoryWorkflowStepRepository:
         return step
 
 
+class CustomStoryWorkflowEventRepository:
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def create(
+        self,
+        *,
+        workflow_id: UUID,
+        step_name: CustomStoryWorkflowStep,
+        retry_count: int = 0,
+        metadata_json: dict | None = None,
+        retry_flag: bool = False,
+        retry_comment: str | None = None,
+        retry_source_event_id: UUID | None = None,
+    ) -> CustomStoryWorkflowEvent:
+        event = CustomStoryWorkflowEvent(
+            workflow_id=workflow_id,
+            step_name=step_name,
+            status=CustomStoryWorkflowEventStatus.PENDING,
+            retry_count=retry_count,
+            retry_flag=retry_flag,
+            retry_comment=retry_comment,
+            retry_source_event_id=retry_source_event_id,
+            metadata_json=metadata_json,
+        )
+        self.session.add(event)
+        await self.session.flush()
+        return event
+
+    async def create_if_absent(
+        self,
+        *,
+        workflow_id: UUID,
+        step_name: CustomStoryWorkflowStep,
+        retry_count: int = 0,
+        metadata_json: dict | None = None,
+        retry_flag: bool = False,
+        retry_comment: str | None = None,
+        retry_source_event_id: UUID | None = None,
+    ) -> CustomStoryWorkflowEvent | None:
+        result = await self.session.execute(
+            select(CustomStoryWorkflowEvent).where(
+                CustomStoryWorkflowEvent.workflow_id == workflow_id,
+                CustomStoryWorkflowEvent.step_name == step_name,
+                CustomStoryWorkflowEvent.status.in_(
+                    [
+                        CustomStoryWorkflowEventStatus.PENDING,
+                        CustomStoryWorkflowEventStatus.PROCESSING,
+                        CustomStoryWorkflowEventStatus.BATCH_SUBMITTED,
+                    ]
+                ),
+            )
+        )
+        requested_language = metadata_json.get("language") if isinstance(metadata_json, dict) else None
+        for existing in result.scalars().all():
+            if requested_language:
+                existing_metadata = existing.metadata_json if isinstance(existing.metadata_json, dict) else {}
+                if existing_metadata.get("language") == requested_language:
+                    return None
+                continue
+            return None
+        return await self.create(
+            workflow_id=workflow_id,
+            step_name=step_name,
+            retry_count=retry_count,
+            metadata_json=metadata_json,
+            retry_flag=retry_flag,
+            retry_comment=retry_comment,
+            retry_source_event_id=retry_source_event_id,
+        )
+
+    async def latest_for_workflow_step_status(
+        self,
+        *,
+        workflow_id: UUID,
+        step_name: CustomStoryWorkflowStep,
+        status: CustomStoryWorkflowEventStatus,
+    ) -> CustomStoryWorkflowEvent | None:
+        result = await self.session.execute(
+            select(CustomStoryWorkflowEvent)
+            .where(
+                CustomStoryWorkflowEvent.workflow_id == workflow_id,
+                CustomStoryWorkflowEvent.step_name == step_name,
+                CustomStoryWorkflowEvent.status == status,
+            )
+            .order_by(CustomStoryWorkflowEvent.created_at.desc(), CustomStoryWorkflowEvent.id.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def batch_submitted_for_job(
+        self,
+        *,
+        workflow_id: UUID,
+        step_name: CustomStoryWorkflowStep,
+        batch_job_id: UUID,
+    ) -> CustomStoryWorkflowEvent | None:
+        result = await self.session.execute(
+            select(CustomStoryWorkflowEvent)
+            .where(
+                CustomStoryWorkflowEvent.workflow_id == workflow_id,
+                CustomStoryWorkflowEvent.step_name == step_name,
+                CustomStoryWorkflowEvent.status == CustomStoryWorkflowEventStatus.BATCH_SUBMITTED,
+            )
+            .order_by(CustomStoryWorkflowEvent.created_at.desc(), CustomStoryWorkflowEvent.id.desc())
+        )
+        batch_job_id_text = str(batch_job_id)
+        for event in result.scalars().all():
+            metadata = event.metadata_json if isinstance(event.metadata_json, dict) else {}
+            if str(metadata.get("batch_job_id") or "") == batch_job_id_text:
+                return event
+        return None
+
+    async def claim_pending(self, limit: int) -> list[CustomStoryWorkflowEvent]:
+        stale_before = datetime.utcnow() - timedelta(minutes=5)
+        result = await self.session.execute(
+            select(CustomStoryWorkflowEvent)
+            .where(
+                (
+                    CustomStoryWorkflowEvent.status == CustomStoryWorkflowEventStatus.PENDING
+                )
+                | (
+                    (CustomStoryWorkflowEvent.status == CustomStoryWorkflowEventStatus.PROCESSING)
+                    & (CustomStoryWorkflowEvent.locked_at < stale_before)
+                )
+            )
+            .order_by(CustomStoryWorkflowEvent.created_at.asc(), CustomStoryWorkflowEvent.id.asc())
+            .limit(limit)
+            .with_for_update(skip_locked=True)
+        )
+        events = list(result.scalars().all())
+        for event in events:
+            event.status = CustomStoryWorkflowEventStatus.PROCESSING
+            event.locked_at = datetime.utcnow()
+        await self.session.flush()
+        return events
+
+    async def update(self, event: CustomStoryWorkflowEvent) -> CustomStoryWorkflowEvent:
+        if event.metadata_json is not None:
+            flag_modified(event, "metadata_json")
+        await self.session.flush()
+        return event
+
+
 class CustomStoryInputSafetyAuditRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -170,7 +331,7 @@ class CustomStoryInputSafetyAuditRepository:
         self,
         *,
         user_id: UUID,
-        child_id: UUID,
+        child_id: UUID | None,
         provider: str,
         model: str | None,
         request_json: dict,
@@ -241,10 +402,12 @@ class CustomStoryBatchJobRepository:
         provider_model: str | None,
         request_payload: dict | None = None,
         story_id: UUID | None = None,
+        generic_story_id: UUID | None = None,
     ) -> CustomStoryBatchJob:
         job = CustomStoryBatchJob(
             workflow_id=workflow_id,
             story_id=story_id,
+            generic_story_id=generic_story_id,
             job_type=job_type,
             status=StoryBatchJobStatus.SUBMITTED,
             provider="google",
@@ -258,6 +421,12 @@ class CustomStoryBatchJobRepository:
         self.session.add(job)
         await self.session.flush()
         return job
+
+    async def get_by_id(self, batch_job_id: UUID) -> CustomStoryBatchJob | None:
+        result = await self.session.execute(
+            select(CustomStoryBatchJob).where(CustomStoryBatchJob.id == batch_job_id)
+        )
+        return result.scalar_one_or_none()
 
     async def latest_for_workflow_type(
         self, workflow_id: UUID, job_type: StoryBatchJobType
@@ -310,6 +479,10 @@ class CustomStoryBatchJobRepository:
         page_size: int,
         workflow_id: UUID | None = None,
         status: StoryBatchJobStatus | None = None,
+        story_type: CustomStoryWorkflowType | str | None = None,
+        generic_story_id: UUID | None = None,
+        job_type: StoryBatchJobType | None = None,
+        provider: str | None = None,
     ) -> tuple[list[CustomStoryBatchJob], int]:
         """List batch jobs for user with optional filtering by workflow_id and status."""
         filters = [CustomStoryWorkflow.user_id == user_id]
@@ -317,8 +490,20 @@ class CustomStoryBatchJobRepository:
         if workflow_id is not None:
             filters.append(CustomStoryBatchJob.workflow_id == workflow_id)
 
+        if story_type is not None:
+            filters.append(CustomStoryWorkflow.story_type == story_type)
+
+        if generic_story_id is not None:
+            filters.append(CustomStoryBatchJob.generic_story_id == generic_story_id)
+
         if status is not None:
             filters.append(CustomStoryBatchJob.status == status)
+
+        if job_type is not None:
+            filters.append(CustomStoryBatchJob.job_type == job_type)
+
+        if provider is not None:
+            filters.append(CustomStoryBatchJob.provider == provider)
 
         total = await self.session.scalar(
             select(func.count(CustomStoryBatchJob.id))
@@ -345,6 +530,7 @@ class CustomStoryBatchJobRepository:
                     CustomStoryBatchJob.id,
                     CustomStoryBatchJob.workflow_id,
                     CustomStoryBatchJob.story_id,
+                    CustomStoryBatchJob.generic_story_id,
                     CustomStoryBatchJob.job_type,
                     CustomStoryBatchJob.status,
                     CustomStoryBatchJob.provider,

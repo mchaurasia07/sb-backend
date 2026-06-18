@@ -68,6 +68,22 @@ explanations, and textbook-like facts.
 Follow language_profile as the primary guide for vocabulary, sentence length,
 repetition, dialogue complexity, and read-aloud rhythm.
 
+Selected languages come from story_plan_json.selected_languages. Output only
+those language keys, no extra languages.
+
+- title, summary, moral, and each page.text must be objects keyed exactly by
+  story_plan_json.selected_languages.
+- The JSON shape below is illustrative. Replace the shown language keys with
+  exactly story_plan_json.selected_languages. If selected_languages is ["hi"],
+  output only "hi". If it is ["en","hi","mr"], output exactly those three keys.
+- English (en) must be natural children's story prose.
+- Hindi (hi) and Marathi (mr) must be natural children's narration in
+  Devanagari, not literal translations of English.
+- Write each selected language independently from the same plan. Do not copy
+  English sentence order into Hindi or Marathi.
+- Use common English words in Hindi/Marathi only where children would naturally
+  use them.
+
 Age band fallback targets:
 
 - Infant Toddler (0-3): 10-25 words per page, 1-3 very simple sentences.
@@ -93,21 +109,38 @@ The final story page must show the resolution_payoff and the child's emotional
 change before the moral field explains it. Do not introduce a new conflict on
 the final page.
 
+The final page must read like the story is complete. It must close the main
+conflict, show the child's changed feeling, and end on a warm final image,
+gesture, shared moment, or action. Do not end as if another story page is
+needed.
+
+The moral is a separate short lesson after the story. It must not replace the
+final page's emotional closure.
+
 The moral field must be 1-2 short, child-friendly sentences.
 
 ## OUTPUT FORMAT
 
+## PAGE COUNT REQUIREMENT
+
+story_plan_json.expected_page_count is the required page count.
+You MUST output exactly story_plan_json.expected_page_count page objects in pages.
+pages.length must equal story_plan_json.expected_page_count.
+Each output page must correspond to exactly one planned page.
+Output page_number values must match story_plan_json.expected_page_numbers exactly, in the same order.
+Do not merge, collapse, summarize, skip, add, or reorder pages.
+
 {
-"title": "",
-"summary": "",
+"title": {"en": ""},
+"summary": {"en": ""},
 "pages": [
 {
 "page_number": 1,
 "emotion": "",
-"text": ""
+"text": {"en": ""}
 }
 ],
-"moral": ""
+"moral": {"en": ""}
 }
 
 ## VALID JSON REQUIREMENTS
@@ -118,13 +151,15 @@ markdown code blocks.
 
 ## FINAL CHECK
 
-1. Page count matches the plan.
+1. pages.length equals story_plan_json.expected_page_count.
 2. Every page advances the story spine.
 3. Cause and effect connects the pages.
 4. The selected child remains the hero and main actor.
-5. The final page shows the lesson before the moral explains it.
+5. The final page closes the conflict and feels complete before the moral explains the lesson.
 6. The narration sounds natural when read aloud.
-7. The output JSON shape exactly matches the required format.
+7. Output page_number values match story_plan_json.expected_page_numbers exactly.
+8. Localized objects contain exactly story_plan_json.selected_languages and no extra language keys.
+9. The output JSON shape exactly matches the required format.
 
 # STORY PLAN JSON
 

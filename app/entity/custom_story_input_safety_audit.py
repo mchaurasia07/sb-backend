@@ -31,8 +31,8 @@ class CustomStoryInputSafetyAudit(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     user_id: Mapped[UUID] = mapped_column(HyphenatedUUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    child_id: Mapped[UUID] = mapped_column(
-        HyphenatedUUID(), ForeignKey("child_profiles.id", ondelete="CASCADE"), nullable=False
+    child_id: Mapped[UUID | None] = mapped_column(
+        HyphenatedUUID(), ForeignKey("child_profiles.id", ondelete="CASCADE"), nullable=True
     )
     workflow_id: Mapped[UUID | None] = mapped_column(
         HyphenatedUUID(), ForeignKey("custom_story_workflows.id", ondelete="SET NULL"), nullable=True

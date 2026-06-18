@@ -41,10 +41,8 @@ from app.model.response.generic_story_workflow import (
 )
 from app.model.response.story_catalog import StoryCatalogResponse
 from app.model.response.story_content import StoryContentResponse
-from app.service.generic_story_batch_service import GenericStoryBatchService
-from app.service.generic_story_multi_image_service import GenericStoryMultiImageTestService
 from app.service.generic_story_service import GenericStoryService
-from app.service.generic_story_workflow_service import GenericStoryWorkflowService
+from app.service.custom_story_workflow_service import CustomStoryWorkflowService
 from app.service.image_optimizer import optimize_display_image
 from app.service.notification_service import NotificationService
 from app.service.story_catalog_service import StoryCatalogService
@@ -139,14 +137,16 @@ async def create_generic_story(
     return success_response(data, "Generic story created successfully")
 
 
-@router.post("/workflows", response_model=ApiResponse[GenericStoryWorkflowResponse], status_code=status.HTTP_201_CREATED)
+@router.post("/workflows", response_model=ApiResponse[GenericStoryWorkflowResponse], status_code=status.HTTP_202_ACCEPTED)
 async def create_generic_story_workflow(
     payload: GenericStoryWorkflowCreateRequest,
+    response: Response,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[GenericStoryWorkflowResponse]:
-    data = await GenericStoryWorkflowService(session).create(current_user.id, payload)
-    return success_response(data, "Generic story workflow created successfully")
+    data = await CustomStoryWorkflowService(session).create_generic(current_user.id, payload)
+    response.status_code = status.HTTP_202_ACCEPTED
+    return success_response(data, "Generic story workflow queued successfully")
 
 
 @router.get("/workflows", response_model=ApiResponse[PaginatedResponse[GenericStoryWorkflowListResponse]])
@@ -155,11 +155,11 @@ async def list_generic_story_workflows(
     page_size: int = Query(20, ge=1, le=100),
     user_id: UUID | None = Query(None),
     title: str | None = Query(default=None, max_length=255),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[PaginatedResponse[GenericStoryWorkflowListResponse]]:
-    data = await GenericStoryWorkflowService(session).list(
-        user_id=user_id,
+    data = await CustomStoryWorkflowService(session).list_generic(
+        user_id=user_id or current_user.id,
         title=title,
         page=page,
         page_size=page_size,
@@ -173,7 +173,7 @@ async def get_generic_story_workflow(
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[GenericStoryWorkflowResponse]:
-    data = await GenericStoryWorkflowService(session).get(current_user.id, workflow_id)
+    data = await CustomStoryWorkflowService(session).get_generic(current_user.id, workflow_id)
     return success_response(data, "Generic story workflow retrieved successfully")
 
 
@@ -183,7 +183,7 @@ async def delete_generic_story_workflow(
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[None]:
-    await GenericStoryWorkflowService(session).delete(current_user.id, workflow_id)
+    await CustomStoryWorkflowService(session).delete_generic(current_user.id, workflow_id)
     return success_response(None, "Generic story workflow deleted successfully")
 
 
@@ -194,7 +194,11 @@ async def get_generic_story_workflow_steps(
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[list[GenericStoryWorkflowStepDetailResponse]]:
-    data = await GenericStoryWorkflowService(session).get_steps(current_user.id, workflow_id, step_name=step_name)
+    data = await CustomStoryWorkflowService(session).get_generic_steps(
+        current_user.id,
+        workflow_id,
+        step_name=step_name,
+    )
     return success_response(data, "Generic story workflow steps retrieved successfully")
 
 
@@ -206,12 +210,8 @@ async def execute_generic_story_workflow(
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[GenericStoryWorkflowResponse]:
-    data = await GenericStoryWorkflowService(session).execute(
-        current_user.id,
-        workflow_id,
-        payload,
-        public_base_url=str(request.base_url).rstrip("/"),
-    )
+    _ = payload, request
+    data = await CustomStoryWorkflowService(session).retry_generic(current_user.id, workflow_id)
     message = (
         "Generic story workflow completed successfully"
         if data.status == "COMPLETED"
@@ -227,11 +227,8 @@ async def retry_generic_story_workflow(
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[GenericStoryWorkflowResponse]:
-    data = await GenericStoryWorkflowService(session).retry(
-        current_user.id,
-        workflow_id,
-        public_base_url=str(request.base_url).rstrip("/"),
-    )
+    _ = request
+    data = await CustomStoryWorkflowService(session).retry_generic(current_user.id, workflow_id)
     message = (
         "Generic story workflow completed successfully"
         if data.status == "COMPLETED"
@@ -296,12 +293,26 @@ async def upload_generic_story_workflow_images(
             )
         uploads[normalized_field_name] = value
 
-    data = await GenericStoryWorkflowService(session).upload_published_story_images(
-        current_user.id,
-        workflow_id,
+    workflow = await CustomStoryWorkflowService(session).get_generic(current_user.id, workflow_id)
+    if workflow.generic_story_id != generic_story_id:
+        raise AppException("Generic story does not belong to this workflow", status.HTTP_404_NOT_FOUND, "GENERIC_STORY_WORKFLOW_NOT_FOUND")
+    story = await GenericStoryService(session).update_page_images(
         generic_story_id,
         uploads,
+        language=workflow.language,
         public_base_url=str(request.base_url).rstrip("/"),
+    )
+    pages = story.story_json.get("pages") if isinstance(story.story_json, dict) else []
+    data = GenericStoryImageUploadResponse(
+        workflow_id=workflow_id,
+        generic_story_id=generic_story_id,
+        cover_image_url=story.cover_image or "",
+        page_image_urls={
+            int(page.get("page_number")): str(page.get("image_url"))
+            for page in pages
+            if isinstance(page, dict) and page.get("page_number") and page.get("image_url")
+        },
+        updated_languages=story.available_languages,
     )
     return success_response(data, "Generic story images uploaded successfully")
 
@@ -331,12 +342,25 @@ async def upload_generic_story_workflow_audio(
             )
         uploads[normalized_field_name] = value
 
-    data = await GenericStoryWorkflowService(session).upload_published_story_audio(
-        current_user.id,
-        workflow_id,
+    workflow = await CustomStoryWorkflowService(session).get_generic(current_user.id, workflow_id)
+    if workflow.generic_story_id != generic_story_id:
+        raise AppException("Generic story does not belong to this workflow", status.HTTP_404_NOT_FOUND, "GENERIC_STORY_WORKFLOW_NOT_FOUND")
+    story = await GenericStoryService(session).update_page_audio(
         generic_story_id,
-        language,
         uploads,
+        language,
+    )
+    pages = story.story_json.get("pages") if isinstance(story.story_json, dict) else []
+    data = GenericStoryAudioUploadResponse(
+        workflow_id=workflow_id,
+        generic_story_id=generic_story_id,
+        language=language,
+        page_audio_urls={
+            int(page.get("page_number")): str(page.get("audio_url"))
+            for page in pages
+            if isinstance(page, dict) and page.get("page_number") and page.get("audio_url")
+        },
+        updated_languages=story.available_languages,
     )
     return success_response(data, "Generic story audio uploaded successfully")
 
@@ -357,14 +381,12 @@ async def submit_generic_story_image_batch(
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[GenericStoryBatchImageSubmitResponse]:
-    data = await GenericStoryBatchService(session).submit_image_batch(
-        user_id=current_user.id,
-        generic_story_id=generic_story_id,
-        force=force,
-        page_numbers=set(pages or []) or None,
-        provider=provider,
+    _ = current_user, session, force, provider, pages
+    raise AppException(
+        "Generic image batch generation now runs through /api/v1/generic-stories/workflows.",
+        status.HTTP_410_GONE,
+        "GENERIC_STORY_LEGACY_BATCH_DISABLED",
     )
-    return success_response(data, data.message)
 
 
 @router.post(
@@ -379,13 +401,12 @@ async def submit_generic_story_narration_batch(
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[GenericStoryBatchNarrationSubmitResponse]:
-    data = await GenericStoryBatchService(session).submit_narration_batch(
-        user_id=current_user.id,
-        generic_story_id=generic_story_id,
-        language=language,
-        force=force,
+    _ = current_user, session, generic_story_id, language, force
+    raise AppException(
+        "Generic narration batch generation now runs through /api/v1/generic-stories/workflows.",
+        status.HTTP_410_GONE,
+        "GENERIC_STORY_LEGACY_BATCH_DISABLED",
     )
-    return success_response(data, data.message)
 
 
 @router.get(
@@ -398,12 +419,12 @@ async def get_generic_story_narration_prompt(
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[GenericStoryNarrationPromptResponse]:
-    _ = current_user
-    data = await GenericStoryBatchService(session).get_narration_prompts(
-        generic_story_id=generic_story_id,
-        language=language,
+    _ = current_user, session, generic_story_id, language
+    raise AppException(
+        "Generic narration prompt preview from legacy batch service is disabled for unified workflows.",
+        status.HTTP_410_GONE,
+        "GENERIC_STORY_LEGACY_BATCH_DISABLED",
     )
-    return success_response(data, "Generic story narration prompts generated successfully")
 
 
 @router.post(
@@ -417,13 +438,12 @@ async def multi_generate_generic_story_images_test(
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[dict]:
-    data = await GenericStoryMultiImageTestService(session).generate(
-        current_user.id,
-        generic_story_id,
-        language=language,
-        public_base_url=str(request.base_url).rstrip("/"),
+    _ = current_user, session, generic_story_id, language, request
+    raise AppException(
+        "Generic multi-image test generation from legacy workflow service is disabled for unified workflows.",
+        status.HTTP_410_GONE,
+        "GENERIC_STORY_LEGACY_BATCH_DISABLED",
     )
-    return success_response(data, "Generic story multi-image test generation completed")
 
 
 @router.post(
@@ -437,13 +457,12 @@ async def regenerate_generic_story_page_image(
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[GenericStoryBatchImageSubmitResponse]:
-    data = await GenericStoryBatchService(session).submit_image_batch(
-        user_id=current_user.id,
-        generic_story_id=generic_story_id,
-        force=True,
-        page_numbers={page_number},
+    _ = current_user, session, generic_story_id, page_number
+    raise AppException(
+        "Generic image regeneration now runs through /api/v1/generic-stories/workflows.",
+        status.HTTP_410_GONE,
+        "GENERIC_STORY_LEGACY_BATCH_DISABLED",
     )
-    return success_response(data, f"Generic story page {page_number} image regeneration submitted")
 
 
 @router.get("/batch-jobs", response_model=ApiResponse[PaginatedResponse[GenericStoryBatchJobResponse]])
@@ -459,12 +478,14 @@ async def list_generic_story_batch_jobs(
     session: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[PaginatedResponse[GenericStoryBatchJobResponse]]:
     _ = current_user
-    data = await GenericStoryBatchService(session).list_batch_jobs(
+    data = await CustomStoryWorkflowService(session).list_batch_jobs(
+        current_user.id,
         page=page,
         page_size=page_size,
-        generic_story_id=generic_story_id,
         workflow_id=workflow_id,
         status_filter=status_filter,
+        story_type=CustomStoryWorkflowService._workflow_type_generic(),
+        generic_story_id=generic_story_id,
         job_type=job_type,
         provider=provider,
     )
@@ -478,7 +499,7 @@ async def reconcile_generic_story_batch_jobs(
     session: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[dict]:
     _ = current_user
-    data = await GenericStoryBatchService(session).reconcile_batch_jobs(limit=limit)
+    data = await CustomStoryWorkflowService(session).reconcile_batch_jobs(limit=limit)
     return success_response(data, "Generic story batch jobs reconciled successfully")
 
 
@@ -492,7 +513,7 @@ async def cancel_generic_story_batch_job(
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[GenericStoryBatchJobCancelResponse]:
-    data = await GenericStoryBatchService(session).cancel_batch_job(
+    data = await CustomStoryWorkflowService(session).cancel_generic_batch_job(
         user_id=current_user.id,
         generic_story_id=generic_story_id,
         batch_job_id=batch_job_id,

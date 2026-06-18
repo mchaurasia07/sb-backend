@@ -4,12 +4,15 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from fastapi import BackgroundTasks
 from starlette.responses import Response
 from pydantic import ValidationError
 
 from app.core.exceptions import AppException
-from app.entity.custom_story_workflow import CustomStoryWorkflowStatus, CustomStoryWorkflowStep
+from app.entity.custom_story_workflow import (
+    CustomStoryWorkflowEventStatus,
+    CustomStoryWorkflowStatus,
+    CustomStoryWorkflowStep,
+)
 from app.entity.story_batch_job import StoryBatchJobStatus, StoryBatchJobType
 from app.entity.story_step import StepStatus
 from app.model.request.story import ReaderCategory, StoryGenerationRequest, age_group_for_reader_category
@@ -211,6 +214,7 @@ def test_custom_story_workflow_step_order_includes_publish_last():
         CustomStoryWorkflowStep.NARRATION_GENERATION,
         CustomStoryWorkflowStep.PUBLISH_STORY,
     ]
+    assert "INPUT_SAFETY_VALIDATION" not in [step.value for step in CustomStoryWorkflowService.ORDERED_STEPS]
 
 
 def test_story_generation_request_defaults_to_delayed_and_execute_flags():
@@ -503,11 +507,15 @@ async def test_create_runs_input_safety_before_creating_workflow(monkeypatch):
     async def _commit():
         calls.append("commit")
 
+    async def _create_event_if_absent(**_kwargs):
+        return None
+
     monkeypatch.setattr(custom_story_workflow_service.settings, "CUSTOM_STORY_EXECUTE_WORKFLOW_DEFAULT", False)
     monkeypatch.setattr(custom_story_workflow_service.StoryInputSafetyService, "inspect", _inspect)
     service.children = SimpleNamespace(get_for_user=_get_child)
     service.workflows = SimpleNamespace(create=_create_workflow)
     service.input_safety_audits = SimpleNamespace(create=_audit_create, update=_audit_update)
+    service.events = SimpleNamespace(create_if_absent=_create_event_if_absent)
     service.session = SimpleNamespace(commit=_commit)
 
     response = await service.create(uuid4(), payload)
@@ -530,6 +538,7 @@ async def test_create_allows_imagined_cast_without_child_character_image(monkeyp
     )
     service = CustomStoryWorkflowService.__new__(CustomStoryWorkflowService)
     created = {}
+    queued_events = []
 
     async def _get_child(user_id, child_id):
         return SimpleNamespace(id=child_id, dob=date(2019, 1, 1), character_image_url=None)
@@ -573,9 +582,14 @@ async def test_create_allows_imagined_cast_without_child_character_image(monkeyp
     async def _audit_update(audit):
         return audit
 
+    async def _create_event_if_absent(**_kwargs):
+        queued_events.append(_kwargs)
+        return None
+
     service.input_safety_audits = SimpleNamespace(create=_audit_create, update=_audit_update)
     service.children = SimpleNamespace(get_for_user=_get_child)
     service.workflows = SimpleNamespace(create=_create_workflow)
+    service.events = SimpleNamespace(create_if_absent=_create_event_if_absent)
     service.session = SimpleNamespace(commit=_commit)
     monkeypatch.setattr(custom_story_workflow_service.StoryInputSafetyService, "inspect", _inspect)
 
@@ -584,6 +598,12 @@ async def test_create_allows_imagined_cast_without_child_character_image(monkeyp
     assert response.workflow_id
     assert created["processing_mode"] == "delayed"
     assert created["use_child_character"] is False
+    assert queued_events == [
+        {
+            "workflow_id": response.workflow_id,
+            "step_name": CustomStoryWorkflowStep.STORY_PLAN_GENERATION,
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -734,12 +754,10 @@ async def test_create_custom_story_workflow_skips_background_when_execution_disa
             return response_data
 
     monkeypatch.setattr(story_routes, "CustomStoryWorkflowService", _FakeCustomStoryWorkflowService)
-    background_tasks = BackgroundTasks()
     route_response = Response()
 
     response = await story_routes.create_custom_story_workflow(
         payload,
-        background_tasks,
         route_response,
         SimpleNamespace(id=user_id),
         object(),
@@ -748,12 +766,11 @@ async def test_create_custom_story_workflow_skips_background_when_execution_disa
     assert response.data == response_data
     assert response.message == "Custom story workflow saved successfully; execution skipped"
     assert route_response.status_code == 201
-    assert background_tasks.tasks == []
     assert calls["create"] == (user_id, payload)
 
 
 @pytest.mark.asyncio
-async def test_create_custom_story_workflow_queues_background_when_requested(monkeypatch):
+async def test_create_custom_story_workflow_queues_event_when_requested(monkeypatch):
     user_id = uuid4()
     workflow_id = uuid4()
     payload = StoryGenerationRequest(
@@ -775,23 +792,341 @@ async def test_create_custom_story_workflow_queues_background_when_requested(mon
             return response_data
 
     monkeypatch.setattr(story_routes, "CustomStoryWorkflowService", _FakeCustomStoryWorkflowService)
-    background_tasks = BackgroundTasks()
     route_response = Response()
 
     response = await story_routes.create_custom_story_workflow(
         payload,
-        background_tasks,
         route_response,
         SimpleNamespace(id=user_id),
         object(),
     )
 
     assert response.data == response_data
-    assert response.message == "Custom story workflow started successfully"
+    assert response.message == "Custom story workflow queued successfully"
     assert route_response.status_code == 202
-    assert len(background_tasks.tasks) == 1
-    assert background_tasks.tasks[0].func is story_routes.execute_custom_story_workflow_background
-    assert background_tasks.tasks[0].args == (workflow_id,)
+
+
+@pytest.mark.asyncio
+async def test_story_generation_text_batch_failure_creates_one_full_retry_event():
+    workflow = _workflow(
+        processing_mode="delayed",
+        status=CustomStoryWorkflowStatus.IN_PROGRESS,
+        current_step=CustomStoryWorkflowStep.STORY_GENERATION.value,
+        story_plan_json={"pages": [{"page_number": 1}, {"page_number": 2}]},
+    )
+    source_event = SimpleNamespace(
+        id=uuid4(),
+        workflow_id=workflow.id,
+        step_name=CustomStoryWorkflowStep.STORY_GENERATION,
+        status=CustomStoryWorkflowEventStatus.BATCH_SUBMITTED,
+        retry_count=0,
+        retry_flag=False,
+        retry_comment=None,
+        retry_source_event_id=None,
+        metadata_json={"batch_job_id": "old-job"},
+        error_message=None,
+        completed_at=None,
+    )
+    job = SimpleNamespace(
+        id=uuid4(),
+        workflow_id=workflow.id,
+        story_id=None,
+        job_type=StoryBatchJobType.STORY,
+        status=StoryBatchJobStatus.FAILED,
+        provider_job_name="batches/story",
+        provider_state="JOB_STATE_SUCCEEDED",
+        error_message="Story generation returned 1 pages; expected 2",
+        response_payload=None,
+    )
+    created_events = []
+    updated_events = []
+    updated_jobs = []
+    updated_workflows = []
+    service = CustomStoryWorkflowService.__new__(CustomStoryWorkflowService)
+    service.steps = _StepRepo()
+
+    async def _update_event(event):
+        updated_events.append(event)
+        return event
+
+    async def _create_event(**kwargs):
+        event = SimpleNamespace(
+            id=uuid4(),
+            status=CustomStoryWorkflowEventStatus.PENDING,
+            completed_at=None,
+            error_message=None,
+            **kwargs,
+        )
+        created_events.append(event)
+        return event
+
+    async def _update_job(job_arg):
+        updated_jobs.append(job_arg)
+        return job_arg
+
+    async def _update_workflow(workflow_arg):
+        updated_workflows.append(workflow_arg)
+        return workflow_arg
+
+    service.events = SimpleNamespace(update=_update_event, create=_create_event)
+    service.batch_jobs = SimpleNamespace(update=_update_job)
+    service.workflows = SimpleNamespace(update=_update_workflow)
+
+    raw_text = '{"title":"Tiny","pages":[{"page_number":1,"emotion":"happy","text":"Only one."}],"moral":"Try."}'
+    await service._handle_text_batch_failure(
+        workflow,
+        job,
+        source_event,
+        CustomStoryWorkflowStep.STORY_GENERATION,
+        error_message=job.error_message,
+        raw_text=raw_text,
+        provider_response={"raw": "provider"},
+    )
+
+    assert job.response_payload["text"] == raw_text
+    assert source_event.status == CustomStoryWorkflowEventStatus.FAILED
+    assert source_event.error_message == job.error_message
+    assert len(created_events) == 1
+    retry_event = created_events[0]
+    assert retry_event.step_name == CustomStoryWorkflowStep.STORY_GENERATION
+    assert retry_event.retry_flag is True
+    assert retry_event.retry_comment == "FULL_BATCH_RETRY"
+    assert retry_event.retry_source_event_id == source_event.id
+    assert workflow.status == CustomStoryWorkflowStatus.IN_PROGRESS
+    assert workflow.error_message is None
+    assert updated_jobs
+    assert updated_events
+    assert updated_workflows
+
+
+@pytest.mark.asyncio
+async def test_story_generation_text_batch_retry_failure_marks_workflow_failed():
+    workflow = _workflow(status=CustomStoryWorkflowStatus.IN_PROGRESS)
+    retry_event = SimpleNamespace(
+        id=uuid4(),
+        status=CustomStoryWorkflowEventStatus.BATCH_SUBMITTED,
+        retry_count=1,
+        retry_flag=True,
+        retry_comment="FULL_BATCH_RETRY",
+        metadata_json={},
+        error_message=None,
+        completed_at=None,
+    )
+    job = SimpleNamespace(
+        id=uuid4(),
+        workflow_id=workflow.id,
+        story_id=None,
+        job_type=StoryBatchJobType.STORY,
+        status=StoryBatchJobStatus.FAILED,
+        provider_job_name="batches/story",
+        provider_state="JOB_STATE_SUCCEEDED",
+        error_message="Invalid JSON",
+        response_payload=None,
+    )
+    service = CustomStoryWorkflowService.__new__(CustomStoryWorkflowService)
+    service.steps = _StepRepo()
+
+    async def _update(value):
+        return value
+
+    service.events = SimpleNamespace(update=_update)
+    service.batch_jobs = SimpleNamespace(update=_update)
+    service.workflows = SimpleNamespace(update=_update)
+
+    await service._handle_text_batch_failure(
+        workflow,
+        job,
+        retry_event,
+        CustomStoryWorkflowStep.STORY_GENERATION,
+        error_message=job.error_message,
+        raw_text="{bad json",
+        provider_response=None,
+    )
+
+    assert workflow.status == CustomStoryWorkflowStatus.FAILED
+    assert workflow.error_message == "Invalid JSON"
+    assert retry_event.status == CustomStoryWorkflowEventStatus.FAILED
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "step_name,job_type",
+    [
+        (CustomStoryWorkflowStep.STORY_PLAN_GENERATION, StoryBatchJobType.STORY_PLAN),
+        (CustomStoryWorkflowStep.IMAGE_PLAN_GENERATION, StoryBatchJobType.IMAGE_PLAN),
+    ],
+)
+async def test_text_batch_failure_creates_full_retry_for_plan_steps(step_name, job_type):
+    workflow = _workflow(status=CustomStoryWorkflowStatus.IN_PROGRESS)
+    source_event = SimpleNamespace(
+        id=uuid4(),
+        status=CustomStoryWorkflowEventStatus.BATCH_SUBMITTED,
+        retry_count=0,
+        retry_flag=False,
+        retry_comment=None,
+        metadata_json={"batch_job_id": "old-job"},
+        error_message=None,
+        completed_at=None,
+    )
+    job = SimpleNamespace(
+        id=uuid4(),
+        workflow_id=workflow.id,
+        story_id=None,
+        job_type=job_type,
+        status=StoryBatchJobStatus.FAILED,
+        provider_job_name="batches/text",
+        provider_state="JOB_STATE_SUCCEEDED",
+        error_message="Invalid JSON",
+        response_payload=None,
+    )
+    created_events = []
+    service = CustomStoryWorkflowService.__new__(CustomStoryWorkflowService)
+    service.steps = _StepRepo()
+
+    async def _update(value):
+        return value
+
+    async def _create_event(**kwargs):
+        event = SimpleNamespace(id=uuid4(), status=CustomStoryWorkflowEventStatus.PENDING, **kwargs)
+        created_events.append(event)
+        return event
+
+    service.events = SimpleNamespace(update=_update, create=_create_event)
+    service.batch_jobs = SimpleNamespace(update=_update)
+    service.workflows = SimpleNamespace(update=_update)
+
+    await service._handle_text_batch_failure(
+        workflow,
+        job,
+        source_event,
+        step_name,
+        error_message=job.error_message,
+        raw_text="{bad json",
+        provider_response=None,
+    )
+
+    assert len(created_events) == 1
+    assert created_events[0].step_name == step_name
+    assert created_events[0].retry_flag is True
+    assert created_events[0].retry_comment == "FULL_BATCH_RETRY"
+    assert workflow.status == CustomStoryWorkflowStatus.IN_PROGRESS
+    assert workflow.current_step == step_name.value
+
+
+@pytest.mark.asyncio
+async def test_process_reconciled_image_job_partial_retry_creates_retry_event(monkeypatch):
+    workflow = _workflow(
+        processing_mode="delayed",
+        story_json={
+            "pages": [
+                {"page_number": 1, "text": "Mira listened."},
+                {"page_number": 2, "text": "Mira tried again."},
+            ]
+        },
+        image_plan_json={
+            "pages": [
+                {"page_number": 1, "image_prompt": "page one"},
+                {"page_number": 2, "image_prompt": "page two"},
+            ]
+        },
+        status=CustomStoryWorkflowStatus.IN_PROGRESS,
+    )
+    job = SimpleNamespace(
+        id=uuid4(),
+        workflow_id=workflow.id,
+        story_id=None,
+        job_type=StoryBatchJobType.IMAGE,
+        status=StoryBatchJobStatus.RUNNING,
+        attempt=1,
+        provider_job_name="batches/image",
+        provider_state="JOB_STATE_SUCCEEDED",
+        request_keys=["page_1", "page_2"],
+        response_payload=None,
+        error_message=None,
+        completed_item_count=0,
+        failed_item_count=0,
+        missing_keys=[],
+    )
+    source_event = SimpleNamespace(
+        id=uuid4(),
+        status=CustomStoryWorkflowEventStatus.BATCH_SUBMITTED,
+        retry_count=0,
+        retry_flag=False,
+        retry_comment=None,
+        metadata_json={"batch_job_id": str(job.id)},
+        error_message=None,
+        completed_at=None,
+    )
+    retry_job = SimpleNamespace(
+        id=uuid4(),
+        job_type=StoryBatchJobType.IMAGE,
+        provider_job_name="batches/image-retry",
+        attempt=2,
+    )
+    service = CustomStoryWorkflowService.__new__(CustomStoryWorkflowService)
+    service.steps = _StepRepo()
+    calls = {"retry_items": None, "created_events": []}
+
+    async def _update(value):
+        return value
+
+    async def _batch_submitted_for_job(**kwargs):
+        assert kwargs["batch_job_id"] == job.id
+        return source_event
+
+    async def _create_event(**kwargs):
+        event = SimpleNamespace(
+            id=uuid4(),
+            status=CustomStoryWorkflowEventStatus.PENDING,
+            completed_at=None,
+            **kwargs,
+        )
+        calls["created_events"].append(event)
+        return event
+
+    class _BatchRunner:
+        async def _build_image_items(self, story, story_json, image_plan):
+            _ = story, story_json, image_plan
+            return [SimpleNamespace(key="page_1"), SimpleNamespace(key="page_2")]
+
+        async def _process_image_batch_responses(self, story, story_json, items, provider_job):
+            _ = story, story_json, items, provider_job
+            return {"page_1"}, {"page_2"}, {"items": [{"key": "page_2", "status": "missing_response"}]}
+
+        async def _submit_image_batch_job_only(self, story, items, *, attempt):
+            _ = story
+            calls["retry_items"] = [item.key for item in items]
+            calls["retry_attempt"] = attempt
+            return retry_job
+
+    monkeypatch.setattr(custom_story_workflow_service.settings, "STORY_BATCH_MAX_IMAGE_RETRIES", 3)
+    service.batch_jobs = SimpleNamespace(update=_update)
+    service.workflows = SimpleNamespace(update=_update)
+    service.events = SimpleNamespace(
+        update=_update,
+        create=_create_event,
+        batch_submitted_for_job=_batch_submitted_for_job,
+    )
+    service.session = SimpleNamespace(commit=lambda: None)
+
+    async def _commit():
+        return None
+
+    service.session = SimpleNamespace(commit=_commit)
+
+    await service._process_reconciled_image_job(workflow, job, SimpleNamespace(), _BatchRunner())
+
+    assert calls["retry_items"] == ["page_2"]
+    assert calls["retry_attempt"] == 2
+    assert source_event.status == CustomStoryWorkflowEventStatus.FAILED
+    assert len(calls["created_events"]) == 1
+    retry_event = calls["created_events"][0]
+    assert retry_event.retry_flag is True
+    assert retry_event.retry_comment == "PARTIAL_RETRY"
+    assert retry_event.status == CustomStoryWorkflowEventStatus.BATCH_SUBMITTED
+    assert retry_event.metadata_json["batch_job_id"] == str(retry_job.id)
+    assert workflow.status == CustomStoryWorkflowStatus.IN_PROGRESS
+    assert workflow.current_step == CustomStoryWorkflowStep.IMAGE_GENERATION.value
 
 
 @pytest.mark.asyncio
@@ -1270,12 +1605,23 @@ async def test_process_reconciled_audio_job_retries_only_missing_keys(monkeypatc
     )
     retry_job = SimpleNamespace(
         id=uuid4(),
+        job_type=StoryBatchJobType.AUDIO,
         provider_job_name="batches/audio-retry",
         attempt=2,
     )
+    source_event = SimpleNamespace(
+        id=uuid4(),
+        status=CustomStoryWorkflowEventStatus.BATCH_SUBMITTED,
+        retry_count=0,
+        retry_flag=False,
+        retry_comment=None,
+        metadata_json={"batch_job_id": str(job.id)},
+        error_message=None,
+        completed_at=None,
+    )
     service = CustomStoryWorkflowService.__new__(CustomStoryWorkflowService)
     service.steps = _StepRepo()
-    calls = {"retry_items": None}
+    calls = {"retry_items": None, "created_events": []}
 
     async def _update_job(job_arg):
         calls["job"] = job_arg
@@ -1287,6 +1633,23 @@ async def test_process_reconciled_audio_job_retries_only_missing_keys(monkeypatc
 
     async def _commit():
         calls["committed"] = True
+
+    async def _update_event(event):
+        return event
+
+    async def _batch_submitted_for_job(**kwargs):
+        assert kwargs["batch_job_id"] == job.id
+        return source_event
+
+    async def _create_event(**kwargs):
+        event = SimpleNamespace(
+            id=uuid4(),
+            status=CustomStoryWorkflowEventStatus.PENDING,
+            completed_at=None,
+            **kwargs,
+        )
+        calls["created_events"].append(event)
+        return event
 
     async def _fail_workflow(*args, **kwargs):
         raise AssertionError("workflow should not fail when missing audio retry is submitted")
@@ -1314,6 +1677,11 @@ async def test_process_reconciled_audio_job_retries_only_missing_keys(monkeypatc
     monkeypatch.setattr(custom_story_workflow_service.settings, "STORY_BATCH_MAX_AUDIO_RETRIES", 3)
     service.batch_jobs = SimpleNamespace(update=_update_job)
     service.workflows = SimpleNamespace(update=_update_workflow)
+    service.events = SimpleNamespace(
+        update=_update_event,
+        create=_create_event,
+        batch_submitted_for_job=_batch_submitted_for_job,
+    )
     service.session = SimpleNamespace(commit=_commit)
     service._mark_workflow_failed = _fail_workflow
 
@@ -1337,6 +1705,14 @@ async def test_process_reconciled_audio_job_retries_only_missing_keys(monkeypatc
     assert step.completed_at is None
     assert step.output_json["retry_submitted"] is True
     assert step.output_json["retry_batch_job_id"] == str(retry_job.id)
+    assert step.output_json["retry_comment"] == "PARTIAL_RETRY"
+    assert source_event.status == CustomStoryWorkflowEventStatus.FAILED
+    assert len(calls["created_events"]) == 1
+    retry_event = calls["created_events"][0]
+    assert retry_event.retry_flag is True
+    assert retry_event.retry_comment == "PARTIAL_RETRY"
+    assert retry_event.status == CustomStoryWorkflowEventStatus.BATCH_SUBMITTED
+    assert retry_event.metadata_json["batch_job_id"] == str(retry_job.id)
     assert workflow.status == CustomStoryWorkflowStatus.IN_PROGRESS
     assert workflow.current_step == CustomStoryWorkflowStep.NARRATION_GENERATION.value
     assert workflow.error_message is None

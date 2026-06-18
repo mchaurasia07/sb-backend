@@ -15,6 +15,7 @@ class GenericStoryWorkflowResponse(BaseModel):
     actual_story: str
     age_group: str
     language: str
+    languages: list[str] | None = None
     requested_pages: int | None
     title: str | None
     summary: str | None
@@ -48,6 +49,7 @@ class GenericStoryWorkflowListResponse(BaseModel):
     actual_story: str
     age_group: str
     language: str
+    languages: list[str] | None = None
     requested_pages: int | None
     title: str | None
     summary: str | None

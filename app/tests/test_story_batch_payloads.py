@@ -105,6 +105,12 @@ def test_tts_prompt_marks_story_text_as_only_spoken_content():
     assert "Mira opened the moon map." in prompt
 
 
+def test_google_tts_provider_reuses_single_process_instance():
+    provider = GoogleTTSProvider()
+
+    assert GoogleTTSProvider() is provider
+
+
 def test_story_reference_image_prompt_uses_rendered_prompt_identity_lock():
     prompt = StoryServiceBatchService._story_reference_image_prompt(
         "Scene prompt with Character Identity Lock.",

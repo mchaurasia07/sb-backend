@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 class GoogleTTSProvider:
     """Wrapper for Gemini native TTS using the Gemini API key."""
 
+    _instance: "GoogleTTSProvider | None" = None
+
     SAMPLE_RATE_HZ = 24000
     CHANNELS = 1
     SAMPLE_WIDTH_BYTES = 2
@@ -35,13 +37,21 @@ class GoogleTTSProvider:
         "mr": "mr-IN",
     }
 
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
     def __init__(self):
+        if getattr(self, "_initialized", False):
+            return
         if not settings.GOOGLE_API_KEY:
             raise ValueError("GOOGLE_API_KEY is required for Gemini TTS")
 
         self.api_key = settings.GOOGLE_API_KEY
         self.model = settings.GOOGLE_TTS_MODEL
         self.voice = settings.GOOGLE_TTS_VOICE
+        self._initialized = True
         logger.info("GoogleTTSProvider initialized with Gemini TTS model=%s voice=%s", self.model, self.voice)
 
     async def generate_narration_audio(

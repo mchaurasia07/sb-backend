@@ -20,6 +20,11 @@ class CustomStoryWorkflowStatus(StrEnum):
     FAILED = "FAILED"
 
 
+class CustomStoryWorkflowType(StrEnum):
+    CUSTOM = "CUSTOM"
+    GENERIC = "GENERIC"
+
+
 class CustomStoryWorkflowStep(StrEnum):
     STORY_PLAN_GENERATION = "STORY_PLAN_GENERATION"
     STORY_PLAN_VALIDATION = "STORY_PLAN_VALIDATION"
@@ -31,6 +36,14 @@ class CustomStoryWorkflowStep(StrEnum):
     PUBLISH_STORY = "PUBLISH_STORY"
 
 
+class CustomStoryWorkflowEventStatus(StrEnum):
+    PENDING = "PENDING"
+    PROCESSING = "PROCESSING"
+    BATCH_SUBMITTED = "BATCH_SUBMITTED"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+
+
 class CustomStoryWorkflow(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """Workflow state for customer-created custom stories."""
 
@@ -39,6 +52,8 @@ class CustomStoryWorkflow(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Index("ix_custom_story_workflows_user_id", "user_id"),
         Index("ix_custom_story_workflows_child_id", "child_id"),
         Index("ix_custom_story_workflows_story_id", "story_id"),
+        Index("ix_custom_story_workflows_generic_story_id", "generic_story_id"),
+        Index("ix_custom_story_workflows_story_type", "story_type"),
         Index("ix_custom_story_workflows_status", "status"),
         Index("ix_custom_story_workflows_created_at", "created_at"),
         Index("ix_custom_story_workflows_user_created_at", "user_id", "created_at"),
@@ -46,14 +61,23 @@ class CustomStoryWorkflow(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     user_id: Mapped[UUID] = mapped_column(HyphenatedUUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    child_id: Mapped[UUID] = mapped_column(
-        HyphenatedUUID(), ForeignKey("child_profiles.id", ondelete="CASCADE"), nullable=False
+    child_id: Mapped[UUID | None] = mapped_column(
+        HyphenatedUUID(), ForeignKey("child_profiles.id", ondelete="CASCADE"), nullable=True
     )
     story_id: Mapped[UUID | None] = mapped_column(
         HyphenatedUUID(), ForeignKey("stories.id", ondelete="SET NULL"), nullable=True
     )
+    generic_story_id: Mapped[UUID | None] = mapped_column(
+        HyphenatedUUID(), ForeignKey("generic_stories.id", ondelete="SET NULL"), nullable=True
+    )
     request_number: Mapped[int] = mapped_column(Integer, nullable=False)
 
+    story_type: Mapped[CustomStoryWorkflowType] = mapped_column(
+        SAEnum(CustomStoryWorkflowType, native_enum=False),
+        nullable=False,
+        default=CustomStoryWorkflowType.CUSTOM,
+        server_default=CustomStoryWorkflowType.CUSTOM.value,
+    )
     generation_mode: Mapped[str] = mapped_column(String(32), nullable=False)
     processing_mode: Mapped[str] = mapped_column(String(32), nullable=False, default="instant")
     age_group: Mapped[AgeGroup] = mapped_column(
@@ -65,6 +89,12 @@ class CustomStoryWorkflow(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     learning_goal: Mapped[str | None] = mapped_column(String(500), nullable=True)
     context: Mapped[str | None] = mapped_column(Text, nullable=True)
     event_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    language: Mapped[str] = mapped_column(String(16), nullable=False, default="en", server_default="en")
+    languages: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    genre: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    publish_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    source_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    input_request: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     reader_category: Mapped[str | None] = mapped_column(String(64), nullable=True)
     use_child_character: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
     execute_image: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
@@ -97,6 +127,7 @@ class CustomStoryWorkflow(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     steps = relationship("CustomStoryWorkflowStepRecord", back_populates="workflow", cascade="all, delete-orphan")
     batch_jobs = relationship("CustomStoryBatchJob", back_populates="workflow", cascade="all, delete-orphan")
+    events = relationship("CustomStoryWorkflowEvent", back_populates="workflow", cascade="all, delete-orphan")
 
 
 class CustomStoryWorkflowStepRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -143,6 +174,39 @@ class CustomStoryWorkflowStepRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         self.output_json = value
 
 
+class CustomStoryWorkflowEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Event queue item that drives one custom workflow step."""
+
+    __tablename__ = "custom_story_workflow_events"
+    __table_args__ = (
+        Index("ix_custom_story_workflow_events_workflow_id", "workflow_id"),
+        Index("ix_custom_story_workflow_events_status_created", "status", "created_at"),
+        Index("ix_custom_story_workflow_events_workflow_step_status", "workflow_id", "step_name", "status"),
+    )
+
+    workflow_id: Mapped[UUID] = mapped_column(
+        HyphenatedUUID(), ForeignKey("custom_story_workflows.id", ondelete="CASCADE"), nullable=False
+    )
+    step_name: Mapped[CustomStoryWorkflowStep] = mapped_column(
+        SAEnum(CustomStoryWorkflowStep, native_enum=False), nullable=False
+    )
+    status: Mapped[CustomStoryWorkflowEventStatus] = mapped_column(
+        SAEnum(CustomStoryWorkflowEventStatus, native_enum=False),
+        nullable=False,
+        default=CustomStoryWorkflowEventStatus.PENDING,
+    )
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    retry_flag: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
+    retry_comment: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    retry_source_event_id: Mapped[UUID | None] = mapped_column(HyphenatedUUID(), nullable=True)
+    metadata_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    workflow = relationship("CustomStoryWorkflow", back_populates="events", foreign_keys=[workflow_id])
+
+
 class CustomStoryBatchJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """Provider batch job attached to a workflow before final story publish."""
 
@@ -150,6 +214,7 @@ class CustomStoryBatchJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (
         Index("ix_custom_story_batch_jobs_workflow_id", "workflow_id"),
         Index("ix_custom_story_batch_jobs_story_id", "story_id"),
+        Index("ix_custom_story_batch_jobs_generic_story_id", "generic_story_id"),
         Index("ix_custom_story_batch_jobs_status", "status"),
         Index("ix_custom_story_batch_jobs_provider_job_name", "provider_job_name"),
         Index("ix_custom_story_batch_jobs_created_id", "created_at", "id"),
@@ -163,6 +228,9 @@ class CustomStoryBatchJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     story_id: Mapped[UUID | None] = mapped_column(
         HyphenatedUUID(), ForeignKey("stories.id", ondelete="SET NULL"), nullable=True
+    )
+    generic_story_id: Mapped[UUID | None] = mapped_column(
+        HyphenatedUUID(), ForeignKey("generic_stories.id", ondelete="SET NULL"), nullable=True
     )
     job_type: Mapped[StoryBatchJobType] = mapped_column(SAEnum(StoryBatchJobType, native_enum=False), nullable=False)
     status: Mapped[StoryBatchJobStatus] = mapped_column(

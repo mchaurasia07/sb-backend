@@ -1,5 +1,6 @@
 import base64
 from io import BytesIO
+import copy
 import json
 import logging
 import math
@@ -47,6 +48,13 @@ from app.utils.prompt_loader import load_prompt, render_prompt
 logger = logging.getLogger(__name__)
 
 DEFAULT_STORY_LANGUAGE = "en"
+SUPPORTED_STORY_LANGUAGES = ("en", "hi", "mr")
+STORY_LANGUAGE_NAMES = {
+    "en": "English",
+    "hi": "Hindi",
+    "mr": "Marathi",
+}
+STORY_LANGUAGE_VARIANTS_KEY = "language_variants"
 
 
 def _repair_json(text: str) -> str:
@@ -264,56 +272,245 @@ def _story_moral_text(story_json: dict[str, Any]) -> str | None:
     return _first_non_empty(moral, story_json.get("moral_theme"))
 
 
+def _story_moral_page(raw_moral: Any, *, page_number: int, fallback: Any = None) -> dict[str, Any]:
+    moral_text = raw_moral.get("text") if isinstance(raw_moral, dict) else raw_moral
+    text = _first_non_empty(moral_text, fallback) or ""
+    moral_page: dict[str, Any] = {"page_number": page_number, "text": text}
+    if isinstance(raw_moral, dict):
+        speech_narration = raw_moral.get("speech_narration")
+        if isinstance(speech_narration, dict):
+            moral_page["speech_narration"] = speech_narration
+    return moral_page
+
+
+def _normalize_story_languages(story: Any, *, default: list[str] | None = None) -> list[str]:
+    raw: Any = getattr(story, "languages", None)
+    if not raw:
+        input_request = getattr(story, "input_request", None)
+        if isinstance(input_request, dict):
+            raw = input_request.get("languages") or input_request.get("language")
+    if not raw:
+        raw = getattr(story, "language", None)
+    if not raw:
+        raw = default or [DEFAULT_STORY_LANGUAGE]
+    if isinstance(raw, str):
+        raw = [raw]
+    languages: list[str] = []
+    for item in raw if isinstance(raw, list) else []:
+        language = str(item or "").strip().lower()
+        if language in SUPPORTED_STORY_LANGUAGES and language not in languages:
+            languages.append(language)
+    return languages or list(default or [DEFAULT_STORY_LANGUAGE])
+
+
+def _localized_text_map(
+    value: Any,
+    languages: list[str],
+    *,
+    label: str,
+    fallback: Any = None,
+    allow_empty_single_language: bool = False,
+) -> dict[str, str]:
+    source = value
+    if isinstance(source, dict) and "text" in source:
+        source = source.get("text")
+    if isinstance(source, dict):
+        localized: dict[str, str] = {}
+        for language in languages:
+            text = _first_non_empty(source.get(language))
+            if not text:
+                raise AppException(
+                    f"Story generation missing {label} for language '{language}'",
+                    code="STORY_LANGUAGE_TEXT_MISSING",
+                )
+            localized[language] = text
+        return localized
+    text = _first_non_empty(source, fallback)
+    if text and len(languages) == 1:
+        return {languages[0]: text}
+    if allow_empty_single_language and len(languages) == 1:
+        return {languages[0]: ""}
+    raise AppException(
+        f"Story generation must return localized {label} for languages: {', '.join(languages)}",
+        code="STORY_LANGUAGE_TEXT_MISSING",
+    )
+
+
+def _validate_devanagari_language(language: str, text_values: list[str]) -> None:
+    if language not in {"hi", "mr"}:
+        return
+    combined = " ".join(text_values)
+    if not re.search(r"[\u0900-\u097F]", combined):
+        raise AppException(
+            f"Story generation returned {language} text without Devanagari script",
+            code="STORY_LANGUAGE_SCRIPT_INVALID",
+        )
+
+
 def _normalize_story_output(raw_story_json: dict[str, Any], plan: dict[str, Any], story: Story) -> dict[str, Any]:
     """Coerce LLM story output into the canonical story_json contract."""
     source_inputs = plan.get("source_inputs") or _story_source_inputs(story)
     raw_moral = raw_story_json.get("moral")
-    raw_moral_text = raw_moral.get("text") if isinstance(raw_moral, dict) else raw_moral
+    languages = _normalize_story_languages(story, default=plan.get("selected_languages") if isinstance(plan, dict) else None)
+    primary_language = languages[0]
+    expected_page_numbers = [
+        int(page.get("page_number"))
+        for page in (plan.get("pages") or [])
+        if isinstance(page, dict) and page.get("page_number") is not None
+    ]
 
-    pages = []
+    title_map = _localized_text_map(
+        raw_story_json.get("title"),
+        languages,
+        label="title",
+        fallback=plan.get("title") or "Untitled",
+    )
+    summary_map = _localized_text_map(
+        raw_story_json.get("summary"),
+        languages,
+        label="summary",
+        fallback=plan.get("summary") or "",
+        allow_empty_single_language=True,
+    )
+    moral_map = _localized_text_map(
+        raw_moral,
+        languages,
+        label="moral",
+        fallback=_first_non_empty(raw_story_json.get("moral_theme"), plan.get("moral_theme")),
+    )
+
+    pages_by_language: dict[str, list[dict[str, Any]]] = {language: [] for language in languages}
     for idx, page in enumerate(raw_story_json.get("pages") or []):
         if not isinstance(page, dict):
             continue
-        text = _first_non_empty(page.get("text"), page.get("narration_sample"))
-        if not text:
-            continue
+        page_number = int(page.get("page_number") or (expected_page_numbers[idx] if idx < len(expected_page_numbers) else idx + 1))
+        text_map = _localized_text_map(
+            page.get("text"),
+            languages,
+            label=f"page {page_number} text",
+            fallback=page.get("narration_sample"),
+        )
         emotion = normalize_page_emotion(page.get("emotion"))
-        pages.append(
-            {
-                "page_number": len(pages) + 1,
-                "text": text,
-                "emotion": emotion,
-                "narration": build_page_narration(emotion, story.age_group),
-            }
+        for language in languages:
+            pages_by_language[language].append(
+                {
+                    "page_number": page_number,
+                    "text": text_map[language],
+                    "emotion": emotion,
+                    "narration": build_page_narration(emotion, story.age_group),
+                }
+            )
+
+    pages = pages_by_language[primary_language]
+    for language, language_pages in pages_by_language.items():
+        if not language_pages:
+            raise AppException("Story generation returned no valid pages", code="INVALID_STORY_JSON")
+        _validate_devanagari_language(
+            language,
+            [title_map[language], summary_map[language], moral_map[language]]
+            + [str(page.get("text") or "") for page in language_pages],
         )
 
-    if not pages:
-        raise AppException("Story generation returned no valid pages", code="INVALID_STORY_JSON")
-    expected_page_count = len(plan.get("pages") or [])
+    received_page_numbers = [int(page.get("page_number") or 0) for page in pages]
+    expected_page_count = len(expected_page_numbers)
     if expected_page_count and len(pages) != expected_page_count:
         raise AppException(
             f"Story generation returned {len(pages)} pages; expected {expected_page_count}",
             code="STORY_PAGE_COUNT_MISMATCH",
         )
+    if expected_page_numbers and received_page_numbers != expected_page_numbers:
+        raise AppException(
+            f"Story generation returned page numbers {received_page_numbers}; expected {expected_page_numbers}",
+            code="STORY_PAGE_COUNT_MISMATCH",
+        )
 
-    return {
-        "title": _first_non_empty(raw_story_json.get("title"), plan.get("title"), "Untitled"),
-        "theme": _first_non_empty(
-            raw_story_json.get("theme"),
-            plan.get("moral_theme"),
-            source_inputs.get("category") if isinstance(source_inputs, dict) else None,
-            story.category,
-            "adventure",
-        ),
-        "art_style": _first_non_empty(
-            raw_story_json.get("art_style"),
-            plan.get("global_visual_style"),
-            "",
-        ) or "",
-        "summary": _first_non_empty(raw_story_json.get("summary"), plan.get("summary")) or "",
-        "pages": pages,
-        "moral": _first_non_empty(raw_moral_text, raw_story_json.get("moral_theme"), plan.get("moral_theme")) or "",
-    }
+    theme = _first_non_empty(
+        raw_story_json.get("theme"),
+        plan.get("moral_theme"),
+        source_inputs.get("category") if isinstance(source_inputs, dict) else None,
+        story.category,
+        "adventure",
+    )
+    art_style = _first_non_empty(
+        raw_story_json.get("art_style"),
+        plan.get("global_visual_style"),
+        "",
+    ) or ""
+    variants: dict[str, dict[str, Any]] = {}
+    for language in languages:
+        language_pages = copy.deepcopy(pages_by_language[language])
+        variants[language] = {
+            "title": title_map[language],
+            "theme": theme,
+            "art_style": art_style,
+            "summary": summary_map[language],
+            "pages": language_pages,
+            "moral": _story_moral_page(
+                moral_map[language],
+                page_number=len(language_pages) + 1,
+                fallback=plan.get("moral_theme"),
+            ),
+            "language": language,
+        }
+
+    primary = copy.deepcopy(variants[primary_language])
+    primary["languages"] = languages
+    primary[STORY_LANGUAGE_VARIANTS_KEY] = variants
+    return primary
+
+
+def _story_json_language_variant(story_json: dict[str, Any], language: str) -> dict[str, Any]:
+    variants = story_json.get(STORY_LANGUAGE_VARIANTS_KEY)
+    if isinstance(variants, dict) and isinstance(variants.get(language), dict):
+        return copy.deepcopy(variants[language])
+    return copy.deepcopy({key: value for key, value in story_json.items() if key != STORY_LANGUAGE_VARIANTS_KEY})
+
+
+def _set_story_json_language_variant(story_json: dict[str, Any], language: str, language_story_json: dict[str, Any]) -> None:
+    variants = story_json.setdefault(STORY_LANGUAGE_VARIANTS_KEY, {})
+    clean_variant = copy.deepcopy({key: value for key, value in language_story_json.items() if key != STORY_LANGUAGE_VARIANTS_KEY})
+    clean_variant["language"] = language
+    variants[language] = clean_variant
+    primary_language = (story_json.get("languages") or [story_json.get("language") or DEFAULT_STORY_LANGUAGE])[0]
+    if language == primary_language:
+        for key, value in clean_variant.items():
+            story_json[key] = copy.deepcopy(value)
+        story_json[STORY_LANGUAGE_VARIANTS_KEY] = variants
+
+
+def _sync_story_media_to_language_variants(story_json: dict[str, Any], *, include_audio: bool = False) -> dict[str, Any]:
+    variants = story_json.get(STORY_LANGUAGE_VARIANTS_KEY)
+    if not isinstance(variants, dict):
+        return story_json
+    shared_top_keys = ("cover_image_url", "back_cover_image_url")
+    for language, variant in list(variants.items()):
+        if not isinstance(variant, dict):
+            continue
+        for key in shared_top_keys:
+            if story_json.get(key):
+                variant[key] = story_json.get(key)
+        base_pages = story_json.get("pages") if isinstance(story_json.get("pages"), list) else []
+        variant_pages = variant.get("pages") if isinstance(variant.get("pages"), list) else []
+        by_number = {
+            int(page.get("page_number") or idx + 1): page
+            for idx, page in enumerate(variant_pages)
+            if isinstance(page, dict)
+        }
+        for idx, base_page in enumerate(base_pages):
+            if not isinstance(base_page, dict):
+                continue
+            page_number = int(base_page.get("page_number") or idx + 1)
+            variant_page = by_number.get(page_number)
+            if not isinstance(variant_page, dict):
+                continue
+            for key in ("image_url", "planned_image_prompt", "image_prompt"):
+                if base_page.get(key):
+                    variant_page[key] = base_page.get(key)
+            if include_audio and language == (story_json.get("language") or DEFAULT_STORY_LANGUAGE):
+                for key in ("tts_prompt", "tts_skipped", "tts_model", "tts_voice", "audio_url", "duration", "word_timestamps"):
+                    if key in base_page:
+                        variant_page[key] = copy.deepcopy(base_page[key])
+    return story_json
 
 
 # Testing flags helper
@@ -427,6 +624,12 @@ class StoryService:
     def _story_max_tokens(cls, age_group: str) -> int:
         value = normalize_age_group(age_group)
         return cls.STORY_MAX_TOKENS_BY_AGE.get(value, cls.STORY_MAX_TOKENS_BY_AGE[DEFAULT_AGE_GROUP])
+
+    @classmethod
+    def _story_max_tokens_for_languages(cls, age_group: str, languages: list[str] | None = None) -> int:
+        base = cls._story_max_tokens(age_group)
+        multiplier = max(1, len(languages or [DEFAULT_STORY_LANGUAGE]))
+        return min(30000, base * multiplier)
 
     @classmethod
     def _image_plan_max_tokens(cls, age_group: str) -> int:
@@ -1163,7 +1366,7 @@ class StoryService:
         step.started_at = datetime.utcnow()
 
         template = load_prompt(self._story_generation_prompt_path(story))
-        prompt_plan = self._build_story_generation_context(plan)
+        prompt_plan = self._build_story_generation_context(plan, languages=_normalize_story_languages(story))
 
         # Convert to compact JSON - this ensures proper escaping of special characters
         try:
@@ -1181,7 +1384,7 @@ class StoryService:
             try:
                 result = await self.ai_provider.generate_text(
                     prompt,
-                    max_tokens=self._story_max_tokens(story.age_group),
+                    max_tokens=self._story_max_tokens_for_languages(story.age_group, _normalize_story_languages(story)),
                     temperature=0.7,
                     step_name=StoryStepName.STORY_GENERATION.value,
                     response_format={"type": "json_object"},
@@ -1199,18 +1402,24 @@ class StoryService:
                 )
                 result = await self.ai_provider.generate_text(
                     fallback_prompt,
-                    max_tokens=self._story_max_tokens(story.age_group),
+                    max_tokens=self._story_max_tokens_for_languages(story.age_group, _normalize_story_languages(story)),
                     temperature=0.45,
                     step_name=StoryStepName.STORY_GENERATION.value,
                     response_format={"type": "json_object"},
                 )
 
+            generation_result = result
             try:
                 # Repair common JSON issues before parsing
                 cleaned_json = _repair_json_from_llm(result.text)
                 raw_story_json = json.loads(cleaned_json)
             except json.JSONDecodeError as e:
-                repaired_json = await self._repair_story_generation_json_response(result.text, e, story)
+                repaired_json = await self._repair_story_generation_json_response(
+                    result.text,
+                    e,
+                    story,
+                    expected_page_count=len(plan.get("pages") or []),
+                )
                 if repaired_json is not None:
                     cleaned_json = repaired_json
                     raw_story_json = json.loads(cleaned_json)
@@ -1257,11 +1466,23 @@ class StoryService:
                         code="INVALID_LLM_JSON",
                     )
 
-            story_json = _normalize_story_output(raw_story_json, plan, story)
+            try:
+                story_json = _normalize_story_output(raw_story_json, plan, story)
+            except AppException as exc:
+                if exc.code != "STORY_PAGE_COUNT_MISMATCH":
+                    raise
+                retry_result = await self._retry_story_generation_for_page_count(
+                    prompt_plan,
+                    story,
+                    original_error=exc.message,
+                )
+                generation_result = retry_result
+                raw_story_json = self._parse_story_generation_text(retry_result.text)
+                story_json = _normalize_story_output(raw_story_json, plan, story)
 
             step.response = _with_workflow_usage(
                 story_json,
-                _workflow_usage(result, output_text=result.text),
+                _workflow_usage(generation_result, output_text=generation_result.text),
             )
             step.status = StepStatus.COMPLETED
             step.completed_at = datetime.utcnow()
@@ -1283,9 +1504,13 @@ class StoryService:
         malformed_json: str,
         parse_error: json.JSONDecodeError,
         story: Story,
+        *,
+        expected_page_count: int,
     ) -> str | None:
         if settings.STORY_MOCK_LLM_RESPONSES:
             return None
+        selected_languages = _normalize_story_languages(story)
+        localized_empty = {language: "" for language in selected_languages}
 
         prompt = f"""
 You are a strict JSON repair tool.
@@ -1294,7 +1519,8 @@ Repair the malformed JSON below into one valid JSON object only.
 
 Rules:
 - Do not rewrite the story.
-- Do not add, remove, or reorder pages.
+- Preserve exactly {expected_page_count} pages.
+- Do not add, remove, collapse, summarize, or reorder pages.
 - Do not change character names, plot events, wording, title, summary, or moral except the minimum required to make valid JSON.
 - Escape quotes inside string values with backslash.
 - Convert literal line breaks inside strings to \\n.
@@ -1304,16 +1530,16 @@ Rules:
 
 Expected schema:
 {{
-  "title": "",
-  "summary": "",
+  "title": {_compact_json(localized_empty)},
+  "summary": {_compact_json(localized_empty)},
   "pages": [
     {{
       "page_number": 1,
       "emotion": "",
-      "text": ""
+      "text": {_compact_json(localized_empty)}
     }}
   ],
-  "moral": ""
+  "moral": {_compact_json(localized_empty)}
 }}
 
 Original parse error:
@@ -1326,14 +1552,24 @@ Malformed JSON:
         try:
             result = await self.ai_provider.generate_text(
                 prompt,
-                max_tokens=self._story_max_tokens(story.age_group),
+                max_tokens=self._story_max_tokens_for_languages(story.age_group, _normalize_story_languages(story)),
                 temperature=0,
                 step_name="STORY_GENERATION_JSON_REPAIR",
                 response_format={"type": "json_object"},
                 empty_response_retries=1,
             )
             repaired_json = _repair_json_from_llm(result.text)
-            json.loads(repaired_json)
+            repaired_payload = json.loads(repaired_json)
+            repaired_pages = repaired_payload.get("pages") if isinstance(repaired_payload, dict) else None
+            repaired_page_count = len(repaired_pages) if isinstance(repaired_pages, list) else 0
+            if expected_page_count and repaired_page_count != expected_page_count:
+                logger.warning(
+                    "Story %s: rejected repaired story JSON because page_count=%s expected=%s",
+                    story.id,
+                    repaired_page_count,
+                    expected_page_count,
+                )
+                return None
             return repaired_json
         except Exception as exc:
             logger.warning(
@@ -1343,6 +1579,52 @@ Malformed JSON:
             )
             return None
 
+    async def _retry_story_generation_for_page_count(
+        self,
+        prompt_plan: dict[str, Any],
+        story: Story,
+        *,
+        original_error: str,
+    ):
+        expected_page_count = len(prompt_plan.get("pages") or [])
+        selected_languages = [
+            language
+            for language in (prompt_plan.get("selected_languages") or [DEFAULT_STORY_LANGUAGE])
+            if language in SUPPORTED_STORY_LANGUAGES
+        ] or [DEFAULT_STORY_LANGUAGE]
+        localized_empty = {language: "" for language in selected_languages}
+        prompt = (
+            "You are a children's picture-book writer. Regenerate the full story from the plan below.\n"
+            f"The previous response failed validation: {original_error}.\n\n"
+            f"Return valid JSON only with exactly {expected_page_count} page objects in pages.\n"
+            "Do not return the schema example. Do not summarize pages. Do not collapse pages.\n"
+            f"Every localized text object must contain exactly these language keys: {', '.join(selected_languages)}.\n"
+            "Each page must have page_number, emotion, and localized text. Page numbers must follow the plan.\n"
+            "Use the same title, hero, story spine, page count, setting, learning goal, and ending from the plan.\n\n"
+            "Required JSON shape:\n"
+            f'{{"title":{_compact_json(localized_empty)},"summary":{_compact_json(localized_empty)},'
+            f'"pages":[{{"page_number":1,"emotion":"","text":{_compact_json(localized_empty)}}}],'
+            f'"moral":{_compact_json(localized_empty)}}}\n\n'
+            f"STORY PLAN JSON:\n{_compact_json(prompt_plan)}"
+        )
+        logger.warning(
+            "Story %s: retrying story generation after page-count mismatch; expected_pages=%s",
+            story.id,
+            expected_page_count,
+        )
+        return await self.ai_provider.generate_text(
+            prompt,
+            max_tokens=self._story_max_tokens_for_languages(story.age_group, selected_languages),
+            temperature=0.45,
+            step_name=StoryStepName.STORY_GENERATION.value,
+            response_format={"type": "json_object"},
+        )
+
+    @staticmethod
+    def _parse_story_generation_text(text: str) -> dict[str, Any]:
+        cleaned_json = _repair_json_from_llm(text)
+        return json.loads(cleaned_json)
+
     @staticmethod
     def _is_google_prompt_safety_block(exc: AppException) -> bool:
         message = str(getattr(exc, "message", exc))
@@ -1350,13 +1632,22 @@ Malformed JSON:
 
     @staticmethod
     def _story_generation_fallback_prompt(prompt_plan: dict[str, Any]) -> str:
+        selected_languages = [
+            language
+            for language in (prompt_plan.get("selected_languages") or [DEFAULT_STORY_LANGUAGE])
+            if language in SUPPORTED_STORY_LANGUAGES
+        ] or [DEFAULT_STORY_LANGUAGE]
+        localized_empty = {language: "" for language in selected_languages}
         return (
             "You are a warm children's picture-book writer.\n"
             "Write the story from the sanitized plan below. Keep the same title, hero, page count, setting, "
             "learning goal, and ending. Use gentle, practical community-care wording. Keep the concern meaningful "
             "but calm, hopeful, and restorative. Do not use intense consequence language.\n\n"
-            "Return only valid JSON in this exact shape:\n"
-            '{"title":"","summary":"","pages":[{"page_number":1,"emotion":"","text":""}],"moral":""}\n\n'
+            f"Return only valid JSON with exactly these language keys: {', '.join(selected_languages)}.\n"
+            "Use this exact shape:\n"
+            f'{{"title":{_compact_json(localized_empty)},"summary":{_compact_json(localized_empty)},'
+            f'"pages":[{{"page_number":1,"emotion":"","text":{_compact_json(localized_empty)}}}],'
+            f'"moral":{_compact_json(localized_empty)}}}\n\n'
             f"SANITIZED PLAN JSON:\n{_compact_json(prompt_plan)}"
         )
 
@@ -1385,6 +1676,9 @@ Malformed JSON:
             "Create a concise visual plan from the sanitized story inputs. Use warm, family-friendly, "
             "school-and-home-safe wording. Avoid sensitive negative phrasing; state positive visual requirements only.\n"
             "Keep character identities stable. If water play appears, choose modest covered family-friendly outfits.\n"
+            "Story JSON is the source of truth for page count. Output pages.length must equal "
+            "Story JSON expected_page_count exactly, and page_number values must match expected_page_numbers exactly. "
+            "Do not skip, merge, collapse, add, or reorder pages.\n"
             f"{mode_rule}\n\n"
             "Return this exact JSON shape:\n"
             f'{{"visual_bible":{{"hero":{{"character_id":"{hero_id}","name":"","appearance":"","outfit":"","footwear":"","signature_item":""}},'
@@ -1469,7 +1763,19 @@ Malformed JSON:
                 },
                 "companion": {"appearance": ""},
                 "recurring_characters": [
-                    {"character_id": "", "name": "", "role": "", "appearance": "", "outfit": ""}
+                    {
+                        "character_id": "",
+                        "name": "",
+                        "role": "",
+                        "appearance": "",
+                        "outfit": "",
+                        "footwear": "",
+                        "hair_lock": "",
+                        "outfit_lock": "",
+                        "body_scale_lock": "",
+                        "relative_size": "",
+                        "signature_item": "",
+                    }
                 ],
             },
             "character_reference_manifest": manifest,
@@ -1513,10 +1819,17 @@ Malformed JSON:
             f"Cast Mode: {character_context.get('cast_mode', StoryService.CAST_MODE_CHILD_HERO)}\n\n"
             "## PLANNING RULES\n"
             "- Create a visual plan for cover, each page, and back cover.\n"
+            "- Story JSON is the source of truth for page count.\n"
+            "- Output pages.length must equal Story JSON expected_page_count exactly.\n"
+            "- Output page_number values must match Story JSON expected_page_numbers exactly, in the same order.\n"
+            "- Create exactly one image-plan page for each Story JSON page. Do not skip, merge, collapse, add, or reorder pages.\n"
             f"{cast_rules}"
             "- Identify recurring side characters and assign stable lowercase snake_case character_id values.\n"
             "- Include only visible recurring characters in characters_present and reference_character_ids.\n"
-            "- Keep character names, hairstyles, outfits, accessories, and color palettes stable across pages.\n"
+            "- Keep character names, face/head/body shape, hairstyles or body patterns, outfits, footwear, accessories, "
+            "body scale, and color palettes stable across pages.\n"
+            "- For every recurring character, fill visual_bible locks: appearance, outfit/body covering, footwear or "
+            "anatomy-safe equivalent, hair/fur/body lock, outfit_lock, body_scale_lock, relative_size, and signature_item.\n"
             "- Lock exact footwear for the hero in visual_bible.hero.footwear and include it in visual_bible.hero.outfit.\n"
             "- Never leave shoes/footwear implied; choose one concrete footwear state and repeat it in every image_prompt.\n"
             "- Use modest, family-friendly outfits. For water-play scenes, use covered play clothing and water shoes.\n"
@@ -1696,6 +2009,7 @@ Malformed JSON:
                         code="INVALID_LLM_JSON",
                     )
 
+            self._validate_image_plan_page_contract(image_plan, story_json)
             step.response = _with_workflow_usage(
                 image_plan,
                 _workflow_usage(result, output_text=result.text),
@@ -1793,6 +2107,54 @@ Malformed JSON:
 
         StoryService._append_hero_footwear_to_image_prompts(image_plan, hero["footwear"], hero)
         return image_plan
+
+    @staticmethod
+    def _validate_image_plan_page_contract(image_plan: dict[str, Any], story_json: dict[str, Any]) -> None:
+        story_pages = story_json.get("pages") if isinstance(story_json, dict) else None
+        if not isinstance(story_pages, list) or not story_pages:
+            raise AppException(
+                "Story JSON must include pages before image plan generation.",
+                code="IMAGE_PLAN_PAGE_CONTRACT_INVALID",
+            )
+
+        expected_page_numbers: list[int] = []
+        for index, page in enumerate(story_pages):
+            if not isinstance(page, dict):
+                raise AppException(
+                    f"Story JSON page at index {index} is not an object.",
+                    code="IMAGE_PLAN_PAGE_CONTRACT_INVALID",
+                )
+            page_number = page.get("page_number")
+            if not isinstance(page_number, int) or page_number <= 0:
+                raise AppException(
+                    f"Story JSON page at index {index} has invalid page_number.",
+                    code="IMAGE_PLAN_PAGE_CONTRACT_INVALID",
+                )
+            expected_page_numbers.append(page_number)
+
+        image_pages = image_plan.get("pages") if isinstance(image_plan, dict) else None
+        if not isinstance(image_pages, list):
+            raise AppException(
+                f"Image plan returned no pages; expected {len(expected_page_numbers)} pages.",
+                code="IMAGE_PLAN_PAGE_COUNT_MISMATCH",
+                details={"expected_page_numbers": expected_page_numbers, "received_page_numbers": []},
+            )
+
+        received_page_numbers: list[Any] = [
+            page.get("page_number") if isinstance(page, dict) else None for page in image_pages
+        ]
+        if len(image_pages) != len(expected_page_numbers) or received_page_numbers != expected_page_numbers:
+            raise AppException(
+                "Image plan pages must match story pages exactly: "
+                f"expected {expected_page_numbers}, received {received_page_numbers}.",
+                code="IMAGE_PLAN_PAGE_COUNT_MISMATCH",
+                details={
+                    "expected_page_count": len(expected_page_numbers),
+                    "received_page_count": len(image_pages),
+                    "expected_page_numbers": expected_page_numbers,
+                    "received_page_numbers": received_page_numbers,
+                },
+            )
 
     _FOOTWEAR_PATTERN = re.compile(
         r"\b("
@@ -2642,6 +3004,11 @@ Malformed JSON:
                 "story_context": _safe_prompt_value(safe_source_inputs["context"], "none"),
                 "moral": "kindness and courage",
                 "pages": pages,
+                "selected_languages": ", ".join(_normalize_story_languages(story)),
+                "selected_language_names": ", ".join(
+                    STORY_LANGUAGE_NAMES.get(language, language)
+                    for language in _normalize_story_languages(story)
+                ),
                 "custom_character": character_context.get("use_child_character", True),
                 "cast_mode": character_context.get("cast_mode", StoryService.CAST_MODE_CHILD_HERO),
                 "cast_mode_instructions": character_context.get(
@@ -2948,7 +3315,11 @@ Malformed JSON:
         )
 
     @staticmethod
-    def _build_story_generation_context(story_plan: dict[str, Any]) -> dict[str, Any]:
+    def _build_story_generation_context(
+        story_plan: dict[str, Any],
+        *,
+        languages: list[str] | None = None,
+    ) -> dict[str, Any]:
         """Build a compact story-plan context with only fields needed for narration."""
         def text(value: Any) -> str:
             return value.strip() if isinstance(value, str) else ""
@@ -2986,6 +3357,11 @@ Malformed JSON:
                 }
             )
 
+        selected_languages = [
+            language
+            for language in (languages or story_plan.get("selected_languages") or [])
+            if language in SUPPORTED_STORY_LANGUAGES
+        ]
         compact_plan = {
             "title": text(story_plan.get("title")),
             "summary": text(story_plan.get("summary")),
@@ -3010,7 +3386,19 @@ Malformed JSON:
             else {},
             "visual_bible": story_plan.get("visual_bible") if isinstance(story_plan.get("visual_bible"), dict) else {},
             "pages": pages,
+            "expected_page_count": len(pages),
+            "expected_page_numbers": [
+                page.get("page_number")
+                for page in pages
+                if page.get("page_number") is not None
+            ],
         }
+        if selected_languages:
+            compact_plan["selected_languages"] = selected_languages
+            compact_plan["selected_language_names"] = {
+                language: STORY_LANGUAGE_NAMES.get(language, language)
+                for language in selected_languages
+            }
         return StoryService._child_safe_story_context(compact_plan)
 
     @staticmethod
@@ -3122,16 +3510,24 @@ Malformed JSON:
             "pages": compact_plan_pages,
         }
 
+        compact_story_pages = [
+            {
+                "page_number": page.get("page_number"),
+                "emotion": text(page.get("emotion")),
+                "text": text(page.get("text")),
+            }
+            for page in story_json.get("pages", [])
+            if isinstance(page, dict)
+        ]
+        expected_page_numbers = [
+            page.get("page_number")
+            for page in compact_story_pages
+            if isinstance(page.get("page_number"), int)
+        ]
         compact_story_json = {
-            "pages": [
-                {
-                    "page_number": page.get("page_number"),
-                    "emotion": text(page.get("emotion")),
-                    "text": text(page.get("text")),
-                }
-                for page in story_json.get("pages", [])
-                if isinstance(page, dict)
-            ],
+            "expected_page_count": len(compact_story_pages),
+            "expected_page_numbers": expected_page_numbers,
+            "pages": compact_story_pages,
         }
 
         return compact_story_plan, compact_story_json

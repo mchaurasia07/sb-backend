@@ -11,7 +11,6 @@ from google.genai import types
 
 from app.core.config import settings
 from app.core.exceptions import AppException
-from app.model.request.story import StoryGenerationRequest
 from app.service.ai.factory import get_ai_provider
 from app.utils.prompt_loader import load_and_render_prompt
 
@@ -94,7 +93,7 @@ class StoryInputSafetyService:
         "ADULT_THEME",
     }
 
-    async def validate(self, payload: StoryGenerationRequest) -> StoryInputSafetyResult:
+    async def validate(self, payload: Any) -> StoryInputSafetyResult:
         inspection = await self.inspect(payload)
         if inspection.error_message:
             raise AppException(
@@ -112,7 +111,7 @@ class StoryInputSafetyService:
             self._raise_unsafe(inspection.result)
         return inspection.result
 
-    async def inspect(self, payload: StoryGenerationRequest) -> StoryInputSafetyInspection:
+    async def inspect(self, payload: Any) -> StoryInputSafetyInspection:
         request_json = self._request_snapshot(payload)
         idea_json = self._story_idea_json(payload)
         prompt = self._classification_prompt(idea_json)
@@ -221,19 +220,27 @@ class StoryInputSafetyService:
         return sorted(set(categories))
 
     @staticmethod
-    def _request_snapshot(payload: StoryGenerationRequest) -> dict[str, Any]:
-        return payload.model_dump(mode="json")
-
-    @staticmethod
-    def _story_idea_json(payload: StoryGenerationRequest) -> dict[str, str]:
+    def _request_snapshot(payload: Any) -> dict[str, Any]:
+        if hasattr(payload, "model_dump"):
+            return payload.model_dump(mode="json")
+        if isinstance(payload, dict):
+            return dict(payload)
         return {
-            "category": payload.category or "",
-            "learning_goal": payload.learning_goal or "",
-            "context": payload.context or "",
+            key: value
+            for key, value in vars(payload).items()
+            if not key.startswith("_")
         }
 
     @staticmethod
-    def _story_idea_text(payload: StoryGenerationRequest) -> str:
+    def _story_idea_json(payload: Any) -> dict[str, str]:
+        return {
+            "category": getattr(payload, "category", None) or "",
+            "learning_goal": getattr(payload, "learning_goal", None) or "",
+            "context": getattr(payload, "context", None) or "",
+        }
+
+    @staticmethod
+    def _story_idea_text(payload: Any) -> str:
         return json.dumps(StoryInputSafetyService._story_idea_json(payload), ensure_ascii=False)
 
     @staticmethod

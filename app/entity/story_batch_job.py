@@ -12,6 +12,9 @@ from app.entity.types import HyphenatedUUID
 class StoryBatchJobType(str, Enum):
     """Batch job categories used by delayed story generation."""
 
+    STORY_PLAN = "STORY_PLAN"
+    STORY = "STORY"
+    IMAGE_PLAN = "IMAGE_PLAN"
     IMAGE = "IMAGE"
     AUDIO = "AUDIO"
 

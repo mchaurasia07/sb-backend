@@ -5,10 +5,13 @@ from app.entity.child_profile import ChildProfile
 from app.entity.custom_story_input_safety_audit import CustomStoryInputSafetyAudit, CustomStoryInputSafetyAuditStatus
 from app.entity.custom_story_workflow import (
     CustomStoryBatchJob,
+    CustomStoryWorkflowEvent,
+    CustomStoryWorkflowEventStatus,
     CustomStoryWorkflow,
     CustomStoryWorkflowStatus,
     CustomStoryWorkflowStep,
     CustomStoryWorkflowStepRecord,
+    CustomStoryWorkflowType,
 )
 from app.entity.generic_audio import GenericAudio, GenericAudioLanguage
 from app.entity.generic_story import GenericStory, GenericStoryContent, GenericStoryLanguage
@@ -43,10 +46,13 @@ __all__ = [
     "CustomStoryInputSafetyAudit",
     "CustomStoryInputSafetyAuditStatus",
     "CustomStoryBatchJob",
+    "CustomStoryWorkflowEvent",
+    "CustomStoryWorkflowEventStatus",
     "CustomStoryWorkflow",
     "CustomStoryWorkflowStatus",
     "CustomStoryWorkflowStep",
     "CustomStoryWorkflowStepRecord",
+    "CustomStoryWorkflowType",
     "GenericAudio",
     "GenericAudioLanguage",
     "GenericStory",

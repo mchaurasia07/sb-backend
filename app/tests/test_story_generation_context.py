@@ -5,6 +5,7 @@ import pytest
 
 from app.core.exceptions import AppException
 from app.entity.story import AgeGroup
+from app.model.response.story_content import StoryJsonContentResponse
 from app.service.ai.base import TextGenerationResult
 from app.service.story_narration_profile import build_page_narration
 from app.service.story_service import StoryService, _compact_json, _normalize_story_output
@@ -134,6 +135,8 @@ def test_build_story_generation_context_reduces_story_plan_to_narrative_fields()
                 "continuity_requirements": ["Mira keeps the moon map."],
             }
         ],
+        "expected_page_count": 1,
+        "expected_page_numbers": [1],
     }
 
 
@@ -158,6 +161,68 @@ def test_story_generation_prompt_aligns_with_story_plan_contract():
     assert '"emotion": ""' in prompt
     assert '"text": ""' in prompt
     assert '"moral": ""' in prompt
+
+
+def test_custom_story_generation_prompts_enforce_exact_page_count():
+    for prompt_path in (
+        "prompts/story/story_generation_child_hero_prompt.txt",
+        "prompts/story/story_generation_imagined_cast_prompt.txt",
+    ):
+        prompt = load_prompt(prompt_path)
+
+        assert "## PAGE COUNT REQUIREMENT" in prompt
+        assert "story_plan_json.expected_page_count is the required page count" in prompt
+        assert "pages.length must equal story_plan_json.expected_page_count" in prompt
+        assert "Output page_number values must match story_plan_json.expected_page_numbers exactly" in prompt
+        assert "Do not merge, collapse, summarize, skip, add, or reorder pages" in prompt
+        assert "Replace the shown language keys with" in prompt
+        assert "selected_languages is [\"hi\"]" in prompt
+        assert "output only \"hi\"" in prompt
+        assert "output exactly those three keys" in prompt
+
+
+def test_tts_prompt_has_multilingual_voice_rules():
+    prompt = load_prompt("prompts/tts_narration_template.txt")
+
+    assert "For Hindi and Marathi, speak naturally in that language" in prompt
+    assert "Do not translate or normalize the text into another language" in prompt
+    assert "language must match Language above" in prompt
+
+
+def test_input_safety_prompt_uses_product_age_range():
+    prompt = load_prompt("prompts/story/input_safety_validation_prompt.txt")
+
+    assert "children ages **0-9**" in prompt
+    assert "unsuitable for children ages 0-9" in prompt
+
+
+def test_story_plan_prompts_require_complete_final_page():
+    for prompt_path in (
+        "prompts/story/story_plan_child_hero_prompt.txt",
+        "prompts/story/story_plan_imagined_cast_prompt.txt",
+    ):
+        prompt = load_prompt(prompt_path)
+
+        assert "## ENDING COMPLETENESS" in prompt
+        assert "final planned page must feel like a satisfying storybook ending" in prompt
+        assert "central_problem is resolved or peacefully accepted" in prompt
+        assert "page_turn_hook should be a closing image or emotional" in prompt
+        assert "The final page creates completion and does not set up another event" in prompt
+
+
+def test_story_generation_prompts_keep_moral_separate_from_story_closure():
+    for prompt_path in (
+        "prompts/story/story_generation_child_hero_prompt.txt",
+        "prompts/story/story_generation_imagined_cast_prompt.txt",
+    ):
+        prompt = load_prompt(prompt_path)
+
+        assert "The final page must read like the story is complete" in prompt
+        assert "Do not end as if another story page is" in prompt
+        assert "The moral is a separate short lesson after the story" in prompt
+        assert "It must not replace the" in prompt
+        assert "final page's emotional closure" in prompt
+        assert "final page closes the conflict and feels complete" in prompt
 
 
 def test_cast_mode_prompt_paths_are_split():
@@ -928,6 +993,11 @@ def test_story_image_prompt_renders_child_name():
     assert "Mira" in prompt
     assert "{child_name}" not in prompt
     assert "{story_title}" not in prompt
+    assert "Internally verify the face lock before rendering" in prompt
+    assert "Do not output, render, or" in prompt
+    assert "display verification text" in prompt
+    assert "Before rendering, state explicitly" not in prompt
+    assert "Statement: \"I will render this child" not in prompt
 
 
 def test_cover_image_prompt_includes_exact_story_title():
@@ -1014,7 +1084,70 @@ def test_normalize_story_output_adds_deterministic_page_narration():
         }
     ]
     assert "speech_narration" not in normalized["pages"][0]
-    assert normalized["moral"] == "Small patient steps can solve big puzzles."
+    assert normalized["moral"] == {
+        "page_number": 2,
+        "text": "Small patient steps can solve big puzzles.",
+    }
+
+
+def test_normalize_story_output_builds_selected_language_variants():
+    raw_story_json = {
+        "title": {"en": "Mira and the Moon Map", "hi": "मीरा और चाँद का नक्शा"},
+        "summary": {"en": "Mira solves a moonlit puzzle.", "hi": "मीरा चाँदनी वाली पहेली सुलझाती है."},
+        "pages": [
+            {
+                "page_number": 1,
+                "emotion": "wonder",
+                "text": {
+                    "en": "Mira opened the moon map.",
+                    "hi": "मीरा ने चाँद का नक्शा खोला.",
+                },
+            }
+        ],
+        "moral": {
+            "en": "Small patient steps can solve big puzzles.",
+            "hi": "धैर्य वाले छोटे कदम बड़ी पहेलियाँ सुलझा सकते हैं.",
+        },
+    }
+    plan = {
+        "title": "Mira and the Moon Map",
+        "theme": "patience",
+        "selected_languages": ["en", "hi"],
+        "pages": [{"page_number": 1}],
+    }
+    story = SimpleNamespace(
+        category="adventure",
+        event_description=None,
+        learning_goal=None,
+        context=None,
+        age_group="3-6",
+        languages=["en", "hi"],
+    )
+
+    normalized = _normalize_story_output(raw_story_json, plan, story)
+
+    assert normalized["title"] == "Mira and the Moon Map"
+    assert normalized["languages"] == ["en", "hi"]
+    assert normalized["language_variants"]["hi"]["title"] == "मीरा और चाँद का नक्शा"
+    assert normalized["language_variants"]["hi"]["pages"][0]["text"] == "मीरा ने चाँद का नक्शा खोला."
+    assert normalized["language_variants"]["hi"]["moral"] == {
+        "page_number": 2,
+        "text": "धैर्य वाले छोटे कदम बड़ी पहेलियाँ सुलझा सकते हैं.",
+    }
+
+
+def test_story_content_response_accepts_legacy_string_moral():
+    response = StoryJsonContentResponse.model_validate(
+        {
+            "title": "Mira and the Moon Map",
+            "pages": [{"page_number": 1, "text": "Mira listened."}],
+            "moral": "Small patient steps can solve big puzzles.",
+        }
+    )
+
+    assert response.moral is not None
+    assert response.moral.page_number is None
+    assert response.moral.text == "Small patient steps can solve big puzzles."
 
 
 def test_normalize_story_output_rejects_page_count_mismatch():
@@ -1034,6 +1167,40 @@ def test_normalize_story_output_rejects_page_count_mismatch():
 
     with pytest.raises(AppException, match="expected 2"):
         _normalize_story_output(raw_story_json, plan, story)
+
+
+@pytest.mark.asyncio
+async def test_story_json_repair_rejects_page_count_mismatch():
+    class _FakeProvider:
+        async def generate_text(self, prompt, **kwargs):
+            _ = prompt, kwargs
+            return TextGenerationResult(
+                text=json.dumps(
+                    {
+                        "title": "Mira and the Moon Map",
+                        "summary": "A one-page bad repair.",
+                        "pages": [{"page_number": 1, "emotion": "wonder", "text": "One page only."}],
+                        "moral": "Keep trying.",
+                    }
+                ),
+                prompt_used=prompt,
+                model="fake",
+                metadata={},
+            )
+
+    service = StoryService.__new__(StoryService)
+    service._ai_provider = _FakeProvider()
+    story = SimpleNamespace(id="story-1", age_group="3-6")
+    parse_error = json.JSONDecodeError("bad json", "{", 0)
+
+    repaired = await service._repair_story_generation_json_response(
+        "{bad",
+        parse_error,
+        story,
+        expected_page_count=2,
+    )
+
+    assert repaired is None
 
 
 def test_build_page_narration_maps_emotion_and_age_group():
@@ -1126,6 +1293,8 @@ def test_build_image_plan_context_reduces_story_plan_and_story_json_to_visual_fi
         ],
     }
     assert compact_story_json == {
+        "expected_page_count": 1,
+        "expected_page_numbers": [1],
         "pages": [
             {
                 "page_number": 1,
@@ -1134,3 +1303,54 @@ def test_build_image_plan_context_reduces_story_plan_and_story_json_to_visual_fi
             }
         ],
     }
+
+
+def test_custom_safe_image_plan_prompt_enforces_story_page_contract():
+    prompt = StoryService._custom_safe_image_plan_prompt(
+        {
+            "visual_bible": {"hero": {"character_id": "mira"}},
+            "pages": [{"page_number": 1}, {"page_number": 2}],
+        },
+        {
+            "expected_page_count": 2,
+            "expected_page_numbers": [1, 2],
+            "pages": [{"page_number": 1, "text": "One."}, {"page_number": 2, "text": "Two."}],
+        },
+        {
+            "use_child_character": False,
+            "cast_mode": StoryService.CAST_MODE_IMAGINED,
+            "character_description": "Invented cast.",
+        },
+    )
+
+    assert "Story JSON is the source of truth for page count" in prompt
+    assert "Output pages.length must equal Story JSON expected_page_count exactly" in prompt
+    assert "Output page_number values must match Story JSON expected_page_numbers exactly" in prompt
+    assert "Do not skip, merge, collapse, add, or reorder pages" in prompt
+    assert '"body_scale_lock":""' in prompt
+    assert '"relative_size":""' in prompt
+    assert '"signature_item":""' in prompt
+    assert "For every recurring character, fill visual_bible locks" in prompt
+
+
+def test_validate_image_plan_page_contract_rejects_missing_page():
+    story_json = {
+        "pages": [
+            {"page_number": 1, "text": "One."},
+            {"page_number": 2, "text": "Two."},
+            {"page_number": 3, "text": "Three."},
+        ]
+    }
+    image_plan = {
+        "pages": [
+            {"page_number": 1, "image_prompt": "One."},
+            {"page_number": 3, "image_prompt": "Three."},
+        ]
+    }
+
+    with pytest.raises(AppException) as exc_info:
+        StoryService._validate_image_plan_page_contract(image_plan, story_json)
+
+    assert exc_info.value.code == "IMAGE_PLAN_PAGE_COUNT_MISMATCH"
+    assert exc_info.value.details["expected_page_numbers"] == [1, 2, 3]
+    assert exc_info.value.details["received_page_numbers"] == [1, 3]

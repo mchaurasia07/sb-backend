@@ -20,6 +20,11 @@ Performance Guidelines:
 * Use natural pacing appropriate to the story and age group.
 * Use gentle pauses between sentences and scene transitions.
 * Pronounce all words clearly and naturally in the target language.
+* For Hindi and Marathi, speak naturally in that language using child-friendly
+  rhythm and pronunciation. Do not anglicize pronunciation except for common
+  English words already present in the text.
+* Do not translate or normalize the text into another language. The spoken
+  language must match Language above.
 * Deliver dialogue as spoken conversation, not as narration read aloud.
 * Bring emotional moments to life through natural variation in pitch, emphasis, rhythm, and energy.
 * Read exclamations, interjections, reactions, sound words, and expressive phrases with the feeling implied by the story context.

@@ -14,6 +14,8 @@ Theme: {theme}
 Learning Goal: {learning_goal}
 Story Context: {story_context}
 Page Count: {pages}
+Selected Output Languages: {selected_languages}
+Selected Language Names: {selected_language_names}
 Character Profile JSON: {character_profile_json}
 Cast Mode: {cast_mode}
 Cast Mode Instructions: {cast_mode_instructions}
@@ -79,6 +81,22 @@ Story Context priority:
 - Story Context must directly influence hero_want, central_problem, emotional_need, climax_choice, and resolution_payoff.
 - A reader should understand that the story happened because of Story Context.
 
+## ENDING COMPLETENESS
+
+The final planned page must feel like a satisfying storybook ending.
+
+The last page must:
+
+- clearly show the central_problem is resolved or peacefully accepted
+- show the hero's original want has been fulfilled, changed, or understood
+- show the hero's emotional_need has been met
+- include a warm final image, gesture, shared moment, or resting beat
+- create a feeling of completion, comfort, pride, joy, or calm
+- not introduce a new problem, mystery, question, cliffhanger, or unfinished action
+
+For the final page only, page_turn_hook should be a closing image or emotional
+resting beat, not a hook for another event.
+
 ## CONTENT ANCHORS
 
 Make the theme concrete. Include named places, objects, creatures, facts, or
@@ -95,6 +113,10 @@ Every page should include a useful domain_detail when possible.
 ## LANGUAGE PROFILE
 
 Create language_profile for the story writer.
+
+The plan itself must stay language-neutral and structurally shared across all
+selected output languages. Do not create separate plots per language. The final
+story writer will localize the same plan into only the selected languages.
 
 - 0-3: familiar everyday words, sound words, repetition, sensory language, 1-8 words per sentence.
 - 3-6: simple everyday vocabulary, concrete descriptions, short dialogue, 5-12 words per sentence.
@@ -283,6 +305,7 @@ continuity_requirements should mention locked outfit, signature item, recurring 
 - language_profile matches Age Group.
 - learning_goal appears throughout the story.
 - content_anchors include concrete theme details.
+- The final page creates completion and does not set up another event.
 - Every page includes growth_step, domain_detail, and page_turn_hook.
 - The hero outfit and recurring characters remain consistent.
 - The hero is the selected child, not an invented replacement.

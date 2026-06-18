@@ -4,7 +4,8 @@ You are a HIGH-CONSISTENCY children's story IMAGE GENERATION engine.
 
 Generate ONE premium storybook illustration for a SINGLE story page.
 
-The illustration must preserve the same child character, recurring characters, outfit, age appearance, and visual style across the entire book.
+The illustration must preserve the same hero, recurring characters, outfit or
+body design, age appearance, and visual style across the entire book.
 
 ---
 
@@ -103,8 +104,8 @@ Character Reference Portrait during character creation. They define the exact
 facial identity that must be preserved in every illustration.
 
 RENDERING VERIFICATION:
-Before rendering, state explicitly: "Rendering child with [face_lock details]"
-This prevents unconscious variation between pages.
+Internally verify the face lock before rendering. Do not output, render, or
+display verification text in the image.
 
 CONSTRAINT ENFORCEMENT:
 - Do not interpret these fields as guidelines
@@ -135,12 +136,14 @@ Cast Mode Instructions:
 {cast_mode_instructions}
 
 When a Master Character Reference Image is attached, it is the visual source of
-truth for the hero child's face and age appearance. When side-character
+truth for the selected child hero's face and age appearance. When side-character
 reference images are attached, each is the visual source of truth for that
 side character's face/head identity and locked design.
 
-The hero child name is "{child_name}". When the page refers to the hero, treat
-that named child as the same hero defined in the Visual Bible.
+The hero name is "{child_name}". When Cast Mode is CHILD_HERO, this is the
+selected child hero. When Cast Mode is IMAGINED_CAST, this is the invented hero
+from the Visual Bible. Treat that named hero as the same character across the
+whole book.
 
 Preserve exactly:
 
@@ -182,7 +185,7 @@ Use the Visual Bible for:
 * full-body or seated body proportions
 * rendering style
 
-Do not redesign the child.
+Do not redesign the hero.
 
 Do not create a generic animated character.
 
@@ -202,8 +205,8 @@ All recurring characters defined in the Visual Bible must remain visually identi
 
 If Current Page Data includes reference_character_ids, draw only those matching
 character identities from the attached references and Visual Bible. Do not swap
-faces between characters. Do not use the hero child's face for a side character
-or a side character's face for the hero child.
+faces between characters. Do not use the selected child hero's face for a side
+character or a side character's face for the selected child hero.
 
 Preserve:
 
@@ -292,11 +295,11 @@ children's picture book.
 
 For water park, pool, beach, splash pad, rain, or any water-play scene:
 
-* the hero child must wear a rash guard shirt that covers shoulders and the
+* a human child hero must wear a rash guard shirt that covers shoulders and the
   upper body
-* the hero child must wear knee-length swim shorts, swim leggings, or
+* a human child hero must wear knee-length swim shorts, swim leggings, or
   shorts-over-leggings
-* the hero child must wear water shoes or sandals
+* a human child hero must wear water shoes or sandals
 * adults and caregivers must wear modest cover-up clothing such as a rash guard
   or t-shirt with knee-length shorts, leggings, or a skirted cover-up
 * every visible person must use a covered, modest, family-friendly water-play
@@ -361,16 +364,16 @@ Back Cover:
 * visually calming
 * no visible title text unless Current Page explicitly asks for it
 
-Keep the child character as the primary focal point.
+Keep the hero character as the primary focal point.
 
 Avoid clutter and overcrowded scenes.
 
 Maintain stable character scale across story pages:
 
 * story pages should usually use a medium full-body or three-quarter view
-* the child should be clearly readable but not an extreme close-up
-* avoid making the face disproportionately large compared with the body
-* avoid shrinking the child into the background unless the page explicitly requires a wide establishing shot
+* the hero should be clearly readable but not an extreme close-up
+* avoid making the face/head disproportionately large compared with the body
+* avoid shrinking the hero into the background unless the page explicitly requires a wide establishing shot
 
 ---
 
@@ -378,7 +381,7 @@ Maintain stable character scale across story pages:
 
 Prioritize:
 
-1. Child character
+1. Hero character
 2. Main story action
 3. Supporting characters
 4. Environment
@@ -496,14 +499,13 @@ artistic interpretations or variations of locked facial features.
 
 Before you begin rendering, verify you understand the face lock:
 
-1. **Face Structure:** The face shape, cheeks, jawline, and chin are [state from face lock]
-2. **Eyes:** Color is [state], shape is [state], size is [state]
-3. **Hair:** Color is [state], length is [state], style is [state], direction is [state]
-4. **Other:** Nose is [state], mouth is [state]
-5. **Distinctive Features:** [List any] MUST be visible in this image
-6. **Reference Image:** The attached Master Character Reference Image shows all these locks
+Internally check:
+1. Face/head/body structure remains locked.
+2. Eyes, hair/fur/body covering, color palette, and distinctive features remain locked.
+3. Outfit/body design and footwear/anatomy-safe equivalent remain locked.
+4. Reference image, when attached, remains the primary identity source.
 
-Statement: "I will render this child with [face structure lock], [eyes lock], [hair lock], and ensure [distinctive features] are visible. These are exact constraints, not artistic suggestions."
+Do not render checklist text, labels, captions, or verification statements.
 
 ---
 
@@ -511,6 +513,9 @@ Statement: "I will render this child with [face structure lock], [eyes lock], [h
 
 Generate ONE premium cinematic children's storybook illustration that faithfully depicts the Current Page Data while preserving complete consistency with the attached Master Character Reference Image when present and always with the Visual Bible.
 
-CRITICAL: Use the FACE LOCK CONSTRAINTS as exact structural requirements for the hero child's face. The attached reference image and face lock constraints are your authority—do not vary from them.
+CRITICAL: For CHILD_HERO, use the FACE LOCK CONSTRAINTS as exact structural
+requirements for the selected child hero's face. For IMAGINED_CAST, use the
+Visual Bible as the exact model sheet for the invented hero and recurring cast.
+Do not vary from the applicable identity source.
 
 If Page Type is cover, render the exact Story Title visibly and correctly on the cover.

@@ -98,13 +98,23 @@ class GenericStoryBatchService:
         self.batch_jobs = GenericStoryBatchJobRepository(session)
         self.image_storage = get_image_storage_service()
         self.audio_storage = get_story_audio_storage_service()
-        self.tts_provider = GoogleTTSProvider()
+        self._tts_provider: GoogleTTSProvider | None = None
         self.google_client = genai.Client(api_key=settings.GOOGLE_API_KEY)
         self.openai_client = AsyncOpenAI(
             api_key=settings.OPENAI_API_KEY,
             organization=settings.OPENAI_ORG_ID or None,
             project=settings.OPENAI_PROJECT_ID or None,
         )
+
+    @property
+    def tts_provider(self) -> GoogleTTSProvider:
+        if self._tts_provider is None:
+            self._tts_provider = GoogleTTSProvider()
+        return self._tts_provider
+
+    @tts_provider.setter
+    def tts_provider(self, provider: GoogleTTSProvider) -> None:
+        self._tts_provider = provider
 
     @staticmethod
     def _log_event(event: str, **fields: Any) -> None:

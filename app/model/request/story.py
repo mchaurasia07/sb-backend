@@ -80,6 +80,18 @@ class StoryGenerationRequest(BaseModel):
     category: str | None = Field(None, max_length=100, description="Story category (e.g., 'adventure')")
     learning_goal: str | None = Field(None, max_length=500, description="Educational objective")
     context: str | None = Field(None, max_length=2000, description="Additional context or preferences")
+    language: str | None = Field(
+        default=None,
+        min_length=2,
+        max_length=16,
+        description="Backward-compatible single language. Use languages for new clients.",
+    )
+    languages: list[str] = Field(
+        default_factory=lambda: ["en"],
+        min_length=1,
+        max_length=3,
+        description="Story content/narration languages. Supported: en, hi, mr.",
+    )
 
     # Testing flags
     skip_image_generation: bool = Field(False, description="Skip image generation for testing")
@@ -98,7 +110,15 @@ class StoryGenerationRequest(BaseModel):
         description="Start background workflow execution after saving. Defaults to false so create only saves the workflow.",
     )
 
-    @field_validator("category", "learning_goal", "context", mode="before")
+    @model_validator(mode="before")
+    @classmethod
+    def apply_language_alias(cls, data):
+        if isinstance(data, dict) and "languages" not in data and data.get("language"):
+            data = dict(data)
+            data["languages"] = [data["language"]]
+        return data
+
+    @field_validator("category", "learning_goal", "context", "language", mode="before")
     @classmethod
     def normalize_text(cls, value):
         if value is None:
@@ -107,6 +127,29 @@ class StoryGenerationRequest(BaseModel):
             return value
         normalized = " ".join(value.split())
         return normalized or None
+
+    @field_validator("languages", mode="before")
+    @classmethod
+    def normalize_languages(cls, value):
+        if value is None:
+            return ["en"]
+        if isinstance(value, str):
+            value = [value]
+        if not isinstance(value, list):
+            return value
+        supported = {"en", "hi", "mr"}
+        normalized: list[str] = []
+        for item in value:
+            lang = str(item or "").strip().lower()
+            if not lang:
+                continue
+            if lang not in supported:
+                raise ValueError("languages supports only: en, hi, mr")
+            if lang not in normalized:
+                normalized.append(lang)
+        if not normalized:
+            raise ValueError("At least one language is required")
+        return normalized
 
     @field_validator("reader_category", mode="before")
     @classmethod
@@ -119,6 +162,7 @@ class StoryGenerationRequest(BaseModel):
             self.execute_image = not self.skip_image_generation
         else:
             self.skip_image_generation = not self.execute_image
+        self.language = self.languages[0]
 
         if not (self.category or self.learning_goal or self.context):
             raise ValueError("Custom stories require category, learning_goal, or context")

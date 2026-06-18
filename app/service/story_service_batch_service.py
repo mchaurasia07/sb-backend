@@ -95,8 +95,18 @@ class StoryServiceBatchService:
         self.workflow = StoryService(session)
         self.image_storage = get_image_storage_service()
         self.audio_storage = get_story_audio_storage_service()
-        self.tts_provider = GoogleTTSProvider()
+        self._tts_provider: GoogleTTSProvider | None = None
         self.google_client = genai.Client(api_key=settings.GOOGLE_API_KEY)
+
+    @property
+    def tts_provider(self) -> GoogleTTSProvider:
+        if self._tts_provider is None:
+            self._tts_provider = GoogleTTSProvider()
+        return self._tts_provider
+
+    @tts_provider.setter
+    def tts_provider(self, provider: GoogleTTSProvider) -> None:
+        self._tts_provider = provider
 
     @staticmethod
     def _log_event(event: str, **fields: Any) -> None:
@@ -1172,6 +1182,8 @@ class StoryServiceBatchService:
         story_json: dict[str, Any],
         items: list[BatchAudioItem],
         provider_job: types.BatchJob,
+        *,
+        language: str = DEFAULT_STORY_LANGUAGE,
     ) -> tuple[set[str], set[str], dict[str, Any]]:
         responses = list((provider_job.dest.inlined_responses if provider_job.dest else None) or [])
         by_key = self._responses_by_key(responses)
@@ -1199,7 +1211,7 @@ class StoryServiceBatchService:
                 duration = self.tts_provider._pcm_duration_seconds(pcm_bytes)
                 audio_url = await self.audio_storage.save_story_page_audio(
                     story_id=story.id,
-                    language=DEFAULT_STORY_LANGUAGE,
+                    language=language,
                     page_number=item.page_number,
                     audio_bytes=wav_bytes,
                 )
@@ -1254,6 +1266,8 @@ class StoryServiceBatchService:
         items: list[BatchAudioItem],
         *,
         attempt: int,
+        language: str = DEFAULT_STORY_LANGUAGE,
+        event_id: UUID | None = None,
     ) -> StoryBatchJob:
         requests = [self._build_audio_inlined_request(item) for item in items]
         model = settings.GOOGLE_TTS_MODEL.removeprefix("models/")
@@ -1267,7 +1281,8 @@ class StoryServiceBatchService:
             request_payload={
                 "mode": "audio",
                 "attempt": attempt,
-                "language": DEFAULT_STORY_LANGUAGE,
+                "language": language,
+                "event_id": str(event_id) if event_id is not None else None,
                 "voice": settings.GOOGLE_TTS_VOICE,
                 "items": [
                     {
@@ -1289,7 +1304,7 @@ class StoryServiceBatchService:
         provider_job = await self.google_client.aio.batches.create(
             model=model,
             src=requests,
-            config={"display_name": f"story-{story.id}-audio-attempt-{attempt}"},
+            config={"display_name": f"story-{story.id}-audio-{language}-attempt-{attempt}"},
         )
         job.provider_job_name = provider_job.name
         job.provider_state = self._job_state_name(provider_job)
@@ -1941,6 +1956,7 @@ class StoryServiceBatchService:
         story_json: dict[str, Any],
         *,
         age_group: str | None = None,
+        language: str = DEFAULT_STORY_LANGUAGE,
     ) -> list[BatchAudioItem]:
         pages = story_json.get("pages", [])
         narration_age_group = age_group or story_json.get("age_group")
@@ -1972,7 +1988,7 @@ class StoryServiceBatchService:
             prompt = self.tts_provider.build_prompt(
                 text,
                 pace=pace,
-                language=DEFAULT_STORY_LANGUAGE,
+                language=language,
                 voice_style=voice_style,
                 tone=tone,
                 emotion=emotion,
