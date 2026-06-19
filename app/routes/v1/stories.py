@@ -16,6 +16,7 @@ from app.model.response.custom_story_workflow import (
     CustomStoryWorkflowResponse,
     CustomStoryWorkflowStepResponse,
     CustomStoryWorkflowBatchJobCancelResponse,
+    CustomStoryWorkflowEventResponse,
 )
 from app.model.response.story import (
     StoryBatchJobCancelResponse,
@@ -173,6 +174,16 @@ async def get_custom_story_workflow_steps(
 ) -> ApiResponse[list[CustomStoryWorkflowStepResponse]]:
     data = await CustomStoryWorkflowService(session).get_steps(current_user.id, workflow_id)
     return success_response(data, "Custom story workflow steps retrieved successfully")
+
+
+@router.get("/workflows/{workflow_id}/events", response_model=ApiResponse[list[CustomStoryWorkflowEventResponse]])
+async def get_custom_story_workflow_events(
+    workflow_id: UUID,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> ApiResponse[list[CustomStoryWorkflowEventResponse]]:
+    data = await CustomStoryWorkflowService(session).get_events(current_user.id, workflow_id)
+    return success_response(data, "Custom story workflow events retrieved successfully")
 
 
 @router.post(

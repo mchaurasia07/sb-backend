@@ -38,6 +38,7 @@ from app.model.request.generic_story_workflow import GenericStoryWorkflowCreateR
 from app.model.response.common import PaginatedResponse
 from app.model.response.custom_story_workflow import (
     CustomStoryWorkflowBatchJobResponse,
+    CustomStoryWorkflowEventResponse,
     CustomStoryWorkflowResponse,
     CustomStoryWorkflowStepResponse,
 )
@@ -426,6 +427,11 @@ class CustomStoryWorkflowService:
         steps = await self.steps.list_by_workflow(workflow.id)
         return [self._step_response(step) for step in steps]
 
+    async def get_events(self, user_id: UUID, workflow_id: UUID) -> list[CustomStoryWorkflowEventResponse]:
+        workflow = await self._get_owned(user_id, workflow_id)
+        events = await self.events.list_by_workflow_desc(workflow.id)
+        return [self._event_response(event) for event in events]
+
     async def get_generic_steps(
         self,
         user_id: UUID,
@@ -442,6 +448,11 @@ class CustomStoryWorkflowService:
                 if self._status_value(step.step_name) == step_name
             ]
         return [self._generic_step_response(workflow, step) for step in steps]
+
+    async def get_generic_events(self, user_id: UUID, workflow_id: UUID) -> list[CustomStoryWorkflowEventResponse]:
+        workflow = await self._get_owned(user_id, workflow_id, story_type=CustomStoryWorkflowType.GENERIC)
+        events = await self.events.list_by_workflow_desc(workflow.id)
+        return [self._event_response(event) for event in events]
 
     async def retry(self, user_id: UUID, workflow_id: UUID) -> CustomStoryWorkflowResponse:
         workflow = await self.workflows.get_for_user_for_update(user_id, workflow_id)
@@ -514,7 +525,7 @@ class CustomStoryWorkflowService:
         story_service = StoryService(self.session)
         safety_service = StoryInputSafetyService()
         context = self._generic_context(payload)
-        category = payload.theme or payload.genre or "adventure"
+        category = payload.category or payload.theme or payload.genre or "adventure"
         safety_payload = SimpleNamespace(
             title=payload.title,
             category=category,
@@ -598,19 +609,20 @@ class CustomStoryWorkflowService:
             input_request=payload.model_dump(mode="json"),
             reader_category=reader_category_for_age_group(payload.age_group).value,
             use_child_character=False,
-            execute_image=True,
-            execute_narration=True,
-            skip_validation=False,
-            execute_workflow=True,
+            execute_image=payload.execute_image,
+            execute_narration=payload.execute_narration,
+            skip_validation=payload.skip_validation,
+            execute_workflow=payload.execute_workflow,
             status=CustomStoryWorkflowStatus.PENDING,
             **story_service._current_ai_config(),
         )
         audit.workflow_id = workflow.id
         await self.input_safety_audits.update(audit)
-        await self.events.create_if_absent(
-            workflow_id=workflow.id,
-            step_name=CustomStoryWorkflowStep.STORY_PLAN_GENERATION,
-        )
+        if payload.execute_workflow:
+            await self.events.create_if_absent(
+                workflow_id=workflow.id,
+                step_name=CustomStoryWorkflowStep.STORY_PLAN_GENERATION,
+            )
         await self.session.commit()
         return self._generic_response(workflow)
 
@@ -619,7 +631,9 @@ class CustomStoryWorkflowService:
         parts: list[str] = []
         if payload.title:
             parts.append(f"Requested title idea: {payload.title}")
-        if payload.actual_story:
+        if payload.context:
+            parts.append(f"Story idea/context: {payload.context}")
+        if payload.actual_story and payload.actual_story != payload.context:
             parts.append(f"Story idea/context: {payload.actual_story}")
         if payload.genre:
             parts.append(f"Genre: {payload.genre}")
@@ -3325,4 +3339,23 @@ class CustomStoryWorkflowService:
             started_at=step.started_at,
             completed_at=step.completed_at,
             created_at=step.created_at,
+        )
+
+    @staticmethod
+    def _event_response(event: CustomStoryWorkflowEvent) -> CustomStoryWorkflowEventResponse:
+        return CustomStoryWorkflowEventResponse(
+            id=event.id,
+            workflow_id=event.workflow_id,
+            step_name=event.step_name.value if hasattr(event.step_name, "value") else str(event.step_name),
+            status=event.status.value if hasattr(event.status, "value") else str(event.status),
+            retry_count=event.retry_count,
+            retry_flag=event.retry_flag,
+            retry_comment=event.retry_comment,
+            retry_source_event_id=event.retry_source_event_id,
+            metadata=event.metadata_json,
+            error_message=event.error_message,
+            locked_at=event.locked_at,
+            completed_at=event.completed_at,
+            created_at=event.created_at,
+            updated_at=event.updated_at,
         )

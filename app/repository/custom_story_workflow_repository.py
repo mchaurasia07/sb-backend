@@ -292,6 +292,14 @@ class CustomStoryWorkflowEventRepository:
                 return event
         return None
 
+    async def list_by_workflow_desc(self, workflow_id: UUID) -> list[CustomStoryWorkflowEvent]:
+        result = await self.session.execute(
+            select(CustomStoryWorkflowEvent)
+            .where(CustomStoryWorkflowEvent.workflow_id == workflow_id)
+            .order_by(CustomStoryWorkflowEvent.created_at.desc(), CustomStoryWorkflowEvent.id.desc())
+        )
+        return list(result.scalars().all())
+
     async def claim_pending(self, limit: int) -> list[CustomStoryWorkflowEvent]:
         stale_before = datetime.utcnow() - timedelta(minutes=5)
         result = await self.session.execute(

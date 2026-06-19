@@ -124,6 +124,76 @@ class _BatchRepo:
         return job
 
 
+@pytest.mark.asyncio
+async def test_get_events_returns_workflow_events_newest_first():
+    user_id = uuid4()
+    workflow_id = uuid4()
+    older_event_id = uuid4()
+    newer_event_id = uuid4()
+    created_at_older = datetime(2026, 6, 19, 10, 0, tzinfo=UTC)
+    created_at_newer = datetime(2026, 6, 19, 10, 5, tzinfo=UTC)
+    workflow = _workflow(
+        id=workflow_id,
+        user_id=user_id,
+        story_type=SimpleNamespace(value="CUSTOM"),
+    )
+    events = [
+        SimpleNamespace(
+            id=newer_event_id,
+            workflow_id=workflow_id,
+            step_name=CustomStoryWorkflowStep.STORY_GENERATION,
+            status=CustomStoryWorkflowEventStatus.BATCH_SUBMITTED,
+            retry_count=1,
+            retry_flag=True,
+            retry_comment="FULL_BATCH_RETRY",
+            retry_source_event_id=older_event_id,
+            metadata_json={"batch_job_id": "batch-2"},
+            error_message=None,
+            locked_at=None,
+            completed_at=None,
+            created_at=created_at_newer,
+            updated_at=created_at_newer,
+        ),
+        SimpleNamespace(
+            id=older_event_id,
+            workflow_id=workflow_id,
+            step_name=CustomStoryWorkflowStep.STORY_GENERATION,
+            status=CustomStoryWorkflowEventStatus.FAILED,
+            retry_count=0,
+            retry_flag=False,
+            retry_comment=None,
+            retry_source_event_id=None,
+            metadata_json={"batch_job_id": "batch-1"},
+            error_message="Invalid JSON",
+            locked_at=None,
+            completed_at=created_at_older,
+            created_at=created_at_older,
+            updated_at=created_at_older,
+        ),
+    ]
+
+    async def _get_for_user(_user_id, _workflow_id):
+        assert _user_id == user_id
+        assert _workflow_id == workflow_id
+        return workflow
+
+    async def _list_by_workflow_desc(_workflow_id):
+        assert _workflow_id == workflow_id
+        return events
+
+    service = CustomStoryWorkflowService.__new__(CustomStoryWorkflowService)
+    service.workflows = SimpleNamespace(get_for_user=_get_for_user)
+    service.events = SimpleNamespace(list_by_workflow_desc=_list_by_workflow_desc)
+
+    response = await service.get_events(user_id, workflow_id)
+
+    assert [item.id for item in response] == [newer_event_id, older_event_id]
+    assert response[0].retry_flag is True
+    assert response[0].retry_comment == "FULL_BATCH_RETRY"
+    assert response[0].metadata == {"batch_job_id": "batch-2"}
+    assert response[1].error_message == "Invalid JSON"
+
+
 def _step_by_name(steps: _StepRepo, step_name: CustomStoryWorkflowStep):
     value = step_name.value
     for step in reversed(steps.items):

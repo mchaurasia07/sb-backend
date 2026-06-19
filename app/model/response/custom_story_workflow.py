@@ -56,6 +56,23 @@ class CustomStoryWorkflowStepResponse(BaseModel):
     created_at: datetime
 
 
+class CustomStoryWorkflowEventResponse(BaseModel):
+    id: UUID
+    workflow_id: UUID
+    step_name: str
+    status: str
+    retry_count: int
+    retry_flag: bool
+    retry_comment: str | None
+    retry_source_event_id: UUID | None
+    metadata: dict[str, Any] | None = None
+    error_message: str | None
+    locked_at: datetime | None
+    completed_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
 class CustomStoryWorkflowBatchJobResponse(BaseModel):
     id: UUID
     workflow_id: UUID

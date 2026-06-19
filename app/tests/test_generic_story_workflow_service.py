@@ -357,6 +357,30 @@ def test_workflow_create_request_has_illustration_type_without_requested_pages()
     assert "requested_pages" not in fields
 
 
+def test_generic_workflow_create_request_accepts_custom_story_payload_shape():
+    request = GenericStoryWorkflowCreateRequest.model_validate(
+        {
+            "reader_category": "Early Reader",
+            "category": "adventure",
+            "learning_goal": "sharing and teamwork",
+            "context": "A tiny moon bus helps children find a lost star.",
+            "languages": ["en", "hi"],
+            "execute_image": True,
+            "execute_narration": True,
+            "skip_validation": False,
+            "execute_workflow": True,
+        }
+    )
+
+    assert request.child_id is None
+    assert request.age_group == "3-6"
+    assert request.category == "adventure"
+    assert request.context == "A tiny moon bus helps children find a lost star."
+    assert request.language == "en"
+    assert request.languages == ["en", "hi"]
+    assert request.use_child_character is False
+
+
 def test_workflow_execute_request_ignores_multi_image_mode_flag():
     default_request = GenericStoryWorkflowExecuteRequest.model_validate({})
     request = GenericStoryWorkflowExecuteRequest.model_validate({"multi_image_mode": False})
