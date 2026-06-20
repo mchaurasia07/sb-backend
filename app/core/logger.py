@@ -2,6 +2,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 import sys
+import time
 from typing import Any
 
 import structlog
@@ -9,18 +10,36 @@ import structlog
 from app.core.config import settings
 
 
+class UTCLogFormatter(logging.Formatter):
+    """Render all stdlib and structlog records in one human-readable format."""
+
+    converter = time.gmtime
+
+
+def _render_log_message(logger: Any, method_name: str, event_dict: dict[str, Any]) -> str:
+    event = str(event_dict.pop("event", "")).strip()
+    if "level" in event_dict:
+        event_dict.pop("level", None)
+    if "timestamp" in event_dict:
+        event_dict.pop("timestamp", None)
+    details = " ".join(f"{key}={value}" for key, value in event_dict.items() if value is not None)
+    if event and details:
+        return f"{event} {details}"
+    return event or details
+
+
 def configure_logging() -> None:
-    """Configure structured JSON logs suitable for production aggregation."""
+    """Configure application logs for console/journal and optional rotating files."""
     log_level = getattr(logging, settings.LOG_LEVEL.strip().upper(), logging.INFO)
-    formatter = logging.Formatter("%(message)s")
-    timestamper = structlog.processors.TimeStamper(fmt="iso", utc=True)
+    formatter = UTCLogFormatter(
+        fmt="%(asctime)sZ - %(levelname)s - [%(name)s] - %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
+    )
     processors: list[Any] = [
         structlog.contextvars.merge_contextvars,
-        structlog.processors.add_log_level,
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
-        timestamper,
-        structlog.processors.JSONRenderer(),
+        _render_log_message,
     ]
 
     console_handler = logging.StreamHandler(sys.stdout)
@@ -58,7 +77,7 @@ def configure_logging() -> None:
         processors=processors,
         logger_factory=structlog.stdlib.LoggerFactory(),
         wrapper_class=structlog.make_filtering_bound_logger(log_level),
-        cache_logger_on_first_use=True,
+        cache_logger_on_first_use=False,
     )
 
 

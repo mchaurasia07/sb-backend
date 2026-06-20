@@ -146,14 +146,17 @@ async def test_scheduler_logs_use_clear_reconcile_and_event_process_labels(monke
     log_messages = []
 
     class FakeLogger:
+        def __init__(self, process_name):
+            self.process_name = process_name
+
         def info(self, message, **kwargs):
-            log_messages.append(str(message))
+            log_messages.append((self.process_name, str(message)))
 
         def warning(self, message, **kwargs):
-            log_messages.append(str(message))
+            log_messages.append((self.process_name, str(message)))
 
         def exception(self, message, **kwargs):
-            log_messages.append(str(message))
+            log_messages.append((self.process_name, str(message)))
 
     class FakeStoryBatchService:
         def __init__(self, session):
@@ -172,7 +175,8 @@ async def test_scheduler_logs_use_clear_reconcile_and_event_process_labels(monke
         async def process_events(self, *, limit):
             return {"checked_count": 3, "processed_count": 2}
 
-    monkeypatch.setattr(scheduler_module, "logger", FakeLogger())
+    monkeypatch.setattr(scheduler_module, "reconcile_logger", FakeLogger("SCHEDULER-RECONCILE"))
+    monkeypatch.setattr(scheduler_module, "event_process_logger", FakeLogger("SCHEDULER-EVENT_PROCESS"))
     monkeypatch.setattr(scheduler_module, "AsyncSessionLocal", _FakeSessionContext)
     monkeypatch.setattr(scheduler_module, "StoryServiceBatchService", FakeStoryBatchService)
     monkeypatch.setattr(scheduler_module, "CustomStoryWorkflowService", FakeWorkflowService)
@@ -184,10 +188,10 @@ async def test_scheduler_logs_use_clear_reconcile_and_event_process_labels(monke
     await scheduler._run_reconcile_once()
     await scheduler._run_events_once()
 
-    assert "[SCHEDULER][RECONCILE] run_started" in log_messages
-    assert "[SCHEDULER][RECONCILE] run_completed" in log_messages
-    assert "[SCHEDULER][EVENT_PROCESS] run_started" in log_messages
-    assert "[SCHEDULER][EVENT_PROCESS] run_completed" in log_messages
+    assert ("SCHEDULER-RECONCILE", "run_started") in log_messages
+    assert ("SCHEDULER-RECONCILE", "run_completed") in log_messages
+    assert ("SCHEDULER-EVENT_PROCESS", "run_started") in log_messages
+    assert ("SCHEDULER-EVENT_PROCESS", "run_completed") in log_messages
 
 
 @pytest.mark.asyncio

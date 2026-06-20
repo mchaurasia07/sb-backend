@@ -18,7 +18,10 @@ from app.entity.story_batch_job import StoryBatchJobStatus, StoryBatchJobType
 from app.entity.story_step import StepStatus
 from app.model.request.story import ReaderCategory, StoryGenerationRequest, age_group_for_reader_category
 from app.model.response.custom_story_workflow import CustomStoryWorkflowResponse
-from app.repository.custom_story_workflow_repository import CustomStoryWorkflowEventRepository
+from app.repository.custom_story_workflow_repository import (
+    CustomStoryBatchJobRepository,
+    CustomStoryWorkflowEventRepository,
+)
 from app.routes.v1 import stories as story_routes
 from app.service import custom_story_workflow_service
 from app.service.custom_story_workflow_service import CustomStoryWorkflowService
@@ -271,12 +274,28 @@ async def test_list_batch_jobs_returns_paginated_typed_response_with_filters():
     calls = {}
 
     class _BatchJobs:
-        async def list_for_user(self, user_id_arg, *, page, page_size, workflow_id=None, status=None):
+        async def list_for_user(
+            self,
+            user_id_arg,
+            *,
+            page,
+            page_size,
+            workflow_id=None,
+            status=None,
+            story_type=None,
+            generic_story_id=None,
+            job_type=None,
+            provider=None,
+        ):
             calls["user_id"] = user_id_arg
             calls["page"] = page
             calls["page_size"] = page_size
             calls["workflow_id"] = workflow_id
             calls["status"] = status
+            calls["story_type"] = story_type
+            calls["generic_story_id"] = generic_story_id
+            calls["job_type"] = job_type
+            calls["provider"] = provider
             return [job], 1
 
     service = CustomStoryWorkflowService.__new__(CustomStoryWorkflowService)
@@ -296,6 +315,10 @@ async def test_list_batch_jobs_returns_paginated_typed_response_with_filters():
         "page_size": 20,
         "workflow_id": workflow_id,
         "status": StoryBatchJobStatus.RUNNING,
+        "story_type": None,
+        "generic_story_id": None,
+        "job_type": None,
+        "provider": None,
     }
     assert response.total == 1
     assert response.page == 1
@@ -306,6 +329,82 @@ async def test_list_batch_jobs_returns_paginated_typed_response_with_filters():
     assert response.items[0].status == "RUNNING"
     assert response.items[0].request_keys == ["cover", "page_1"]
     assert response.items[0].missing_keys == ["page_1"]
+
+
+@pytest.mark.asyncio
+async def test_list_batch_jobs_can_filter_by_story_type():
+    user_id = uuid4()
+    calls = {}
+
+    class _BatchJobs:
+        async def list_for_user(
+            self,
+            user_id_arg,
+            *,
+            page,
+            page_size,
+            workflow_id=None,
+            status=None,
+            story_type=None,
+            generic_story_id=None,
+            job_type=None,
+            provider=None,
+        ):
+            calls["user_id"] = user_id_arg
+            calls["story_type"] = story_type
+            return [], 0
+
+    service = CustomStoryWorkflowService.__new__(CustomStoryWorkflowService)
+    service.batch_jobs = _BatchJobs()
+
+    response = await service.list_batch_jobs(
+        user_id,
+        page=1,
+        page_size=20,
+        story_type=CustomStoryWorkflowType.GENERIC,
+    )
+
+    assert calls == {
+        "user_id": user_id,
+        "story_type": CustomStoryWorkflowType.GENERIC,
+    }
+    assert response.total == 0
+
+
+@pytest.mark.asyncio
+async def test_batch_job_repository_lists_custom_workflow_jobs_newest_first():
+    captured = {}
+
+    class _Scalars:
+        def all(self):
+            return []
+
+    class _Result:
+        def scalars(self):
+            return _Scalars()
+
+    class _Session:
+        async def scalar(self, statement):
+            captured["count_statement"] = statement
+            return 0
+
+        async def execute(self, statement):
+            captured["id_statement"] = statement
+            return _Result()
+
+    repository = CustomStoryBatchJobRepository(_Session())
+
+    jobs, total = await repository.list_for_user(
+        uuid4(),
+        page=1,
+        page_size=20,
+    )
+
+    statement_sql = str(captured["id_statement"].compile(compile_kwargs={"literal_binds": False}))
+    assert jobs == []
+    assert total == 0
+    assert "custom_story_batch_jobs" in statement_sql
+    assert "ORDER BY custom_story_batch_jobs.created_at DESC, custom_story_batch_jobs.id DESC" in statement_sql
 
 
 def test_custom_story_workflow_step_order_includes_publish_last():

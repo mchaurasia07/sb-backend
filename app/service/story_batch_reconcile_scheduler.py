@@ -13,9 +13,8 @@ from app.service.custom_story_workflow_service import CustomStoryWorkflowService
 from app.service.story_service_batch_service import StoryServiceBatchService
 
 logger = get_logger(__name__)
-
-RECONCILE_LOG_PREFIX = "[SCHEDULER][RECONCILE]"
-EVENT_PROCESS_LOG_PREFIX = "[SCHEDULER][EVENT_PROCESS]"
+reconcile_logger = get_logger("SCHEDULER-RECONCILE")
+event_process_logger = get_logger("SCHEDULER-EVENT_PROCESS")
 
 
 class StoryBatchReconcileScheduler:
@@ -49,14 +48,14 @@ class StoryBatchReconcileScheduler:
                 self._run_reconcile_loop(),
                 name="story-batch-reconcile-scheduler",
             )
-            logger.info(
-                f"{RECONCILE_LOG_PREFIX} scheduler_started",
+            reconcile_logger.info(
+                "scheduler_started",
                 start_minute=settings.STORY_BATCH_RECONCILE_START_MINUTE,
                 interval_minutes=settings.STORY_BATCH_RECONCILE_INTERVAL_MINUTES,
                 limit=settings.STORY_BATCH_RECONCILE_LIMIT,
             )
         else:
-            logger.info(f"{RECONCILE_LOG_PREFIX} scheduler_disabled")
+            reconcile_logger.info("scheduler_disabled")
 
         if settings.CUSTOM_WORKFLOW_EVENT_SCHEDULER_ENABLED:
             self._event_lock = asyncio.Lock()
@@ -64,14 +63,14 @@ class StoryBatchReconcileScheduler:
                 self._run_event_loop(),
                 name="custom-workflow-event-scheduler",
             )
-            logger.info(
-                f"{EVENT_PROCESS_LOG_PREFIX} scheduler_started",
+            event_process_logger.info(
+                "scheduler_started",
                 start_minute=settings.CUSTOM_WORKFLOW_EVENT_START_MINUTE,
                 interval_minutes=settings.CUSTOM_WORKFLOW_EVENT_INTERVAL_MINUTES,
                 limit=settings.CUSTOM_WORKFLOW_EVENT_PROCESS_LIMIT,
             )
         else:
-            logger.info(f"{EVENT_PROCESS_LOG_PREFIX} scheduler_disabled")
+            event_process_logger.info("scheduler_disabled")
 
     async def stop(self) -> None:
         if self._stop_event:
@@ -94,8 +93,8 @@ class StoryBatchReconcileScheduler:
 
         while not self._stop_event.is_set():
             delay_seconds = self._seconds_until_next_reconcile_run()
-            logger.info(
-                f"{RECONCILE_LOG_PREFIX} next_run_scheduled",
+            reconcile_logger.info(
+                "next_run_scheduled",
                 delay_seconds=round(delay_seconds, 2),
                 start_minute=settings.STORY_BATCH_RECONCILE_START_MINUTE,
                 interval_minutes=settings.STORY_BATCH_RECONCILE_INTERVAL_MINUTES,
@@ -111,8 +110,8 @@ class StoryBatchReconcileScheduler:
 
         while not self._stop_event.is_set():
             delay_seconds = self._seconds_until_next_event_run()
-            logger.info(
-                f"{EVENT_PROCESS_LOG_PREFIX} next_run_scheduled",
+            event_process_logger.info(
+                "next_run_scheduled",
                 delay_seconds=round(delay_seconds, 2),
                 start_minute=settings.CUSTOM_WORKFLOW_EVENT_START_MINUTE,
                 interval_minutes=settings.CUSTOM_WORKFLOW_EVENT_INTERVAL_MINUTES,
@@ -167,13 +166,13 @@ class StoryBatchReconcileScheduler:
         if self._reconcile_lock is None:
             return
         if self._reconcile_lock.locked():
-            logger.warning(f"{RECONCILE_LOG_PREFIX} overlap_skipped previous_run_still_active")
+            reconcile_logger.warning("overlap_skipped previous_run_still_active")
             return
 
         async with self._reconcile_lock:
             try:
-                logger.info(
-                    f"{RECONCILE_LOG_PREFIX} run_started",
+                reconcile_logger.info(
+                    "run_started",
                     limit=settings.STORY_BATCH_RECONCILE_LIMIT,
                 )
                 async with AsyncSessionLocal() as session:
@@ -183,37 +182,37 @@ class StoryBatchReconcileScheduler:
                     custom_story_result = await CustomStoryWorkflowService(session).reconcile_batch_jobs(
                         limit=settings.STORY_BATCH_RECONCILE_LIMIT
                     )
-                logger.info(
-                    f"{RECONCILE_LOG_PREFIX} run_completed",
+                reconcile_logger.info(
+                    "run_completed",
                     checked_count=story_result.get("checked_count"),
                     processed_count=story_result.get("processed_count"),
                     workflow_checked_count=custom_story_result.get("checked_count"),
                     workflow_processed_count=custom_story_result.get("processed_count"),
                 )
             except Exception as exc:
-                logger.exception(f"{RECONCILE_LOG_PREFIX} run_failed", error=str(exc))
+                reconcile_logger.exception("run_failed", error=str(exc))
 
     async def _run_events_once(self) -> None:
         if self._event_lock is None:
             return
         if self._event_lock.locked():
-            logger.warning(f"{EVENT_PROCESS_LOG_PREFIX} overlap_skipped previous_run_still_active")
+            event_process_logger.warning("overlap_skipped previous_run_still_active")
             return
 
         async with self._event_lock:
             try:
-                logger.info(
-                    f"{EVENT_PROCESS_LOG_PREFIX} run_started",
+                event_process_logger.info(
+                    "run_started",
                     limit=settings.CUSTOM_WORKFLOW_EVENT_PROCESS_LIMIT,
                 )
                 async with AsyncSessionLocal() as session:
                     result = await CustomStoryWorkflowService(session).process_events(
                         limit=settings.CUSTOM_WORKFLOW_EVENT_PROCESS_LIMIT
                     )
-                logger.info(
-                    f"{EVENT_PROCESS_LOG_PREFIX} run_completed",
+                event_process_logger.info(
+                    "run_completed",
                     checked_count=result.get("checked_count"),
                     processed_count=result.get("processed_count"),
                 )
             except Exception as exc:
-                logger.exception(f"{EVENT_PROCESS_LOG_PREFIX} run_failed", error=str(exc))
+                event_process_logger.exception("run_failed", error=str(exc))

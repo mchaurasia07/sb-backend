@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session, AsyncSessionLocal
 from app.core.dependencies import get_current_user
+from app.entity.custom_story_workflow import CustomStoryWorkflowType
 from app.entity.story_batch_job import StoryBatchJobStatus
 from app.entity.user import User
 from app.model.request.story import StoryGenerationRequest, BatchWebPConversionRequest
@@ -119,16 +120,18 @@ async def list_custom_workflow_batch_jobs(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     workflow_id: UUID | None = Query(default=None),
+    story_type: CustomStoryWorkflowType | None = Query(default=None),
     status_filter: StoryBatchJobStatus | None = Query(default=None, alias="status"),
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[PaginatedResponse[CustomStoryWorkflowBatchJobResponse]]:
-    """List batch jobs for custom workflows with optional filtering."""
+    """List workflow batch jobs with optional filtering."""
     data = await CustomStoryWorkflowService(session).list_batch_jobs(
         current_user.id,
         page=page,
         page_size=page_size,
         workflow_id=workflow_id,
+        story_type=story_type,
         status_filter=status_filter,
     )
     return success_response(data, "Batch jobs retrieved successfully")

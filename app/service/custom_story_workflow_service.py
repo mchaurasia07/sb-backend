@@ -1701,7 +1701,7 @@ class CustomStoryWorkflowService:
         page_size: int,
         workflow_id: UUID | None = None,
         status_filter: StoryBatchJobStatus | None = None,
-        story_type: CustomStoryWorkflowType | None = CustomStoryWorkflowType.CUSTOM,
+        story_type: CustomStoryWorkflowType | None = None,
         generic_story_id: UUID | None = None,
         job_type: StoryBatchJobType | None = None,
         provider: str | None = None,
