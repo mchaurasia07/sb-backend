@@ -177,13 +177,14 @@ async def get_custom_story_workflow_steps(
 
 
 @router.get("/workflows/{workflow_id}/events", response_model=ApiResponse[list[CustomStoryWorkflowEventResponse]])
-async def get_custom_story_workflow_events(
+async def get_story_workflow_events(
     workflow_id: UUID,
+    story_type: str | None = Query(default=None, pattern="^(CUSTOM|GENERIC)$"),
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> ApiResponse[list[CustomStoryWorkflowEventResponse]]:
-    data = await CustomStoryWorkflowService(session).get_events(current_user.id, workflow_id)
-    return success_response(data, "Custom story workflow events retrieved successfully")
+    data = await CustomStoryWorkflowService(session).get_events(current_user.id, workflow_id, story_type=story_type)
+    return success_response(data, "Story workflow events retrieved successfully")
 
 
 @router.post(

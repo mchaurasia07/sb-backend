@@ -14,6 +14,9 @@ from app.service.story_service_batch_service import StoryServiceBatchService
 
 logger = get_logger(__name__)
 
+RECONCILE_LOG_PREFIX = "[SCHEDULER][RECONCILE]"
+EVENT_PROCESS_LOG_PREFIX = "[SCHEDULER][EVENT_PROCESS]"
+
 
 class StoryBatchReconcileScheduler:
     """Runs delayed story batch reconciliation and workflow event processing."""
@@ -47,13 +50,13 @@ class StoryBatchReconcileScheduler:
                 name="story-batch-reconcile-scheduler",
             )
             logger.info(
-                "story_batch_reconcile_scheduler_started",
+                f"{RECONCILE_LOG_PREFIX} scheduler_started",
                 start_minute=settings.STORY_BATCH_RECONCILE_START_MINUTE,
                 interval_minutes=settings.STORY_BATCH_RECONCILE_INTERVAL_MINUTES,
                 limit=settings.STORY_BATCH_RECONCILE_LIMIT,
             )
         else:
-            logger.info("story_batch_reconcile_scheduler_disabled")
+            logger.info(f"{RECONCILE_LOG_PREFIX} scheduler_disabled")
 
         if settings.CUSTOM_WORKFLOW_EVENT_SCHEDULER_ENABLED:
             self._event_lock = asyncio.Lock()
@@ -62,13 +65,13 @@ class StoryBatchReconcileScheduler:
                 name="custom-workflow-event-scheduler",
             )
             logger.info(
-                "custom_workflow_event_scheduler_started",
+                f"{EVENT_PROCESS_LOG_PREFIX} scheduler_started",
                 start_minute=settings.CUSTOM_WORKFLOW_EVENT_START_MINUTE,
                 interval_minutes=settings.CUSTOM_WORKFLOW_EVENT_INTERVAL_MINUTES,
                 limit=settings.CUSTOM_WORKFLOW_EVENT_PROCESS_LIMIT,
             )
         else:
-            logger.info("custom_workflow_event_scheduler_disabled")
+            logger.info(f"{EVENT_PROCESS_LOG_PREFIX} scheduler_disabled")
 
     async def stop(self) -> None:
         if self._stop_event:
@@ -92,7 +95,7 @@ class StoryBatchReconcileScheduler:
         while not self._stop_event.is_set():
             delay_seconds = self._seconds_until_next_reconcile_run()
             logger.info(
-                "story_batch_reconcile_scheduler_next_run_scheduled",
+                f"{RECONCILE_LOG_PREFIX} next_run_scheduled",
                 delay_seconds=round(delay_seconds, 2),
                 start_minute=settings.STORY_BATCH_RECONCILE_START_MINUTE,
                 interval_minutes=settings.STORY_BATCH_RECONCILE_INTERVAL_MINUTES,
@@ -109,7 +112,7 @@ class StoryBatchReconcileScheduler:
         while not self._stop_event.is_set():
             delay_seconds = self._seconds_until_next_event_run()
             logger.info(
-                "custom_workflow_event_scheduler_next_run_scheduled",
+                f"{EVENT_PROCESS_LOG_PREFIX} next_run_scheduled",
                 delay_seconds=round(delay_seconds, 2),
                 start_minute=settings.CUSTOM_WORKFLOW_EVENT_START_MINUTE,
                 interval_minutes=settings.CUSTOM_WORKFLOW_EVENT_INTERVAL_MINUTES,
@@ -164,11 +167,15 @@ class StoryBatchReconcileScheduler:
         if self._reconcile_lock is None:
             return
         if self._reconcile_lock.locked():
-            logger.warning("story_batch_reconcile_scheduler_overlap_skipped")
+            logger.warning(f"{RECONCILE_LOG_PREFIX} overlap_skipped previous_run_still_active")
             return
 
         async with self._reconcile_lock:
             try:
+                logger.info(
+                    f"{RECONCILE_LOG_PREFIX} run_started",
+                    limit=settings.STORY_BATCH_RECONCILE_LIMIT,
+                )
                 async with AsyncSessionLocal() as session:
                     story_result = await StoryServiceBatchService(session).reconcile_batch_jobs(
                         limit=settings.STORY_BATCH_RECONCILE_LIMIT
@@ -177,32 +184,36 @@ class StoryBatchReconcileScheduler:
                         limit=settings.STORY_BATCH_RECONCILE_LIMIT
                     )
                 logger.info(
-                    "story_batch_reconcile_scheduler_run_completed",
+                    f"{RECONCILE_LOG_PREFIX} run_completed",
                     checked_count=story_result.get("checked_count"),
                     processed_count=story_result.get("processed_count"),
                     workflow_checked_count=custom_story_result.get("checked_count"),
                     workflow_processed_count=custom_story_result.get("processed_count"),
                 )
             except Exception as exc:
-                logger.exception("story_batch_reconcile_scheduler_run_failed", error=str(exc))
+                logger.exception(f"{RECONCILE_LOG_PREFIX} run_failed", error=str(exc))
 
     async def _run_events_once(self) -> None:
         if self._event_lock is None:
             return
         if self._event_lock.locked():
-            logger.warning("custom_workflow_event_scheduler_overlap_skipped")
+            logger.warning(f"{EVENT_PROCESS_LOG_PREFIX} overlap_skipped previous_run_still_active")
             return
 
         async with self._event_lock:
             try:
+                logger.info(
+                    f"{EVENT_PROCESS_LOG_PREFIX} run_started",
+                    limit=settings.CUSTOM_WORKFLOW_EVENT_PROCESS_LIMIT,
+                )
                 async with AsyncSessionLocal() as session:
                     result = await CustomStoryWorkflowService(session).process_events(
                         limit=settings.CUSTOM_WORKFLOW_EVENT_PROCESS_LIMIT
                     )
                 logger.info(
-                    "custom_workflow_event_scheduler_run_completed",
+                    f"{EVENT_PROCESS_LOG_PREFIX} run_completed",
                     checked_count=result.get("checked_count"),
                     processed_count=result.get("processed_count"),
                 )
             except Exception as exc:
-                logger.exception("custom_workflow_event_scheduler_run_failed", error=str(exc))
+                logger.exception(f"{EVENT_PROCESS_LOG_PREFIX} run_failed", error=str(exc))

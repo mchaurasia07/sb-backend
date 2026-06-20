@@ -39,7 +39,6 @@ from app.model.response.generic_story_workflow import (
     GenericStoryWorkflowResponse,
     GenericStoryWorkflowStepDetailResponse,
 )
-from app.model.response.custom_story_workflow import CustomStoryWorkflowEventResponse
 from app.model.response.story_catalog import StoryCatalogResponse
 from app.model.response.story_content import StoryContentResponse
 from app.service.generic_story_service import GenericStoryService
@@ -202,16 +201,6 @@ async def get_generic_story_workflow_steps(
         step_name=step_name,
     )
     return success_response(data, "Generic story workflow steps retrieved successfully")
-
-
-@router.get("/workflows/{workflow_id}/events", response_model=ApiResponse[list[CustomStoryWorkflowEventResponse]])
-async def get_generic_story_workflow_events(
-    workflow_id: UUID,
-    current_user: User = Depends(get_current_user),
-    session: AsyncSession = Depends(get_db_session),
-) -> ApiResponse[list[CustomStoryWorkflowEventResponse]]:
-    data = await CustomStoryWorkflowService(session).get_generic_events(current_user.id, workflow_id)
-    return success_response(data, "Generic story workflow events retrieved successfully")
 
 
 @router.post("/workflows/{workflow_id}/execute", response_model=ApiResponse[GenericStoryWorkflowResponse])

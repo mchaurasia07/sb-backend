@@ -180,12 +180,19 @@ class CustomStoryWorkflowEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "custom_story_workflow_events"
     __table_args__ = (
         Index("ix_custom_story_workflow_events_workflow_id", "workflow_id"),
+        Index("ix_custom_story_workflow_events_story_type", "story_type"),
         Index("ix_custom_story_workflow_events_status_created", "status", "created_at"),
         Index("ix_custom_story_workflow_events_workflow_step_status", "workflow_id", "step_name", "status"),
     )
 
     workflow_id: Mapped[UUID] = mapped_column(
         HyphenatedUUID(), ForeignKey("custom_story_workflows.id", ondelete="CASCADE"), nullable=False
+    )
+    story_type: Mapped[CustomStoryWorkflowType] = mapped_column(
+        SAEnum(CustomStoryWorkflowType, native_enum=False),
+        nullable=False,
+        default=CustomStoryWorkflowType.CUSTOM,
+        server_default=CustomStoryWorkflowType.CUSTOM.value,
     )
     step_name: Mapped[CustomStoryWorkflowStep] = mapped_column(
         SAEnum(CustomStoryWorkflowStep, native_enum=False), nullable=False

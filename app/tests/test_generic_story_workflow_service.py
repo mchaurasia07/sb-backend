@@ -89,6 +89,15 @@ def test_generic_story_workflow_create_routes_support_singular_and_plural_paths(
     assert "POST" in route_methods["/workflows"]
 
 
+def test_generic_story_workflow_events_route_is_not_registered():
+    route_methods: set[str] = set()
+    for route in generic_story_routes.router.routes:
+        if getattr(route, "path", None) == "/workflows/{workflow_id}/events":
+            route_methods.update(getattr(route, "methods", set()))
+
+    assert "GET" not in route_methods
+
+
 def _generic_steps_migration():
     path = (
         Path(__file__).resolve().parents[2]

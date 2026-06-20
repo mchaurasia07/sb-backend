@@ -12,11 +12,13 @@ from app.entity.custom_story_workflow import (
     CustomStoryWorkflowEventStatus,
     CustomStoryWorkflowStatus,
     CustomStoryWorkflowStep,
+    CustomStoryWorkflowType,
 )
 from app.entity.story_batch_job import StoryBatchJobStatus, StoryBatchJobType
 from app.entity.story_step import StepStatus
 from app.model.request.story import ReaderCategory, StoryGenerationRequest, age_group_for_reader_category
 from app.model.response.custom_story_workflow import CustomStoryWorkflowResponse
+from app.repository.custom_story_workflow_repository import CustomStoryWorkflowEventRepository
 from app.routes.v1 import stories as story_routes
 from app.service import custom_story_workflow_service
 from app.service.custom_story_workflow_service import CustomStoryWorkflowService
@@ -125,7 +127,7 @@ class _BatchRepo:
 
 
 @pytest.mark.asyncio
-async def test_get_events_returns_workflow_events_newest_first():
+async def test_get_events_returns_any_owned_workflow_events_newest_first():
     user_id = uuid4()
     workflow_id = uuid4()
     older_event_id = uuid4()
@@ -135,12 +137,13 @@ async def test_get_events_returns_workflow_events_newest_first():
     workflow = _workflow(
         id=workflow_id,
         user_id=user_id,
-        story_type=SimpleNamespace(value="CUSTOM"),
+        story_type=CustomStoryWorkflowType.GENERIC,
     )
     events = [
         SimpleNamespace(
             id=newer_event_id,
             workflow_id=workflow_id,
+            story_type=CustomStoryWorkflowType.GENERIC,
             step_name=CustomStoryWorkflowStep.STORY_GENERATION,
             status=CustomStoryWorkflowEventStatus.BATCH_SUBMITTED,
             retry_count=1,
@@ -157,6 +160,7 @@ async def test_get_events_returns_workflow_events_newest_first():
         SimpleNamespace(
             id=older_event_id,
             workflow_id=workflow_id,
+            story_type=CustomStoryWorkflowType.GENERIC,
             step_name=CustomStoryWorkflowStep.STORY_GENERATION,
             status=CustomStoryWorkflowEventStatus.FAILED,
             retry_count=0,
@@ -177,8 +181,9 @@ async def test_get_events_returns_workflow_events_newest_first():
         assert _workflow_id == workflow_id
         return workflow
 
-    async def _list_by_workflow_desc(_workflow_id):
+    async def _list_by_workflow_desc(_workflow_id, *, story_type=None):
         assert _workflow_id == workflow_id
+        assert story_type is None
         return events
 
     service = CustomStoryWorkflowService.__new__(CustomStoryWorkflowService)
@@ -188,10 +193,40 @@ async def test_get_events_returns_workflow_events_newest_first():
     response = await service.get_events(user_id, workflow_id)
 
     assert [item.id for item in response] == [newer_event_id, older_event_id]
+    assert response[0].story_type == "GENERIC"
     assert response[0].retry_flag is True
     assert response[0].retry_comment == "FULL_BATCH_RETRY"
     assert response[0].metadata == {"batch_job_id": "batch-2"}
     assert response[1].error_message == "Invalid JSON"
+
+
+@pytest.mark.asyncio
+async def test_event_repository_stores_workflow_story_type_on_create():
+    workflow_id = uuid4()
+    session = SimpleNamespace(added=[], flushed=False)
+
+    async def _scalar(statement):
+        return CustomStoryWorkflowType.GENERIC
+
+    def _add(event):
+        session.added.append(event)
+
+    async def _flush():
+        session.flushed = True
+
+    session.scalar = _scalar
+    session.add = _add
+    session.flush = _flush
+
+    event = await CustomStoryWorkflowEventRepository(session).create(
+        workflow_id=workflow_id,
+        step_name=CustomStoryWorkflowStep.STORY_GENERATION,
+    )
+
+    assert event.workflow_id == workflow_id
+    assert event.story_type == CustomStoryWorkflowType.GENERIC
+    assert session.added == [event]
+    assert session.flushed is True
 
 
 def _step_by_name(steps: _StepRepo, step_name: CustomStoryWorkflowStep):

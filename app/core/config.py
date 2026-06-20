@@ -12,6 +12,11 @@ class Settings(BaseSettings):
     ENVIRONMENT: str
     DEBUG: bool = Field(validation_alias="APP_DEBUG")
     LOG_LEVEL: str = "INFO"
+    LOG_TO_FILE: bool = True
+    LOG_DIR: str = "logs"
+    LOG_FILE_NAME: str = "storybook-backend.log"
+    LOG_FILE_MAX_BYTES: int = 10 * 1024 * 1024
+    LOG_FILE_BACKUP_COUNT: int = 5
     API_V1_PREFIX: str
 
     DATABASE_URL: str
@@ -132,8 +137,8 @@ class Settings(BaseSettings):
     STORY_BATCH_POLL_INTERVAL_SECONDS: int = 30
     STORY_BATCH_MAX_WAIT_SECONDS: int = 86400
     STORY_BATCH_RECONCILE_SCHEDULER_ENABLED: bool = True
-    STORY_BATCH_RECONCILE_INTERVAL_MINUTES: int = 15
-    STORY_BATCH_RECONCILE_START_MINUTE: int = 0
+    STORY_BATCH_RECONCILE_INTERVAL_MINUTES: int = 5
+    STORY_BATCH_RECONCILE_START_MINUTE: int = 1
     STORY_BATCH_RECONCILE_LIMIT: int = 50
     CUSTOM_WORKFLOW_EVENT_SCHEDULER_ENABLED: bool = True
     CUSTOM_WORKFLOW_EVENT_INTERVAL_MINUTES: int = 5

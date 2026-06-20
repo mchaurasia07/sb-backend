@@ -194,8 +194,10 @@ class CustomStoryWorkflowEventRepository:
         retry_comment: str | None = None,
         retry_source_event_id: UUID | None = None,
     ) -> CustomStoryWorkflowEvent:
+        story_type = await self._story_type_for_workflow(workflow_id)
         event = CustomStoryWorkflowEvent(
             workflow_id=workflow_id,
+            story_type=story_type,
             step_name=step_name,
             status=CustomStoryWorkflowEventStatus.PENDING,
             retry_count=retry_count,
@@ -207,6 +209,19 @@ class CustomStoryWorkflowEventRepository:
         self.session.add(event)
         await self.session.flush()
         return event
+
+    async def _story_type_for_workflow(self, workflow_id: UUID) -> CustomStoryWorkflowType:
+        story_type = await self.session.scalar(
+            select(CustomStoryWorkflow.story_type).where(CustomStoryWorkflow.id == workflow_id)
+        )
+        if isinstance(story_type, CustomStoryWorkflowType):
+            return story_type
+        if isinstance(story_type, str):
+            try:
+                return CustomStoryWorkflowType(story_type)
+            except ValueError:
+                return CustomStoryWorkflowType.CUSTOM
+        return CustomStoryWorkflowType.CUSTOM
 
     async def create_if_absent(
         self,
@@ -292,10 +307,18 @@ class CustomStoryWorkflowEventRepository:
                 return event
         return None
 
-    async def list_by_workflow_desc(self, workflow_id: UUID) -> list[CustomStoryWorkflowEvent]:
+    async def list_by_workflow_desc(
+        self,
+        workflow_id: UUID,
+        *,
+        story_type: CustomStoryWorkflowType | str | None = None,
+    ) -> list[CustomStoryWorkflowEvent]:
+        filters = [CustomStoryWorkflowEvent.workflow_id == workflow_id]
+        if story_type is not None:
+            filters.append(CustomStoryWorkflowEvent.story_type == story_type)
         result = await self.session.execute(
             select(CustomStoryWorkflowEvent)
-            .where(CustomStoryWorkflowEvent.workflow_id == workflow_id)
+            .where(*filters)
             .order_by(CustomStoryWorkflowEvent.created_at.desc(), CustomStoryWorkflowEvent.id.desc())
         )
         return list(result.scalars().all())

@@ -427,9 +427,15 @@ class CustomStoryWorkflowService:
         steps = await self.steps.list_by_workflow(workflow.id)
         return [self._step_response(step) for step in steps]
 
-    async def get_events(self, user_id: UUID, workflow_id: UUID) -> list[CustomStoryWorkflowEventResponse]:
-        workflow = await self._get_owned(user_id, workflow_id)
-        events = await self.events.list_by_workflow_desc(workflow.id)
+    async def get_events(
+        self,
+        user_id: UUID,
+        workflow_id: UUID,
+        *,
+        story_type: CustomStoryWorkflowType | str | None = None,
+    ) -> list[CustomStoryWorkflowEventResponse]:
+        workflow = await self._get_owned(user_id, workflow_id, story_type=None)
+        events = await self.events.list_by_workflow_desc(workflow.id, story_type=story_type)
         return [self._event_response(event) for event in events]
 
     async def get_generic_steps(
@@ -448,11 +454,6 @@ class CustomStoryWorkflowService:
                 if self._status_value(step.step_name) == step_name
             ]
         return [self._generic_step_response(workflow, step) for step in steps]
-
-    async def get_generic_events(self, user_id: UUID, workflow_id: UUID) -> list[CustomStoryWorkflowEventResponse]:
-        workflow = await self._get_owned(user_id, workflow_id, story_type=CustomStoryWorkflowType.GENERIC)
-        events = await self.events.list_by_workflow_desc(workflow.id)
-        return [self._event_response(event) for event in events]
 
     async def retry(self, user_id: UUID, workflow_id: UUID) -> CustomStoryWorkflowResponse:
         workflow = await self.workflows.get_for_user_for_update(user_id, workflow_id)
@@ -3346,6 +3347,9 @@ class CustomStoryWorkflowService:
         return CustomStoryWorkflowEventResponse(
             id=event.id,
             workflow_id=event.workflow_id,
+            story_type=CustomStoryWorkflowService._status_value(
+                getattr(event, "story_type", CustomStoryWorkflowType.CUSTOM)
+            ),
             step_name=event.step_name.value if hasattr(event.step_name, "value") else str(event.step_name),
             status=event.status.value if hasattr(event.status, "value") else str(event.status),
             retry_count=event.retry_count,

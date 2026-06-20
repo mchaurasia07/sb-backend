@@ -59,6 +59,7 @@ class CustomStoryWorkflowStepResponse(BaseModel):
 class CustomStoryWorkflowEventResponse(BaseModel):
     id: UUID
     workflow_id: UUID
+    story_type: str = "CUSTOM"
     step_name: str
     status: str
     retry_count: int
