@@ -252,6 +252,21 @@ def _story_source_inputs(story: Story) -> dict[str, str]:
     }
 
 
+PLANNING_PREFERENCE_KEYS = (
+    "story_seed",
+    "protagonist_preference",
+    "protagonist_avoid",
+    "setting_preference",
+    "tone_preference",
+    "conflict_preference",
+    "moral_preference",
+    "visual_preference",
+    "title_preference",
+    "cultural_context",
+    "avoid_elements",
+)
+
+
 def _first_non_empty(*values: Any) -> str | None:
     for value in values:
         if isinstance(value, str) and value.strip():
@@ -3022,8 +3037,26 @@ Malformed JSON:
                 "character_profile_json": character_profile,
                 "character_profile": character_profile,
                 "character_description": character_context["character_description"],
+                "planning_preferences_json": _compact_json(
+                    StoryService._story_planning_preferences(story, safe_source_inputs)
+                ),
             },
         )
+
+    @staticmethod
+    def _story_planning_preferences(story: Any, source_inputs: dict[str, str]) -> dict[str, str]:
+        """Build optional creative planning controls without changing the request contract."""
+        input_request = getattr(story, "input_request", None)
+        if not isinstance(input_request, dict):
+            input_request = {}
+
+        preferences: dict[str, str] = {}
+        for key in PLANNING_PREFERENCE_KEYS:
+            value = input_request.get(key)
+            if key == "story_seed":
+                value = _first_non_empty(value, source_inputs.get("context"))
+            preferences[key] = StoryService._story_plan_safe_user_text(str(value or ""))
+        return preferences
 
     @staticmethod
     def _story_plan_prompt_source_inputs(source_inputs: dict[str, str]) -> dict[str, str]:
@@ -3093,6 +3126,7 @@ Malformed JSON:
             "story_context": safe_inputs["context"] or "none",
             "cast_mode": character_context.get("cast_mode", StoryService.CAST_MODE_CHILD_HERO),
             "character_profile": character_profile,
+            "planning_preferences": StoryService._story_planning_preferences(story, safe_inputs),
         }
         schema = {
             "title": "",

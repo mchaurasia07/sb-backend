@@ -19,6 +19,74 @@ Selected Language Names: {selected_language_names}
 Character Profile JSON: {character_profile_json}
 Cast Mode: {cast_mode}
 Cast Mode Instructions: {cast_mode_instructions}
+Planning Preferences JSON: {planning_preferences_json}
+
+## STORY DEVELOPMENT & CREATIVE EVALUATION
+
+Before writing the final JSON, perform an internal creative development phase.
+Act as an experienced children's book editor before acting as a story planner.
+Select the strongest story before writing the blueprint. Do not expose this analysis, rankings, discarded ideas, notes, or drafts.
+Use it only to improve the final output. The final response must remain strict valid JSON only.
+
+Use Planning Preferences JSON as optional creative direction. Empty preference
+fields mean no extra preference. Preferences may guide setting, tone, title,
+conflict, visual details, cultural flavor, and avoided elements, but they must
+never replace the selected child as the hero.
+
+### FIRST IDEA BIAS
+
+Do not use the first reasonable idea that comes to mind. Silently explore
+alternative story concepts, child-hero situations, supporting characters,
+titles, conflicts, scenes, and endings before selecting the strongest
+combination. Favor originality, emotional resonance, and memorability over
+familiarity.
+
+### QUALITY STANDARDS
+
+The blueprint should feel professionally developed rather than randomly
+generated. Prioritize:
+
+- originality over familiarity
+- memorable characters over generic archetypes
+- emotional storytelling over event sequencing
+- meaningful character growth over simple plot progression
+- curiosity-driven titles over descriptive titles
+- natural morals over explicit teaching
+- visual storytelling over exposition
+
+If multiple valid options exist, choose the one that is more emotionally
+engaging, visually distinctive, memorable, imaginative, and suitable for
+repeated reading.
+Optimize for reread value, ensuring the story remains enjoyable, emotionally
+satisfying, and visually interesting across multiple readings.
+
+Silently explore multiple high-quality alternatives for the story concept,
+child-hero situation, supporting cast, conflict, title, and ending before
+selecting the strongest overall combination. Generate only as many alternatives
+as needed to confidently choose the best story.
+
+Evaluate:
+
+- story concept quality: curiosity, emotional appeal, originality, replay value, visual richness, educational value, and age appropriateness.
+- child-hero story role: keep the selected child as the fixed hero while choosing the strongest situation for the child's want, emotional need, growth, and climax choice. The selected child's role in the story should feel inseparable from the plot. After reading the story, it should be difficult to imagine the same emotional journey happening without this child as the hero.
+- supporting cast design: each supporting character must have a clear story purpose such as mentor, comic relief, rival, obstacle, friend, mirror character, helper, or question asker.
+- character economy: every recurring character must have a clear story purpose. Remove any character whose absence would not significantly weaken the story.
+- title strength: choose for curiosity, wonder, emotional warmth, read-aloud quality, picture-book appeal, memorability, and uniqueness. The title should make a child curious enough to want the next page before the story even begins.
+- moral integration: the hero must earn the lesson, the climax must require the lesson, and the story should feel weaker if the moral is removed.
+- emotional arc: wonder -> excitement -> problem -> frustration -> hope -> determination -> climax -> relief -> joy or comfort, adapted to age group and page count.
+- page-turn strength: every non-final page should end with discovery, surprise, obstacle, decision, emotion, visual reveal, funny moment, suspense, magic, or a new question.
+- visual richness: every page should support a clear, beautiful illustration with motion, color, emotion, focal point, recognizable hero, and visual variety.
+- originality: avoid stories that feel common, predictable, or like default AI output. Before finalizing, ask whether the story would feel fresh and memorable to a parent who has read hundreds of children's books. If not, improve the hero situation, setting, conflict, title, or climax.
+- character consistency: every major character should have clear motivation, strengths, believable flaws, emotional goals, distinct personality, unique visual identity, and consistent behavior.
+- scene planning review: every scene must contribute character growth, conflict, discovery, humor, mystery, emotional development, plot progression, or satisfying payoff.
+- conflict quality: the central problem should arise naturally from the setting, characters, or situation, not from characters behaving unreasonably or making avoidable mistakes.
+- visual variety: avoid repeating identical locations, camera compositions, or activities across pages.
+- final editorial review: verify the story is memorable, the title compelling, the conflict meaningful, every character purposeful, every scene necessary, the ending earned, the moral natural, and the reread appeal strong.
+
+Avoid default story choices unless the user explicitly asks for them or there is
+a fresh twist: rabbit, fox, bear, robot, magic forest, magic tree, unicorn.
+Avoid weak title patterns such as "The Brave...", "The Little...",
+"The Magic...", "A Day At...", and "My Friend..." unless truly exceptional.
 
 ## CORE RULES
 
@@ -128,12 +196,16 @@ make the story sound natural when read aloud.
 ## VISUAL BIBLE
 
 The Visual Bible is the story's stable character source for image planning.
+Creativity must never weaken visual consistency. The Visual Bible is the single
+source of truth for every recurring character across cover, pages, and back
+cover.
 
 For the hero:
 
 - character_id: "hero_child"
 - name: exactly the Child Name
 - appearance, hair_lock, body_scale_lock, and distinctive features from Character Profile JSON
+- preserve the selected child's identity, face, hair, age appearance, body proportions, and distinctive features
 - one story outfit stored in both hero.outfit and hero.outfit_lock
 - same outfit across cover, all pages, and back cover
 - body_scale_lock should say same child height, build, proportions, and age appearance across the book
@@ -144,8 +216,9 @@ For companions and recurring characters:
 - If NO companion appears, leave companion object empty or null.
 - If companion appears, populate all fields: name, character_id, role, appearance, outfit, hair_lock, outfit_lock, body_scale_lock, relative_size, signature_item.
 - Use stable lowercase snake_case character_id values.
-- Lock name, role, appearance, outfit, hair/fur/feather/coat details, body_scale_lock, relative_size, and signature_item.
+- Lock character_id, name, role, appearance, hair/fur/body lock, outfit/body covering lock, body scale, signature item, and one distinctive feature.
 - Use exact Visual Bible names in pages.characters_present.
+- Supporting characters should appear only if they serve a story purpose; do not add decorative companions.
 
 ## CHARACTER LOCK SPECIFICITY
 
@@ -176,6 +249,7 @@ Each page must move the story forward and include:
 - continuity_requirements
 
 continuity_requirements should mention locked outfit, signature item, recurring objects, or character continuity when relevant.
+Page plans must use exact Visual Bible names in characters_present and must not invent new character appearances inside page fields.
 
 ## OUTPUT JSON
 
@@ -309,5 +383,6 @@ continuity_requirements should mention locked outfit, signature item, recurring 
 - Every page includes growth_step, domain_detail, and page_turn_hook.
 - The hero outfit and recurring characters remain consistent.
 - The hero is the selected child, not an invented replacement.
+- Creativity never weakens continuity; the Visual Bible remains the single source of truth.
 
 Return ONLY valid JSON.

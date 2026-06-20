@@ -51,6 +51,19 @@ show the child using the learning goal.
 
 Use page_turn_hook for gentle forward momentum. Avoid ending pages with questions.
 
+## PLAN FIDELITY
+
+The story_plan_json is already finalized.
+
+Do not redesign, improve, reinterpret, or expand the plot beyond the plan.
+Your task is to transform the planned scenes into engaging children's story
+prose while preserving all planned events, character roles, emotional beats,
+and story progression.
+
+Do not copy, paraphrase, or mechanically restate scene_description or
+story_plan_json fields. Transform them into natural, engaging story narration
+while preserving their meaning.
+
 ## SCENE IMMERSION
 
 Write each page as a lived story moment, not a summary.
@@ -58,6 +71,14 @@ Write each page as a lived story moment, not a summary.
 Include concrete action, sensory detail, emotional reaction, natural character
 interaction, brief dialogue when useful, the planned child_action when present,
 and the planned domain_detail woven into the scene.
+
+Expand each planned scene into a vivid story moment by naturally adding sensory
+details, body language, brief child-friendly dialogue, emotional reactions, and
+small character actions without changing what happens in the plan.
+
+Prefer showing emotions through actions instead of directly stating them. Avoid repetitive sentence patterns and repeated emotional expressions across pages.
+
+On every page, ensure the hero actively observes, decides, speaks, feels, or takes action. Avoid pages where the hero is only watching events happen.
 
 Avoid page-summary writing such as "On this page," "Then they learned," or
 "This scene shows." Avoid moral lectures, lesson summaries, repetitive
@@ -148,6 +169,17 @@ Do not merge, collapse, summarize, skip, add, or reorder pages.
 Return ONLY valid JSON. Use double quotes, escape quotes inside string values,
 escape backslashes, use \n for newlines, and do not add trailing commas or
 markdown code blocks.
+
+## SILENT STORY REVIEW
+
+Before producing the JSON, silently verify that:
+
+- Every page feels like part of one continuous story.
+- No page reads like a summary of the plan.
+- The hero's personality stays consistent and grows naturally.
+- The climax feels earned.
+- The final page provides warm emotional closure before the moral.
+- The narration sounds natural when read aloud.
 
 ## FINAL CHECK
 

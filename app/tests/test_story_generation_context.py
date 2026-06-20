@@ -210,6 +210,66 @@ def test_story_plan_prompts_require_complete_final_page():
         assert "The final page creates completion and does not set up another event" in prompt
 
 
+def test_story_plan_prompts_require_silent_editorial_evaluation_and_locked_consistency():
+    for prompt_path in (
+        "prompts/story/story_plan_child_hero_prompt.txt",
+        "prompts/story/story_plan_imagined_cast_prompt.txt",
+    ):
+        prompt = load_prompt(prompt_path)
+
+        assert "## STORY DEVELOPMENT & CREATIVE EVALUATION" in prompt
+        assert "Act as an experienced children's book editor before acting as a story planner" in prompt
+        assert "Select the strongest story before writing the blueprint" in prompt
+        assert "Do not expose this analysis" in prompt
+        assert "strict valid JSON only" in prompt
+        assert "### FIRST IDEA BIAS" in prompt
+        assert "Do not use the first reasonable idea" in prompt
+        assert "### QUALITY STANDARDS" in prompt
+        assert "originality over familiarity" in prompt
+        assert "emotional storytelling over event sequencing" in prompt
+        assert "curiosity-driven titles over descriptive titles" in prompt
+        assert "natural morals over explicit teaching" in prompt
+        assert "visual storytelling over exposition" in prompt
+        assert "Optimize for reread value" in prompt
+        assert "multiple high-quality alternatives" in prompt
+        assert "Generate only as many alternatives" in prompt
+        assert "confidently choose the best story" in prompt
+        assert "story concept quality" in prompt
+        assert "supporting cast design" in prompt
+        assert "character economy" in prompt
+        assert "Remove any character whose absence would not significantly weaken the story" in prompt
+        assert "title strength" in prompt
+        assert "moral integration" in prompt
+        assert "emotional arc" in prompt
+        assert "page-turn strength" in prompt
+        assert "visual richness" in prompt
+        assert "originality" in prompt
+        assert "fresh and memorable to a parent who has read hundreds of children's books" in prompt
+        assert "character consistency" in prompt
+        assert "scene planning review" in prompt
+        assert "conflict quality" in prompt
+        assert "central problem should arise naturally from the setting" in prompt
+        assert "not from characters behaving unreasonably or making avoidable mistakes" in prompt
+        assert "visual variety" in prompt
+        assert "final editorial review" in prompt
+        assert "reread appeal" in prompt
+        assert "rabbit, fox, bear, robot, magic forest, magic tree, unicorn" in prompt
+        assert "Creativity must never weaken visual consistency" in prompt
+        assert "Visual Bible is the single" in prompt
+        assert "must not invent new character appearances inside page fields" in prompt
+
+    child_prompt = load_prompt("prompts/story/story_plan_child_hero_prompt.txt")
+    imagined_prompt = load_prompt("prompts/story/story_plan_imagined_cast_prompt.txt")
+
+    assert "child-hero situation" in child_prompt
+    assert "child-hero story role" in child_prompt
+    assert "difficult to imagine the same emotional journey happening without this child as the hero" in child_prompt
+    assert "The hero is always the selected child" in child_prompt
+    assert "protagonist strength" in imagined_prompt
+    assert "difficult to imagine the same story with a different hero" in imagined_prompt
+    assert 'visual_bible.hero.character_id must NOT be "hero_child"' in imagined_prompt
+
+
 def test_story_generation_prompts_keep_moral_separate_from_story_closure():
     for prompt_path in (
         "prompts/story/story_generation_child_hero_prompt.txt",
@@ -223,6 +283,36 @@ def test_story_generation_prompts_keep_moral_separate_from_story_closure():
         assert "It must not replace the" in prompt
         assert "final page's emotional closure" in prompt
         assert "final page closes the conflict and feels complete" in prompt
+
+
+def test_story_generation_prompts_require_plan_fidelity_and_silent_review():
+    for prompt_path in (
+        "prompts/story/story_generation_child_hero_prompt.txt",
+        "prompts/story/story_generation_imagined_cast_prompt.txt",
+    ):
+        prompt = load_prompt(prompt_path)
+
+        assert "## PLAN FIDELITY" in prompt
+        assert "story_plan_json is already finalized" in prompt
+        assert "Do not redesign, improve, reinterpret, or expand the plot beyond the plan" in prompt
+        assert "preserving all planned events, character roles, emotional beats" in prompt
+        assert "and story progression" in prompt
+        assert "Do not copy, paraphrase, or mechanically restate scene_description" in prompt
+        assert "Transform them into natural, engaging story narration" in prompt
+        assert "Expand each planned scene into a vivid story moment" in prompt
+        assert "body language" in prompt
+        assert "without changing what happens in the plan" in prompt
+        assert "Prefer showing emotions through actions instead of directly stating them" in prompt
+        assert "Avoid repetitive sentence patterns" in prompt
+        assert "On every page, ensure the hero actively observes, decides, speaks, feels, or takes action" in prompt
+        assert "Avoid pages where the hero is only watching events happen" in prompt
+        assert "## SILENT STORY REVIEW" in prompt
+        assert "Every page feels like part of one continuous story" in prompt
+        assert "No page reads like a summary of the plan" in prompt
+        assert "The hero's personality stays consistent and grows naturally" in prompt
+        assert "The climax feels earned" in prompt
+        assert "warm emotional closure before the moral" in prompt
+        assert "The narration sounds natural when read aloud" in prompt
 
 
 def test_cast_mode_prompt_paths_are_split():
@@ -239,7 +329,13 @@ def test_cast_mode_prompt_paths_are_split():
 
 def test_imagined_cast_story_plan_prompt_does_not_force_selected_child_as_hero():
     template = load_prompt("prompts/story/story_plan_imagined_cast_prompt.txt")
-    story = SimpleNamespace(age_group=AgeGroup.EARLY_READER)
+    story = SimpleNamespace(
+        age_group=AgeGroup.EARLY_READER,
+        input_request={
+            "story_seed": "A rocket loses its map near a moon garden.",
+            "visual_preference": "bright colors and lots of motion",
+        },
+    )
     child = SimpleNamespace(
         first_name="Mira",
         gender="female",
@@ -274,6 +370,87 @@ def test_imagined_cast_story_plan_prompt_does_not_force_selected_child_as_hero()
     assert "Do NOT use the selected child profile as a story character" in prompt
     assert 'visual_bible.hero.character_id must NOT be "hero_child"' in prompt
     assert "Mira" not in prompt
+    assert "{planning_preferences_json}" not in prompt
+    assert '"story_seed":"A rocket loses its map near a moon garden."' in prompt
+    assert '"visual_preference":"bright colors and lots of motion"' in prompt
+    assert "protagonist strength" in prompt
+
+
+def test_child_hero_story_plan_prompt_keeps_child_hero_and_uses_planning_preferences():
+    template = load_prompt("prompts/story/story_plan_child_hero_prompt.txt")
+    story = SimpleNamespace(
+        age_group=AgeGroup.EARLY_READER,
+        input_request={
+            "story_seed": "A garden puzzle opens only when clues are solved slowly.",
+            "title_preference": "warm and curious, avoid The Little",
+        },
+    )
+    child = SimpleNamespace(
+        first_name="Mira",
+        gender="female",
+        age=6,
+        character_metadata={"description": "A curious child with bright eyes."},
+    )
+
+    prompt = StoryService._render_story_plan_prompt(
+        template,
+        story=story,
+        child=child,
+        source_inputs={
+            "category": "garden mystery",
+            "learning_goal": "solve problems step by step",
+            "context": "A child discovers a patient puzzle in a garden.",
+        },
+        theme="garden mystery",
+        hobby="reading",
+        pages=8,
+        character_context={
+            "use_child_character": True,
+            "cast_mode": StoryService.CAST_MODE_CHILD_HERO,
+            "character_description": "A curious child with bright eyes.",
+            "child_age_label": "Early Reader",
+            "child_age_visual_guidance": "age-appropriate proportions for the reader band",
+            "cast_mode_instructions": "CHILD_HERO: preserve the selected child as the story hero.",
+        },
+    )
+
+    assert "The hero is always the selected child" in prompt
+    assert 'visual_bible.hero.character_id must be exactly "hero_child"' in prompt
+    assert "child-hero story role" in prompt
+    assert "{planning_preferences_json}" not in prompt
+    assert '"story_seed":"A garden puzzle opens only when clues are solved slowly."' in prompt
+    assert '"title_preference":"warm and curious, avoid The Little"' in prompt
+
+
+def test_story_planning_preferences_fall_back_to_existing_context_without_new_request_fields():
+    story = SimpleNamespace(input_request={})
+
+    preferences = StoryService._story_planning_preferences(
+        story,
+        {
+            "category": "space",
+            "learning_goal": "careful observation",
+            "context": "A comet leaves silver clues across the sky.",
+        },
+    )
+
+    assert set(preferences) == set(
+        [
+            "story_seed",
+            "protagonist_preference",
+            "protagonist_avoid",
+            "setting_preference",
+            "tone_preference",
+            "conflict_preference",
+            "moral_preference",
+            "visual_preference",
+            "title_preference",
+            "cultural_context",
+            "avoid_elements",
+        ]
+    )
+    assert preferences["story_seed"] == "A comet leaves silver clues across the sky."
+    assert preferences["protagonist_preference"] == ""
 
 
 def test_story_generation_imagined_prompt_preserves_visual_bible_hero():
