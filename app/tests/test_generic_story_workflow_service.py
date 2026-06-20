@@ -22,6 +22,7 @@ from app.model.request.generic_story_workflow import (
 )
 from app.model.response.generic_story_workflow import GenericStoryWorkflowListResponse, GenericStoryWorkflowResponse
 from app.repository.generic_story_workflow_repository import GenericStoryWorkflowRepository
+from app.routes.v1 import generic_stories as generic_story_routes
 from app.service.generic_story_batch_service import GenericStoryBatchService
 from app.service.generic_story_workflow_service import (
     STORY_LANGUAGE_VARIANTS_KEY,
@@ -75,6 +76,17 @@ def test_generic_story_workflow_has_user_created_at_index():
         "generic_story_id",
         "created_at",
     )
+
+
+def test_generic_story_workflow_create_routes_support_singular_and_plural_paths():
+    route_methods: dict[str, set[str]] = {"/workflow": set(), "/workflows": set()}
+    for route in generic_story_routes.router.routes:
+        path = getattr(route, "path", None)
+        if path in route_methods:
+            route_methods[path].update(getattr(route, "methods", set()))
+
+    assert "POST" in route_methods["/workflow"]
+    assert "POST" in route_methods["/workflows"]
 
 
 def _generic_steps_migration():

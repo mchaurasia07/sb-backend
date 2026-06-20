@@ -138,6 +138,7 @@ async def create_generic_story(
     return success_response(data, "Generic story created successfully")
 
 
+@router.post("/workflow", response_model=ApiResponse[GenericStoryWorkflowResponse], status_code=status.HTTP_202_ACCEPTED)
 @router.post("/workflows", response_model=ApiResponse[GenericStoryWorkflowResponse], status_code=status.HTTP_202_ACCEPTED)
 async def create_generic_story_workflow(
     payload: GenericStoryWorkflowCreateRequest,
