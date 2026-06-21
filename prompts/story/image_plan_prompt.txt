@@ -238,12 +238,46 @@ Each illustration should contain:
 * one clear focal point
 * one primary environment
 
+Every illustration should communicate one dominant visual action. Secondary
+actions may appear only when they support the main action and do not compete
+for attention.
+
+The hero should be the first element a child notices within one second of
+viewing the page.
+
 Avoid clutter.
 
 Maximum:
 
 * 4 supporting objects
 * 4 visible characters
+
+## VISUAL SIMPLICITY BY AGE
+
+Adapt visual complexity to the reader age:
+
+* 0-3: use large readable characters, simple backgrounds, few objects, high
+  visual clarity, and very clear emotions.
+* 3-6: allow richer environments while maintaining a clear focal point, low
+  clutter, and easy-to-read story action.
+* 6-9: allow richer visual context and more environmental detail, but still
+  keep one primary action and a clear hero-focused composition.
+
+## VISUAL CONTINUITY
+
+For consecutive pages, preserve continuity like a coherent film sequence:
+
+* camera orientation when appropriate
+* environment continuity
+* character positions when continuing the same scene
+* prop locations
+* lighting direction
+* color palette and rendering style
+
+When consecutive pages occur in the same location, reuse the same environment
+with only the changes required by the story. Do not reset the location into a
+different forest, room, garden, street, classroom, or fantasy world unless the
+story explicitly changes location or time.
 
 ---
 

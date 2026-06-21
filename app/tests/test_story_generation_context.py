@@ -181,6 +181,30 @@ def test_custom_story_generation_prompts_enforce_exact_page_count():
         assert "output exactly those three keys" in prompt
 
 
+def test_custom_story_generation_prompts_require_native_hindi_marathi_localization():
+    for prompt_path in (
+        "prompts/story/story_generation_child_hero_prompt.txt",
+        "prompts/story/story_generation_imagined_cast_prompt.txt",
+    ):
+        prompt = load_prompt(prompt_path)
+
+        assert "## LANGUAGE LOCALIZATION" in prompt
+        assert "Generate each language directly from the STORY PLAN" in prompt
+        assert "think first as a native children's author" in prompt
+        assert "Do not translate English phrases, idioms, metaphors, sentence structure" in prompt
+        assert "Avoid overly formal, Sanskritized, literary, or textbook words" in prompt
+        assert "Avoid highly literary, overly Sanskritized, or textbook vocabulary" in prompt
+        assert "सच्चा प्यार" in prompt
+        assert "शुद्ध प्यार" in prompt
+        assert "धप्प!" in prompt
+        assert "बॉन्क!" in prompt
+        assert "अरे बाप रे!" in prompt
+        assert "अरे देवा!" in prompt
+        assert "Borrow English words in Hindi or Marathi only if they are genuinely part of" in prompt
+        assert "Never transliterate an English word, phrase, idiom, metaphor, or sound effect" in prompt
+        assert "Hindi and Marathi sound originally authored in those languages" in prompt
+
+
 def test_tts_prompt_has_multilingual_voice_rules():
     prompt = load_prompt("prompts/tts_narration_template.txt")
 
@@ -268,6 +292,35 @@ def test_story_plan_prompts_require_silent_editorial_evaluation_and_locked_consi
     assert "protagonist strength" in imagined_prompt
     assert "difficult to imagine the same story with a different hero" in imagined_prompt
     assert 'visual_bible.hero.character_id must NOT be "hero_child"' in imagined_prompt
+
+
+def test_story_plan_prompts_include_developmental_language_profiles():
+    for prompt_path in (
+        "prompts/story/story_plan_child_hero_prompt.txt",
+        "prompts/story/story_plan_imagined_cast_prompt.txt",
+    ):
+        prompt = load_prompt(prompt_path)
+
+        assert "## AGE ADAPTATION & LANGUAGE PROFILE" in prompt
+        assert "not only reading difficulty" in prompt
+        assert "18-24 month old child" in prompt
+        assert "sitting on a parent's lap" in prompt
+        assert "Every sentence should be understandable from spoken" in prompt
+        assert "language alone" in prompt
+        assert "sound words such as baa, moo, quack" in prompt
+        assert "Sentence length: 1-6 words preferred, maximum 8 words." in prompt
+        assert "Sentence length: 5-12 words." in prompt
+        assert "Sentence length: 8-18 words." in prompt
+        assert "vocabulary, sentence rhythm, emotional depth" in prompt
+        assert '"target_reader": ""' in prompt
+        assert '"narration_style": ""' in prompt
+        assert '"humor_style": ""' in prompt
+        assert '"emotional_complexity": ""' in prompt
+        assert '"concept_complexity": ""' in prompt
+        assert '"sound_word_usage": ""' in prompt
+        assert '"sensory_language": ""' in prompt
+        assert '"page_focus": ""' in prompt
+        assert '"read_aloud_rhythm": ""' in prompt
 
 
 def test_story_generation_prompts_keep_moral_separate_from_story_closure():
@@ -1141,6 +1194,30 @@ def test_prompt_character_identity_lock_formats_summary_profile_and_age():
     assert "Age/body guidance: early-reader child proportions" in lock
 
 
+def test_story_image_generation_prompt_has_stronger_text_and_consistency_rules():
+    prompt = load_prompt("prompts/story/image_generation_prompt.txt")
+
+    assert "Do NOT render any text, letters, words, numbers, logos, labels, signs" in prompt
+    assert "Story pages must be completely text-free unless Current Page Data explicitly" in prompt
+    assert "render ONLY the exact Story Title as the sole visible text on the cover" in prompt
+    assert "do not generate subtitles, author names, publisher logos, decorative words" in prompt
+    assert "Only render characters explicitly listed in Current Page Data" in prompt
+    assert "Do not invent" in prompt
+    assert "background children" in prompt
+    assert "Do not introduce new important objects or props unless specified" in prompt
+    assert "maintain consistent camera distance and character scale across story pages" in prompt
+    assert "Keep the main subject fully inside the frame" in prompt
+    assert "Avoid cutting off the head" in prompt
+    assert "Maintain consistent color palette, rendering style, and lighting mood" in prompt
+    assert "visually rich but uncluttered" in prompt
+    assert "naturally look toward the action" in prompt
+    assert "main story object" in prompt
+    assert "Facial expressions must accurately match the page emotion" in prompt
+    assert "duplicated objects" in prompt
+    assert "duplicated accessories" in prompt
+    assert "repeated background artifacts" in prompt
+
+
 def test_story_image_prompt_renders_child_name():
     template = load_prompt("prompts/story/image_generation_prompt.txt")
 
@@ -1480,6 +1557,24 @@ def test_build_image_plan_context_reduces_story_plan_and_story_json_to_visual_fi
             }
         ],
     }
+
+
+def test_story_image_plan_prompt_has_visual_continuity_and_age_simplicity_rules():
+    prompt = load_prompt("prompts/story/image_plan_prompt.txt")
+
+    assert "## VISUAL SIMPLICITY BY AGE" in prompt
+    assert "0-3: use large readable characters, simple backgrounds, few objects" in prompt
+    assert "3-6: allow richer environments while maintaining a clear focal point" in prompt
+    assert "6-9: allow richer visual context and more environmental detail" in prompt
+    assert "Every illustration should communicate one dominant visual action" in prompt
+    assert "The hero should be the first element a child notices within one second" in prompt
+    assert "## VISUAL CONTINUITY" in prompt
+    assert "camera orientation when appropriate" in prompt
+    assert "environment continuity" in prompt
+    assert "character positions when continuing the same scene" in prompt
+    assert "prop locations" in prompt
+    assert "lighting direction" in prompt
+    assert "When consecutive pages occur in the same location, reuse the same environment" in prompt
 
 
 def test_custom_safe_image_plan_prompt_enforces_story_page_contract():

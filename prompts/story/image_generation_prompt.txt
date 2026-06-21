@@ -208,6 +208,10 @@ character identities from the attached references and Visual Bible. Do not swap
 faces between characters. Do not use the selected child hero's face for a side
 character or a side character's face for the selected child hero.
 
+Only render characters explicitly listed in Current Page Data. Do not invent
+additional people, animals, background children, companions, pets, creatures, or
+crowd characters.
+
 Preserve:
 
 * appearance
@@ -341,13 +345,14 @@ Cover:
 * visually exciting
 * strongest emotional appeal
 * readable front-cover layout
-* render the exact Story Title as visible book-cover title typography
+* render ONLY the exact Story Title as the sole visible text on the cover
 * place title text directly on clean natural title-safe negative space, such as
   sky, soft foliage, wall, or water mist
 * use large, correctly spelled, child-friendly typography
 * do not put the title inside a black rectangle, box, label, banner, UI panel,
   sticker, plaque, or card
-* no extra words besides the exact Story Title
+* do not generate subtitles, author names, publisher logos, decorative words,
+  random letters, extra labels, or additional typography
 
 Story Page:
 
@@ -355,8 +360,10 @@ Story Page:
 * readable storytelling
 * balanced composition
 * text-safe negative space
-* no visible text unless the Current Page explicitly requires a readable sign,
-  label, or book title
+* Do NOT render any text, letters, words, numbers, logos, labels, signs,
+  symbols, or typography on story pages.
+* Story pages must be completely text-free unless Current Page Data explicitly
+  provides the exact text to render.
 
 Back Cover:
 
@@ -374,6 +381,23 @@ Maintain stable character scale across story pages:
 * the hero should be clearly readable but not an extreme close-up
 * avoid making the face/head disproportionately large compared with the body
 * avoid shrinking the hero into the background unless the page explicitly requires a wide establishing shot
+* maintain consistent camera distance and character scale across story pages
+  unless Current Page Data explicitly requests a wide establishing shot or
+  close-up
+
+Keep the main subject fully inside the frame. Avoid cutting off the head,
+hands, feet, locked footwear, signature items, or important story objects.
+
+Do not introduce new important objects or props unless specified in Current
+Page Data or required for the environment. Background details may support the
+setting, but they must not become new story objects.
+
+Maintain consistent color palette, rendering style, and lighting mood across
+consecutive pages unless the story explicitly changes time of day, location, or
+weather.
+
+Keep backgrounds visually rich but uncluttered. Remove unnecessary decorative
+objects that distract from the main story action.
 
 ---
 
@@ -392,6 +416,12 @@ Show emotion through:
 * body language
 * interaction
 * posture
+
+Characters should naturally look toward the action, another character, or the
+main story object. Avoid blank, random, or unfocused gazes.
+
+Facial expressions must accurately match the page emotion. Avoid expressions
+that conflict with the planned emotional beat.
 
 Create a visually rich environment with natural depth.
 
@@ -473,17 +503,25 @@ Do not generate:
 * oversized eyes
 * oversized heads
 * distorted anatomy
+* duplicated objects
+* duplicated accessories
 * duplicate limbs
+* repeated background artifacts
 * extra fingers
 * cropped faces
+* cropped heads, hands, feet, locked footwear, signature items, or important
+  story objects
 * blurry rendering
 * horror imagery
 * aggressive expressions
 * watermarks
 * unwanted text on story pages or back cover
+* letters, numbers, logos, labels, signs, symbols, or typography on story pages
 * text artifacts
 * misspelled cover title
 * extra cover words beyond the exact Story Title
+* subtitles, author names, publisher logos, decorative words, or additional
+  cover typography
 * black rectangle or label behind cover title
 
 For water-play scenes, use modest covered family-friendly outfits for every

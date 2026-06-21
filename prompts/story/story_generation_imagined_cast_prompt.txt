@@ -95,7 +95,9 @@ explanations, and textbook-like facts.
 ## LANGUAGE AND AUDIOBOOK STYLE
 
 Follow language_profile as the primary guide for vocabulary, sentence length,
-repetition, dialogue complexity, and read-aloud rhythm.
+repetition, dialogue complexity, narration style, humor style, emotional
+complexity, concept complexity, sound word usage, sensory language, page focus,
+and read-aloud rhythm.
 
 Selected languages come from story_plan_json.selected_languages. Output only
 those language keys, no extra languages.
@@ -105,13 +107,56 @@ those language keys, no extra languages.
 - The JSON shape below is illustrative. Replace the shown language keys with
   exactly story_plan_json.selected_languages. If selected_languages is ["hi"],
   output only "hi". If it is ["en","hi","mr"], output exactly those three keys.
-- English (en) must be natural children's story prose.
-- Hindi (hi) and Marathi (mr) must be natural children's narration in
-  Devanagari, not literal translations of English.
-- Write each selected language independently from the same plan. Do not copy
-  English sentence order into Hindi or Marathi.
-- Use common English words in Hindi/Marathi only where children would naturally
-  use them.
+
+## LANGUAGE LOCALIZATION
+
+Generate each language directly from the STORY PLAN, not from another language's
+output.
+
+Treat English, Hindi, and Marathi as independent children's stories that share
+the same plot, characters, emotions, page sequence, and moral. For every
+language, think first as a native children's author in that language.
+
+Use vocabulary, expressions, dialogue, rhythm, humor, narration, and sound
+effects that feel naturally written for young children who speak that language.
+Do not translate English phrases, idioms, metaphors, sentence structure,
+dialogue beats, or sound effects. Replace culture-specific wording with the
+most natural equivalent used by parents, caregivers, and children's books in
+that language.
+
+Use age-appropriate everyday spoken language instead of formal, literary,
+dictionary, or textbook vocabulary. If an English word, expression, or sound
+effect would feel unnatural, replace it with a natural local equivalent instead
+of transliterating it.
+
+English (en):
+
+- Write natural children's story prose.
+- Use warm read-aloud rhythm and age-appropriate vocabulary.
+
+Hindi (hi):
+
+- Write in Devanagari as if originally authored for Hindi-speaking children.
+- Prefer everyday conversational Hindi used by parents while reading picture books.
+- Avoid overly formal, Sanskritized, literary, or textbook words.
+- Prefer natural Hindi expressions and sound words over transliterated English.
+- Prefer "सच्चा प्यार", "ढेर सारा प्यार", or "दिल से प्यार" over "शुद्ध प्यार" or "प्योर लव".
+- Prefer natural sound words like "धप्प!", "ठक!", "छपाक!", "टप-टप!", "सरसर!", "फुर्र!" instead of transliterated English sounds like "बॉन्क!".
+- Prefer natural expressions like "अरे!", "अरे बाप रे!", "वाह!", and "हुर्रे!" instead of "ऊप्स!", "ओके!", or "ये!".
+
+Marathi (mr):
+
+- Write in Devanagari as if originally authored for Marathi-speaking children.
+- Prefer everyday spoken Marathi used by parents while reading picture books.
+- Avoid highly literary, overly Sanskritized, or textbook vocabulary.
+- Prefer natural Marathi expressions and sound words over transliterated English.
+- Use simple child-friendly Marathi phrasing, warm read-aloud rhythm, and natural dialogue.
+- Use local sound words and expressions such as "धप्प!", "ठक!", "छपाक!", "टपटप!", "अरे!", "अरे देवा!", "वा!", and "हुर्रे!" where they fit.
+
+Borrow English words in Hindi or Marathi only if they are genuinely part of
+everyday speech among young children, for example बस, स्कूल, डॉक्टर, मोबाइल.
+Never transliterate an English word, phrase, idiom, metaphor, or sound effect
+when a natural Hindi or Marathi equivalent exists.
 
 Age band fallback targets:
 
@@ -189,6 +234,8 @@ Before producing the JSON, silently verify that:
 - The climax feels earned.
 - The final page provides warm emotional closure before the moral.
 - The narration sounds natural when read aloud.
+- Hindi and Marathi sound originally authored in those languages, not translated
+  from English.
 
 ## FINAL CHECK
 
@@ -202,6 +249,9 @@ Before producing the JSON, silently verify that:
 8. Output page_number values match story_plan_json.expected_page_numbers exactly.
 9. Localized objects contain exactly story_plan_json.selected_languages and no extra language keys.
 10. The output JSON shape exactly matches the required format.
+11. Hindi and Marathi avoid literal translation, English sentence order, and
+    transliterated English words or sound effects when natural local equivalents
+    exist.
 
 # STORY PLAN JSON
 

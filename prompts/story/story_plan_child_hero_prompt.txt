@@ -178,20 +178,99 @@ Anchor count:
 
 Every page should include a useful domain_detail when possible.
 
-## LANGUAGE PROFILE
+## AGE ADAPTATION & LANGUAGE PROFILE
 
-Create language_profile for the story writer.
+Create language_profile for the story writer. It must match how children in the
+selected age group naturally understand stories, not only reading difficulty.
+
+The language_profile must guide vocabulary, sentence structure, dialogue,
+repetition, rhythm, humor, emotional complexity, concept complexity, sensory
+language, sound words, page focus, and narration style.
 
 The plan itself must stay language-neutral and structurally shared across all
 selected output languages. Do not create separate plots per language. The final
 story writer will localize the same plan into only the selected languages.
 
-- 0-3: familiar everyday words, sound words, repetition, sensory language, 1-8 words per sentence.
-- 3-6: simple everyday vocabulary, concrete descriptions, short dialogue, 5-12 words per sentence.
-- 6-9: richer but age-appropriate vocabulary, layered emotions, varied sentence structure, 8-18 words per sentence.
+### Infant & Toddler (0-3)
 
-For all ages, prefer familiar words, introduce new words only with context, and
-make the story sound natural when read aloud.
+Children are listeners, not readers. The story should feel like a parent reading
+aloud with warmth, rhythm, and simple delight.
+
+For 0-3 stories, imagine the narrator is reading to an 18-24 month old child
+sitting on a parent's lap. Every sentence should be understandable from spoken
+language alone. Favor repeated words, playful sounds, and simple actions over
+explanation. Most pages should introduce only one new action or idea.
+
+Use:
+
+- very familiar everyday words
+- frequent repetition
+- sound words such as baa, moo, quack, tap tap, splash, zoom, whoosh, yum, clap clap
+- playful baby expressions such as uh-oh, yay, peekaboo, shh, hehe
+- rhythmic phrases
+- predictable sentence patterns
+- sensory words
+- concrete actions happening now
+
+Avoid:
+
+- abstract ideas
+- long explanations
+- complex dialogue
+- multiple events in one sentence
+
+Sentence length: 1-6 words preferred, maximum 8 words.
+Dialogue: single short lines.
+Humor: silly sounds, funny faces, unexpected tiny actions, gentle repetition.
+Learning: through repetition and observation.
+Page focus: one simple action or discovery.
+
+### Early Reader (3-6)
+
+Children enjoy simple adventures with clear feelings, playful discoveries, and
+moments they can join aloud.
+
+Use:
+
+- familiar vocabulary
+- concrete descriptions
+- playful dialogue
+- simple comparisons
+- action words
+- light suspense
+- repeated phrases children can say aloud
+
+Sentence length: 5-12 words.
+Dialogue: 1-3 short exchanges.
+Humor: funny misunderstandings, surprises, silly situations, repetition with variation.
+Learning: through trying, failing, noticing, and trying again.
+Page focus: one meaningful story beat.
+
+### Growing Reader (6-9)
+
+Children enjoy richer stories, problem solving, emotional growth, and characters
+with distinct personalities.
+
+Use:
+
+- broader age-appropriate vocabulary
+- varied sentence lengths
+- expressive dialogue
+- internal thoughts
+- richer descriptions
+- emotional nuance
+- problem solving
+
+Sentence length: 8-18 words.
+Dialogue: natural conversations.
+Humor: character personality, word play, situational comedy.
+Learning: through meaningful choices and consequences.
+Page focus: advance plot and character growth.
+
+For every age group, ensure vocabulary, sentence rhythm, emotional depth,
+dialogue, humor, repetition, concept complexity, and page complexity
+consistently match the selected reader age. Prefer familiar words, introduce new
+words only with context, and make the story sound natural when read aloud.
 
 ## VISUAL BIBLE
 
@@ -278,10 +357,19 @@ Page plans must use exact Visual Bible names in characters_present and must not 
   },
   "language_profile": {
     "reading_stage": "",
+    "target_reader": "",
     "sentence_length": "",
     "vocabulary_level": "",
     "repetition_level": "",
-    "dialogue_complexity": ""
+    "dialogue_complexity": "",
+    "narration_style": "",
+    "humor_style": "",
+    "emotional_complexity": "",
+    "concept_complexity": "",
+    "sound_word_usage": "",
+    "sensory_language": "",
+    "page_focus": "",
+    "read_aloud_rhythm": ""
   },
   "content_anchors": {
     "required_names": [],
@@ -376,7 +464,7 @@ Page plans must use exact Visual Bible names in characters_present and must not 
 - pages.length equals Page Count.
 - The selected child solves the conflict.
 - Story Context shapes central_problem or emotional arc.
-- language_profile matches Age Group.
+- language_profile matches Age Group across vocabulary, sentence rhythm, emotional depth, dialogue, humor, repetition, concept complexity, and page complexity.
 - learning_goal appears throughout the story.
 - content_anchors include concrete theme details.
 - The final page creates completion and does not set up another event.
