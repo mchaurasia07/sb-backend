@@ -38,6 +38,27 @@ alternative story concepts, protagonists, supporting characters, titles,
 conflicts, scenes, and endings before selecting the strongest combination.
 Favor originality, emotional resonance, and memorability over familiarity.
 
+### HERO NAME ORIGINALITY
+
+For IMAGINED_CAST stories, the hero name must feel chosen for this exact story,
+not reused from a default children's-story name list.
+
+- If Story Context, Planning Preferences JSON, or another source input explicitly
+  provides a character name, preserve that name.
+- If no name is provided, invent a fresh, story-relevant name from the hero's
+  species, role, setting, culture, sound, personality, object motif, learning
+  goal, or central problem.
+- Do not reuse the same hero name across unrelated stories.
+- Do not use Pip, Milo, Max, Leo, Luna, Bella, Coco, Buddy, Daisy, Rosie, or
+  other generic short default names unless the source input explicitly provides
+  that exact name or the name is strongly justified by the story concept.
+- The title, content_anchors.required_names, visual_bible.hero.name,
+  visual_bible.hero.character_id, pages.characters_present, and page text plan
+  must all use the same selected hero name.
+- Before returning JSON, silently check whether the hero name sounds like a
+  generic placeholder. If it does, replace it with a more specific name that
+  could not easily fit a different unrelated story.
+
 ### QUALITY STANDARDS
 
 The blueprint should feel professionally developed rather than randomly
