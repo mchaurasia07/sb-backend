@@ -14,7 +14,7 @@ The visual bible will be used for:
 * sequels
 * marketing artwork
 
-Character consistency is critical.
+Character and important-object consistency are critical.
 
 # INPUTS
 
@@ -87,6 +87,10 @@ Visual Diversity Seed:
 12. outfit_lock must include clothing type, exact colors, pattern, and footwear.
 
 13. forbidden_variations must include hairstyle changes, outfit/color changes, footwear changes, missing fixed accessories, random added accessories, skin tone changes, and eye color changes.
+
+14. Important recurring objects must have ONE fixed visual identity. If an object appears across multiple pages or drives the story problem/solution, lock its material, shape, color, size, distinctive marks, orientation rules, and forbidden variations.
+
+15. Object state may change only when the story changes it. Keep permanent identity fixed while allowing page-specific state changes such as open/closed, empty/full, broken/repaired, dry/wet, low/high water level, number of pebbles, lit/unlit, or clean/dirty.
 
 # CROSS-STORY VARIETY RULES
 
@@ -166,7 +170,10 @@ Every character must have a design_fingerprint summarizing the locked look. The 
 {
 "name": "",
 "description": "",
-"continuity_requirements": []
+"visual_identity": "",
+"state_variables": [],
+"continuity_requirements": [],
+"forbidden_variations": []
 }
 ]
 }
@@ -191,4 +198,5 @@ Every character must have a design_fingerprint summarizing the locked look. The 
 16. Every character has design_fingerprint.
 17. cast_design_fingerprint explains the story-specific cast look.
 18. Invented details are locked and reused by cover and all pages.
-19. Return STRICT VALID JSON ONLY.
+19. Every recurring story object has visual_identity, state_variables when state changes across pages, continuity_requirements, and forbidden_variations.
+20. Return STRICT VALID JSON ONLY.

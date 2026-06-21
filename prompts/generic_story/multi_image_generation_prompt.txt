@@ -100,8 +100,10 @@ Use GLOBAL CHARACTER REFERENCE JSON as the source of truth for character appeara
 Use visual_context as the source of truth for page-scoped style, object appearance, and location identity.
 Use visible_character_contract as the exact count contract for named characters in that item.
 Use page_image_plan.characters as the exact visible-character allow-list for that item.
-Use page_image_plan.important_objects as the exact important-object allow-list for that item.
-Do not draw characters or objects that are not listed for that item.
+Use page_image_plan.important_objects as the exact story-important object allow-list for that item.
+Use page_image_plan.object_states as the exact visible state contract for those objects in that item.
+Do not draw characters or story-important objects that are not listed for that item. Natural incidental background details are allowed only when they are required by page_image_plan.environment and do not become new story-important objects.
+Do not carry a recurring/signature object into an item unless it is listed in page_image_plan.important_objects for that item.
 Respect page_image_plan.camera_shot, composition, emotion, environment, and continuity_notes.
 Use page_image_plan.allowed_in_scene_text as the complete allow-list for readable words on story pages.
 If any item field conflicts with the story_page text ban, ignore the title/caption/text instruction and keep the scene wordless except for allowed_in_scene_text.
@@ -122,6 +124,9 @@ story_page:
 - Draw each listed named character once and only once. No duplicate Zoya-like child, parent, helper, pet, or background version of any listed character.
 - Do not create head-only background figures, extra partial heads, or detached/floating faces. Every visible character must have one coherent connected body.
 - Keep every listed character visually consistent with visual_context and page_image_plan.continuity_notes.
+- Draw every listed important object with the same locked identity from visual_context across all images: same material, shape, color, size, markings, and normal orientation.
+- Follow page_image_plan.object_states exactly for the object's current page state: location, orientation, open/closed, empty/full, water level, contents amount/count, damage, cleanliness, light state, or other visible story state.
+- Do not jump ahead to a future solved object state, and do not revert an object to an earlier state. Cause-and-effect object changes must progress sequentially across the requested images.
 - Leave natural uncluttered blank space only if the composition needs it; never fill that space with words.
 - Do not render story prose, narration text, captions, subtitles, title text, speech bubbles, floating text, UI text, or any top/bottom overlay text.
 - Readable text is allowed only when page_image_plan.allowed_in_scene_text explicitly lists short in-scene object text, such as blackboard writing, a chair name label, a classroom sign, or a book cover inside the scene.

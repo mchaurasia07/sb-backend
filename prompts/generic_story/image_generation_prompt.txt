@@ -38,11 +38,19 @@ GLOBAL CHARACTER REFERENCE JSON:
 
 If PAGE TYPE is "cover", create a finished front book cover from the whole-story direction, title layout, genre signal, and story promise. It must not look like page 1 or any interior page. Visible cover characters must match the same canonical character models used for all interior story pages.
 
-If PAGE TYPE is an interior story page, draw the exact SCENE TO DRAW and IMAGE PLAN moment: action, environment, character list, objects, emotion, camera shot, and composition are hard requirements.
+If PAGE TYPE is an interior story page, draw the exact SCENE TO DRAW and IMAGE PLAN moment: action, environment, character list, important objects, object states, emotion, camera shot, and composition are hard requirements.
 
-Use only characters and objects listed in the image plan. Do not add extra characters, family members, toys, props, locations, text, signs, labels, logos, or background story elements unless explicitly listed.
+Use only characters and story-important objects listed in the image plan. Do not add extra characters, family members, toys, props, locations, text, signs, labels, logos, or background story elements unless explicitly listed. Natural incidental background details are allowed only when they are required by the listed environment and do not become new story-important objects.
+
+Do not carry a recurring/signature object into this page unless it is listed in IMAGE PLAN.important_objects for this page. Objects from earlier or later pages must be omitted when the current page scene does not call for them.
 
 Keep identities and continuity from the model sheet and GLOBAL CHARACTER REFERENCE JSON. Do not redesign characters or change outfit, hairstyle, face shape, age, skin tone, body scale, accessories, fixed objects, or forbidden variations. For covers, use the exact same story characters as the interior pages, not marketing redesigns, alternate costumes, older/younger versions, prettier versions, simplified versions, or lookalikes.
+
+Important object consistency is mandatory for objects listed in IMAGE PLAN.important_objects on this page. Every listed object must keep the same locked identity from the model sheet: same material, shape, color, size, markings, and normal orientation. Only change the object's state when IMAGE PLAN.object_states explicitly says it changes on this page.
+
+Before drawing, silently check IMAGE PLAN.object_states. Draw each listed object's exact current state for this page: position, orientation, open/closed state, empty/full state, water level, amount/count of contents, damage, cleanliness, lighting state, or other visible story state. Do not preview a future solved state and do not revert to an earlier state.
+
+For cause-and-effect object sequences, preserve the timeline. A pot with low water must remain low until pebbles are added; the water should rise gradually only on the pages where the plan says it rises. Similar story mechanisms must remain visually sequential and plausible.
 
 Character consistency is mandatory for every visible character, not only the hero.
 

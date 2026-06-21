@@ -608,7 +608,13 @@ def test_image_plan_prompt_uses_story_json_page_count_as_source_of_truth():
     assert "Convert scene_plan.pages[].visual_direction into concrete image-plan camera_shot" in prompt
     assert "image-plan camera_shot, composition, visual_focus, environment, and continuity_notes must reflect it" in prompt
     assert '"allowed_in_scene_text": []' in prompt
+    assert '"object_states": {}' in prompt
     assert "allowed_in_scene_text is the only place to request readable text on story pages" in prompt
+    assert "Do not carry a recurring object into a page just because it appeared earlier or will appear later" in prompt
+    assert "Do not list objects that are absent from this page" in prompt
+    assert "object_states is mandatory for every visible important object" in prompt
+    assert "Object state continuity is sequential and plausible across pages" in prompt
+    assert "Sound effects are not readable image text unless explicitly listed in allowed_in_scene_text" in prompt
     assert "Page composition, visual_focus, environment, and continuity_notes must not mention title area" in prompt
     assert "Each page must show one clear visual moment" in prompt
     assert "not a split scene, montage, collage, sequence, or multi-vignette page" in prompt
@@ -617,6 +623,7 @@ def test_image_plan_prompt_uses_story_json_page_count_as_source_of_truth():
     assert "Never describe floating heads, detached faces, cropped heads, or partial child/adult cutouts" in prompt
     assert "no duplicate heads, duplicate faces, floating heads, detached faces" in prompt
     assert "Do not use split scene, panel, panels, vignette, vignettes, montage, sequence, or collage" in prompt
+    assert "do not spoil the final solution/outcome on the front cover" in prompt
     assert "scene_plan.cinematography" not in prompt
 
 
@@ -633,6 +640,9 @@ def test_character_and_image_generation_prompts_enforce_named_character_consiste
     assert "Do not reuse the same repeated child look across stories." in visual_bible_prompt
     assert "Do not default every girl to the same pigtails, pink kurta" in visual_bible_prompt
     assert "Invented details are locked and reused by cover and all pages." in visual_bible_prompt
+    assert "Important recurring objects must have ONE fixed visual identity." in visual_bible_prompt
+    assert '"state_variables": []' in visual_bible_prompt
+    assert '"forbidden_variations": []' in visual_bible_prompt
     assert '"visual_diversity_seed": "{visual_diversity_seed}"' in visual_bible_prompt
     assert '"cast_design_fingerprint": ""' in visual_bible_prompt
     assert '"design_fingerprint": ""' in visual_bible_prompt
@@ -641,6 +651,11 @@ def test_character_and_image_generation_prompts_enforce_named_character_consiste
     assert "faceless named characters" in image_prompt
     assert "cropped heads" in image_prompt
     assert "Draw each named character listed in IMAGE PLAN.characters exactly once" in image_prompt
+    assert "Do not carry a recurring/signature object into this page unless it is listed" in image_prompt
+    assert "Natural incidental background details are allowed only when they are required by the listed environment" in image_prompt
+    assert "Important object consistency is mandatory for objects listed in IMAGE PLAN.important_objects on this page." in image_prompt
+    assert "Before drawing, silently check IMAGE PLAN.object_states." in image_prompt
+    assert "water should rise gradually only on the pages where the plan says it rises" in image_prompt
     assert "No floating heads, detached heads, disembodied faces" in image_prompt
     assert "Respect basic scene etiquette" in image_prompt
     assert "do not draw outdoor shoes on feet" in image_prompt
@@ -1395,6 +1410,7 @@ def test_multi_image_prompt_forbids_caption_text_but_allows_planned_in_scene_tex
                     "page": 1,
                     "visual_focus": "Children listen in class.",
                     "important_objects": ["blackboard writing", "chair name labels"],
+                    "object_states": {"blackboard writing": "visible only on the classroom blackboard"},
                 },
                 "source_image_prompt": "Classroom scene with blackboard.",
                 "story_page": {"page_number": 1, "emotion": "happy"},
@@ -1413,6 +1429,9 @@ def test_multi_image_prompt_forbids_caption_text_but_allows_planned_in_scene_tex
     assert "Use GLOBAL CHARACTER REFERENCE JSON as the source of truth for character appearance" in prompt
     assert "Use visual_context as the source of truth for page-scoped style" in prompt
     assert "Use visible_character_contract as the exact count contract" in prompt
+    assert "Use page_image_plan.object_states as the exact visible state contract" in prompt
+    assert "Do not carry a recurring/signature object into an item unless it is listed" in prompt
+    assert "Do not jump ahead to a future solved object state" in prompt
     assert "Draw each named character listed for an item exactly once" in prompt
     assert "No floating heads, detached heads, disembodied faces" in prompt
     assert "no duplicate heads, no duplicate faces, no detached heads" in prompt
@@ -1446,6 +1465,46 @@ def test_multi_image_page_prompt_payload_strips_duplicate_source_prompt():
     assert "source_image_prompt" not in payload[0]
     assert payload[0]["visible_character_contract"]["visible_names"] == []
     assert payload[0]["visible_character_contract"]["exact_count_per_name"] == 1
+
+
+def test_multi_image_page_plan_accepts_characters_present_alias():
+    page_plan = {
+        "page": 1,
+        "visual_focus": "Pip studies the clay pot.",
+        "characters_present": ["Pip"],
+        "allowed_in_scene_text": [],
+    }
+
+    plan_payload = GenericStoryWorkflowService._story_page_image_plan_for_multi_image(page_plan)
+    item_payload = GenericStoryWorkflowService._multi_image_item_payload(
+        {
+            "key": "page_1",
+            "page_type": "story_page",
+            "page_number": 1,
+            "page_image_plan": plan_payload,
+        }
+    )
+
+    assert plan_payload["characters"] == ["Pip"]
+    assert item_payload["visible_character_contract"]["visible_names"] == ["Pip"]
+
+
+def test_multi_image_story_page_plan_payload_preserves_object_states():
+    payload = GenericStoryWorkflowService._story_page_image_plan_for_multi_image(
+        {
+            "page": 4,
+            "visual_focus": "Pip studies the clay pot.",
+            "important_objects": ["clay pot", "water"],
+            "object_states": {
+                "clay pot": "same old clay pot, upright under the wilting bush",
+                "water": "tiny amount shimmering at the very bottom, unreachable",
+            },
+        }
+    )
+
+    assert payload["important_objects"] == ["clay pot", "water"]
+    assert payload["object_states"]["clay pot"] == "same old clay pot, upright under the wilting bush"
+    assert "unreachable" in payload["object_states"]["water"]
 
 
 def test_multi_image_story_page_plan_payload_removes_text_layout_instructions():

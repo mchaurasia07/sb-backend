@@ -1574,10 +1574,13 @@ class GenericStoryWorkflowService:
             "emotion",
             "characters",
             "important_objects",
+            "object_states",
             "allowed_in_scene_text",
             "continuity_notes",
         )
         payload = {key: deepcopy(page_plan[key]) for key in allowed_keys if key in page_plan}
+        if "characters" not in payload and isinstance(page_plan.get("characters_present"), list):
+            payload["characters"] = deepcopy(page_plan["characters_present"])
         payload["allowed_in_scene_text"] = cls._allowed_in_scene_text_payload(payload.get("allowed_in_scene_text"))
         for key in ("visual_focus", "composition", "environment"):
             payload[key] = cls._strip_story_page_text_layout_instructions(payload.get(key))
@@ -1625,6 +1628,18 @@ class GenericStoryWorkflowService:
             if sentence.strip() and not any(fragment in sentence.lower() for fragment in banned_fragments)
         ]
         return " ".join(kept).strip()
+
+    @staticmethod
+    def _image_plan_characters(page_image_plan: dict[str, Any]) -> list[Any]:
+        if not isinstance(page_image_plan, dict):
+            return []
+        characters = page_image_plan.get("characters")
+        if isinstance(characters, list):
+            return characters
+        characters_present = page_image_plan.get("characters_present")
+        if isinstance(characters_present, list):
+            return characters_present
+        return []
 
     @staticmethod
     def _image_story_page_context(story_page: dict[str, Any]) -> dict[str, Any]:
@@ -1676,7 +1691,7 @@ class GenericStoryWorkflowService:
 
     @staticmethod
     def _visible_character_contract(page_image_plan: dict[str, Any]) -> dict[str, Any]:
-        characters = page_image_plan.get("characters") if isinstance(page_image_plan.get("characters"), list) else []
+        characters = GenericStoryWorkflowService._image_plan_characters(page_image_plan)
         names = [str(name).strip() for name in characters if str(name or "").strip()]
         return {
             "visible_names": names,
@@ -2226,13 +2241,17 @@ class GenericStoryWorkflowService:
             if text:
                 lines.append(f"{label}: {text}")
 
-        characters = cls._image_scene_value(page_image_plan.get("characters"))
+        characters = cls._image_scene_value(cls._image_plan_characters(page_image_plan))
         if characters:
             lines.append(f"Allowed characters only: {characters}")
 
         objects = cls._image_scene_value(page_image_plan.get("important_objects"))
         if objects:
             lines.append(f"Required objects only: {objects}")
+
+        object_states = cls._image_scene_value(page_image_plan.get("object_states"))
+        if object_states:
+            lines.append(f"Required object states: {object_states}")
 
         continuity = cls._image_scene_value(page_image_plan.get("continuity_notes"))
         if continuity:
@@ -2258,6 +2277,8 @@ class GenericStoryWorkflowService:
         cover = image_plan.get("cover")
         if not isinstance(cover, dict):
             raise AppException("Image plan must include a cover plan.", code="GENERIC_IMAGE_PLAN_COVER_MISSING")
+        if not isinstance(cover.get("characters"), list) and isinstance(cover.get("characters_present"), list):
+            cover["characters"] = deepcopy(cover["characters_present"])
 
         story_title = self._image_plan_story_title(workflow)
         cover["title_text"] = story_title
@@ -2405,7 +2426,7 @@ class GenericStoryWorkflowService:
         if not isinstance(visual_bible, dict):
             return ""
 
-        character_refs = page_image_plan.get("characters") if isinstance(page_image_plan.get("characters"), list) else []
+        character_refs = self._image_plan_characters(page_image_plan)
         object_refs = (
             page_image_plan.get("important_objects")
             if isinstance(page_image_plan.get("important_objects"), list)
@@ -2413,7 +2434,7 @@ class GenericStoryWorkflowService:
         )
         scene_text = " ".join(
             str(page_image_plan.get(field) or "")
-            for field in ("environment", "visual_focus", "composition", "continuity_notes")
+            for field in ("environment", "visual_focus", "composition", "object_states", "continuity_notes")
         )
 
         characters = (
@@ -2476,7 +2497,7 @@ class GenericStoryWorkflowService:
     ) -> list[dict[str, Any]]:
         if not isinstance(visual_bible, dict):
             return []
-        character_refs = page_image_plan.get("characters") if isinstance(page_image_plan.get("characters"), list) else []
+        character_refs = cls._image_plan_characters(page_image_plan)
         characters = cls._matching_character_visual_bible_items(
             visual_bible.get("characters"),
             character_refs,
