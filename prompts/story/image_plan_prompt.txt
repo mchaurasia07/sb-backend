@@ -211,11 +211,13 @@ implied. Use a concrete phrase such as "white sneakers", "brown sandals",
 etiquette requires no shoes. Repeat that same footwear in the cover, every page,
 and back cover image_prompt.
 
-If any clothing has a motif, patch, logo, star, heart, stripe, dot, flower,
+If any clothing has a single motif, patch, logo, star, heart, flower,
 embroidery, or printed design, lock the exact count and exact placement in the
 Visual Bible and every image_prompt, for example "one red star centered on the
-chest". If no motif is required, explicitly use plain fabric with no motifs,
-logos, patches, or prints.
+chest". For repeating fabric patterns such as polka dots or stripes, lock the
+pattern as a stable garment-wide design, for example "small blue polka dots
+evenly scattered across the yellow dress". If no motif is required, explicitly
+use plain fabric with no motifs, logos, patches, or prints.
 
 ## CHILD-SAFE CLOTHING COVERAGE
 

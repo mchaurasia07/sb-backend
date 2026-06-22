@@ -371,6 +371,16 @@ def test_image_plan_validator_rejects_unplaced_outfit_motif():
     assert any("motif" in error for error in result.errors)
 
 
+def test_image_plan_validator_accepts_repeating_polka_dot_garment_pattern():
+    image_plan = _image_plan(page_count=2)
+    image_plan["visual_bible"]["hero"]["outfit"] = "soft yellow dress with small blue polka dots and red shoes"
+    image_plan["visual_bible"]["hero"]["outfit_lock"] = "soft yellow dress with small blue polka dots and red shoes"
+
+    result = ImagePlanValidator().validate(image_plan, story_json=_story_json(page_count=2))
+
+    assert result.ok, result.errors
+
+
 def test_image_plan_validator_rejects_missing_visible_reference_ids():
     image_plan = _image_plan(page_count=2)
     image_plan["pages"][0]["reference_character_ids"] = []

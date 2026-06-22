@@ -176,13 +176,20 @@ class ImagePlanValidator:
             if not isinstance(character, dict):
                 errors.append(f"visual_bible.recurring_characters[{idx}] must be an object.")
                 continue
-            for field in ("name", "role", "appearance"):
+            for field in ("name", "role", "appearance", "outfit"):
                 self._validate_required_string(character, field, f"visual_bible.recurring_characters[{idx}]", errors)
             self._validate_detailed_string(
                 character,
                 "appearance",
                 f"visual_bible.recurring_characters[{idx}]",
                 errors,
+            )
+            self._validate_detailed_string(
+                character,
+                "outfit",
+                f"visual_bible.recurring_characters[{idx}]",
+                errors,
+                min_words=4,
             )
             self._validate_character_body_scale(character, f"visual_bible.recurring_characters[{idx}]", errors)
             self._validate_outfit_motif(character, f"visual_bible.recurring_characters[{idx}]", errors)
@@ -247,6 +254,51 @@ class ImagePlanValidator:
         if len([word for word in combined.replace(",", " ").split() if word.strip()]) < 4:
             errors.append(f"{label}.body_scale_lock or relative_size must lock body scale for image consistency.")
 
+    def _has_term(self, text: str, terms: tuple[str, ...]) -> bool:
+        return any(term in text for term in terms)
+
+    def _has_repeating_pattern_on_garment(self, text: str) -> bool:
+        repeating_pattern_terms = (
+            "polka dot",
+            "polka dots",
+            "dotted",
+            "stripes",
+            "striped",
+            "all-over",
+            "all over",
+            "evenly scattered",
+            "repeating pattern",
+            "floral",
+            "floral print",
+            "geometric",
+            "checkered",
+            "plaid",
+            "paisley",
+            "damask",
+            "brocade",
+            "tasseled",
+            "embroidered",
+        )
+        garment_terms = (
+            "dress",
+            "shirt",
+            "t-shirt",
+            "tee",
+            "skirt",
+            "shorts",
+            "pants",
+            "trousers",
+            "overalls",
+            "cardigan",
+            "jacket",
+            "sweater",
+            "fabric",
+            "sleeves",
+        )
+        has_pattern = self._has_term(text, repeating_pattern_terms)
+        has_garment = self._has_term(text, garment_terms)
+        return has_pattern and has_garment
+
     def _validate_outfit_motif(self, obj: dict[str, Any], label: str, errors: list[str]) -> None:
         combined = f"{obj.get('outfit') or ''} {obj.get('outfit_lock') or ''}".lower()
         if not combined.strip():
@@ -285,6 +337,8 @@ class ImagePlanValidator:
         has_generic_motif = "motif" in combined
         plain_only = any(term in combined for term in plain_terms) and not has_specific_motif
         if plain_only or not (has_specific_motif or has_generic_motif):
+            return
+        if self._has_repeating_pattern_on_garment(combined):
             return
         has_count = bool(re.search(r"\b(one|two|three|four|five|single|double|\d+)\b", combined))
         placement_terms = ("center", "centred", "chest", "left", "right", "front", "back", "sleeve", "collar", "hem", "pocket")
