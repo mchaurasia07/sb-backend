@@ -114,14 +114,25 @@ def test_google_tts_provider_reuses_single_process_instance():
 def test_story_reference_image_prompt_uses_rendered_prompt_identity_lock():
     prompt = StoryServiceBatchService._story_reference_image_prompt(
         "Scene prompt with Character Identity Lock.",
+        reference_images=[
+            BatchImageReference(
+                character_id="ria_the_pattern_maker",
+                name="Ria",
+                role="hero",
+                image_url="/media/ria.png",
+                part=SimpleNamespace(),
+                priority=0,
+            )
+        ],
     )
 
     assert "Character Identity Lock inside the rendered prompt" in prompt
+    assert "character_id=ria_the_pattern_maker; name=Ria; role=hero" in prompt
     assert "Respect basic scene etiquette" in prompt
     assert "do not draw outdoor shoes on feet" in prompt
     assert "This does not change the locked footwear design" in prompt
     assert "Scene prompt with Character Identity Lock." in prompt
-    assert "only attached image" in prompt
+    assert "generated Master Character Reference Portrait" in prompt
 
 
 def test_story_reference_image_prompt_names_multiple_character_references():
@@ -182,6 +193,71 @@ def test_image_reference_selection_prioritizes_hero_and_visible_side_character()
     )
 
     assert [reference.character_id for reference in selected] == ["hero_child", "uncle_raj"]
+
+
+def test_image_reference_selection_attaches_visible_imagined_hero_and_side_character():
+    item = BatchImageItem(
+        key="page_2",
+        page_type="page",
+        page_number=2,
+        page_data={
+            "characters_present": ["Ria", "Leo"],
+            "reference_character_ids": ["ria_the_pattern_maker", "leo_the_explorer"],
+        },
+        source_image_prompt="Ria and Leo arrange leaves.",
+        rendered_prompt="Rendered prompt.",
+        aspect_ratio="1:1",
+        image_size="1024x1024",
+        file_name="page_2.png",
+        text="",
+    )
+    references = [
+        BatchImageReference("ria_the_pattern_maker", "Ria", "hero", "/media/ria.png", SimpleNamespace(), 0),
+        BatchImageReference("leo_the_explorer", "Leo", "friend", "/media/leo.png", SimpleNamespace(), 1),
+        BatchImageReference("maya_the_artist", "Maya", "friend", "/media/maya.png", SimpleNamespace(), 2),
+    ]
+
+    selected = StoryServiceBatchService._select_reference_images_for_item(
+        item,
+        references,
+        model="gemini-3.1-flash-image",
+        strict_page_refs=True,
+    )
+
+    assert [reference.character_id for reference in selected] == ["ria_the_pattern_maker", "leo_the_explorer"]
+
+
+def test_image_reference_selection_does_not_attach_unrelated_refs_for_object_only_page():
+    item = BatchImageItem(
+        key="page_4",
+        page_type="page",
+        page_number=4,
+        page_data={
+            "characters_present": [],
+            "reference_character_ids": [],
+            "important_objects": ["red pencil"],
+            "object_states": {"red pencil": {"count": 1, "location": "on ground"}},
+        },
+        source_image_prompt="A red pencil lies on the classroom floor.",
+        rendered_prompt="Visual Bible mentions Ria and Leo.",
+        aspect_ratio="1:1",
+        image_size="1024x1024",
+        file_name="page_4.png",
+        text="",
+    )
+    references = [
+        BatchImageReference("ria_the_pattern_maker", "Ria", "hero", "/media/ria.png", SimpleNamespace(), 0),
+        BatchImageReference("leo_the_explorer", "Leo", "friend", "/media/leo.png", SimpleNamespace(), 1),
+    ]
+
+    selected = StoryServiceBatchService._select_reference_images_for_item(
+        item,
+        references,
+        model="gemini-3.1-flash-image",
+        strict_page_refs=True,
+    )
+
+    assert selected == []
 
 
 def test_custom_image_reference_selection_ignores_names_from_rendered_visual_bible():

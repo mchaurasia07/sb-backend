@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Any, Iterable
 
 
@@ -98,6 +99,8 @@ class ImagePlanValidator:
                 errors.append(f"pages[{idx}].visual_importance must be one of: {', '.join(sorted(self._VALID_VISUAL_IMPORTANCE))}.")
 
             self._validate_string_array(page, "characters_present", f"pages[{idx}]", errors, allow_empty=True)
+            self._validate_visible_character_refs(page, f"pages[{idx}]", errors)
+            self._validate_object_states(page, f"pages[{idx}]", errors)
 
         if actual_page_numbers and actual_page_numbers != expected_page_numbers:
             errors.append("Image plan pages must match story pages exactly (page_number 1..N).")
@@ -142,6 +145,8 @@ class ImagePlanValidator:
                 self._validate_required_string(hero, field, "visual_bible.hero", errors)
             self._validate_detailed_string(hero, "appearance", "visual_bible.hero", errors)
             self._validate_detailed_string(hero, "outfit", "visual_bible.hero", errors, min_words=4)
+            self._validate_character_body_scale(hero, "visual_bible.hero", errors)
+            self._validate_outfit_motif(hero, "visual_bible.hero", errors)
             if not skip_footwear_validation:
                 self._validate_footwear_lock(hero, "visual_bible.hero", errors)
 
@@ -179,6 +184,8 @@ class ImagePlanValidator:
                 f"visual_bible.recurring_characters[{idx}]",
                 errors,
             )
+            self._validate_character_body_scale(character, f"visual_bible.recurring_characters[{idx}]", errors)
+            self._validate_outfit_motif(character, f"visual_bible.recurring_characters[{idx}]", errors)
 
     def _validate_cover(self, cover: Any, errors: list[str]) -> None:
         if not isinstance(cover, dict):
@@ -186,6 +193,8 @@ class ImagePlanValidator:
             return
         for field in ("visual_focus", "emotion", "image_prompt"):
             self._validate_required_string(cover, field, "cover", errors)
+        self._validate_visible_character_refs(cover, "cover", errors)
+        self._validate_object_states(cover, "cover", errors)
 
     def _validate_back_cover(self, back_cover: Any, errors: list[str]) -> None:
         if not isinstance(back_cover, dict):
@@ -193,6 +202,8 @@ class ImagePlanValidator:
             return
         for field in ("emotion", "image_prompt"):
             self._validate_required_string(back_cover, field, "back_cover", errors)
+        self._validate_visible_character_refs(back_cover, "back_cover", errors)
+        self._validate_object_states(back_cover, "back_cover", errors)
 
     def _validate_required_string(
         self,
@@ -227,6 +238,93 @@ class ImagePlanValidator:
         combined = f"{footwear or ''} {outfit or ''}".lower()
         if not any(term in combined for term in self._FOOTWEAR_TERMS):
             errors.append(f"{label}.footwear must lock exact footwear, socks, or bare feet for image consistency.")
+
+    def _validate_character_body_scale(self, obj: dict[str, Any], label: str, errors: list[str]) -> None:
+        combined = " ".join(
+            str(obj.get(field) or "").strip()
+            for field in ("body_scale_lock", "relative_size", "appearance")
+        )
+        if len([word for word in combined.replace(",", " ").split() if word.strip()]) < 4:
+            errors.append(f"{label}.body_scale_lock or relative_size must lock body scale for image consistency.")
+
+    def _validate_outfit_motif(self, obj: dict[str, Any], label: str, errors: list[str]) -> None:
+        combined = f"{obj.get('outfit') or ''} {obj.get('outfit_lock') or ''}".lower()
+        if not combined.strip():
+            return
+        plain_terms = (
+            "plain fabric",
+            "plain",
+            "solid color",
+            "solid colour",
+            "no motif",
+            "no motifs",
+            "no print",
+            "no prints",
+            "no logo",
+            "no logos",
+            "no patch",
+            "no patches",
+        )
+        motif_terms = (
+            "star",
+            "heart",
+            "flower",
+            "moon",
+            "sun",
+            "badge",
+            "logo",
+            "motif",
+            "stripe",
+            "dot",
+            "polka",
+            "embroidery",
+            "patch",
+            "printed",
+        )
+        has_specific_motif = any(term in combined for term in motif_terms if term != "motif")
+        has_generic_motif = "motif" in combined
+        plain_only = any(term in combined for term in plain_terms) and not has_specific_motif
+        if plain_only or not (has_specific_motif or has_generic_motif):
+            return
+        has_count = bool(re.search(r"\b(one|two|three|four|five|single|double|\d+)\b", combined))
+        placement_terms = ("center", "centred", "chest", "left", "right", "front", "back", "sleeve", "collar", "hem", "pocket")
+        has_placement = any(term in combined for term in placement_terms)
+        if not (has_count and has_placement):
+            errors.append(f"{label}.outfit motif must lock exact count and placement.")
+
+    def _validate_visible_character_refs(self, obj: dict[str, Any], label: str, errors: list[str]) -> None:
+        characters = obj.get("characters_present")
+        if not isinstance(characters, list) or not characters:
+            return
+        named_characters = [
+            str(value).strip()
+            for value in characters
+            if isinstance(value, str)
+            and value.strip()
+            and "unnamed" not in value.strip().lower()
+            and not value.strip().lower().startswith("other ")
+        ]
+        if not named_characters:
+            return
+        refs = obj.get("reference_character_ids")
+        if not isinstance(refs, list) or not any(isinstance(value, str) and value.strip() for value in refs):
+            errors.append(f"{label}.reference_character_ids must include stable ids for visible named characters.")
+
+    def _validate_object_states(self, obj: dict[str, Any], label: str, errors: list[str]) -> None:
+        important_objects = obj.get("important_objects")
+        if not isinstance(important_objects, list) or not important_objects:
+            return
+        object_states = obj.get("object_states")
+        if not isinstance(object_states, dict) or not object_states:
+            errors.append(f"{label}.object_states must define count, owner/location, and state for important_objects.")
+            return
+        serialized_states = str(object_states).lower()
+        for item in important_objects:
+            if not isinstance(item, str) or not item.strip():
+                continue
+            name = item.strip().lower()
+            if name not in serialized_states and name.replace(" ", "_") not in serialized_states:
+                errors.append(f"{label}.object_states missing visible state for important object: {item}.")
 
     def _validate_string_array(
         self,

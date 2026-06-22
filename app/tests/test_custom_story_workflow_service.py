@@ -267,6 +267,67 @@ def _batch_job(**overrides):
 
 
 @pytest.mark.asyncio
+async def test_copy_character_references_to_final_story_storage_updates_manifest_and_visual_bible(monkeypatch):
+    service = CustomStoryWorkflowService.__new__(CustomStoryWorkflowService)
+    final_story_id = uuid4()
+    calls = []
+
+    class _Storage:
+        async def delete_story_directory(self, story_id):
+            raise AssertionError("reference copy must not delete story directories")
+
+    async def _copy_image_url(image_storage, *, image_url, story_id, filename):
+        calls.append((image_storage, image_url, story_id, filename))
+        return f"https://cdn.test/stories/{story_id}/{filename.replace('.png', '.webp')}"
+
+    monkeypatch.setattr(custom_story_workflow_service, "get_image_storage_service", lambda: _Storage())
+    service._copy_story_image_url = _copy_image_url
+    image_plan = {
+        "visual_bible": {
+            "hero": {
+                "character_id": "ria_the_pattern_maker",
+                "name": "Ria",
+                "reference_image_url": "https://cdn.test/workflow/character_ref_ria_the_pattern_maker.webp",
+            },
+            "recurring_characters": [
+                {
+                    "character_id": "leo_the_explorer",
+                    "name": "Leo",
+                    "reference_image_url": "https://cdn.test/workflow/character_ref_leo_the_explorer.webp",
+                }
+            ],
+        },
+        "character_reference_manifest": [
+            {
+                "character_id": "ria_the_pattern_maker",
+                "name": "Ria",
+                "reference_image_url": "https://cdn.test/workflow/character_ref_ria_the_pattern_maker.webp",
+            },
+            {
+                "character_id": "leo_the_explorer",
+                "name": "Leo",
+                "reference_image_url": "https://cdn.test/workflow/character_ref_leo_the_explorer.webp",
+            },
+        ],
+    }
+
+    updated = await service._copy_character_references_to_final_story_storage(image_plan, final_story_id)
+
+    manifest = updated["character_reference_manifest"]
+    assert manifest[0]["reference_image_url"].endswith("/character_ref_ria_the_pattern_maker.webp")
+    assert manifest[1]["reference_image_url"].endswith("/character_ref_leo_the_explorer.webp")
+    assert updated["visual_bible"]["hero"]["persistent_reference_image_url"] == manifest[0]["reference_image_url"]
+    assert (
+        updated["visual_bible"]["recurring_characters"][0]["persistent_reference_image_url"]
+        == manifest[1]["reference_image_url"]
+    )
+    assert [call[3] for call in calls] == [
+        "character_ref_ria_the_pattern_maker.png",
+        "character_ref_leo_the_explorer.png",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_list_batch_jobs_returns_paginated_typed_response_with_filters():
     user_id = uuid4()
     workflow_id = uuid4()

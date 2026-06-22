@@ -102,10 +102,13 @@ def _image_plan(page_count: int = 2) -> dict:
     return {
         "visual_bible": {
             "hero": {
+                "character_id": "hero_child",
                 "name": "Mira",
                 "appearance": "A curious child with bright eyes.",
                 "outfit": "Yellow raincoat, red scarf, and yellow rain boots.",
                 "footwear": "yellow rain boots",
+                "body_scale_lock": "Same early-reader child height, build, proportions, and age appearance.",
+                "relative_size": "child-sized hero",
                 "signature_item": "Moon map",
             },
             "companion": {"appearance": "A small glowing moth."},
@@ -114,6 +117,8 @@ def _image_plan(page_count: int = 2) -> dict:
         "cover": {
             "visual_focus": "Mira holding the moon map.",
             "emotion": "wonder",
+            "characters_present": ["Mira"],
+            "reference_character_ids": ["hero_child"],
             "image_prompt": "Mira smiles while the glowing moon map opens in a moonlit library.",
         },
         "pages": [
@@ -125,12 +130,15 @@ def _image_plan(page_count: int = 2) -> dict:
                 "scene_action": "Mira points to a glowing path on the map.",
                 "environment": "Moonlit library with warm shelves.",
                 "characters_present": ["Mira"],
+                "reference_character_ids": ["hero_child"],
                 "image_prompt": f"Page {index}: Mira follows a glowing map clue in the library.",
             }
             for index in range(1, page_count + 1)
         ],
         "back_cover": {
             "emotion": "warm joy",
+            "characters_present": ["Mira"],
+            "reference_character_ids": ["hero_child"],
             "image_prompt": "Mira closes the moon map with a peaceful smile.",
         },
     }
@@ -338,6 +346,49 @@ def test_image_plan_validator_rejects_missing_hero_footwear_lock():
 
     assert not result.ok
     assert any("footwear" in error for error in result.errors)
+
+
+def test_image_plan_validator_rejects_missing_body_scale_lock():
+    image_plan = _image_plan(page_count=2)
+    image_plan["visual_bible"]["hero"].pop("body_scale_lock")
+    image_plan["visual_bible"]["hero"].pop("relative_size")
+    image_plan["visual_bible"]["hero"]["appearance"] = "Curious child."
+
+    result = ImagePlanValidator().validate(image_plan, story_json=_story_json(page_count=2))
+
+    assert not result.ok
+    assert any("body_scale" in error for error in result.errors)
+
+
+def test_image_plan_validator_rejects_unplaced_outfit_motif():
+    image_plan = _image_plan(page_count=2)
+    image_plan["visual_bible"]["hero"]["outfit"] = "blue t-shirt with yellow stars and red shorts"
+    image_plan["visual_bible"]["hero"]["outfit_lock"] = "blue t-shirt with yellow stars and red shorts"
+
+    result = ImagePlanValidator().validate(image_plan, story_json=_story_json(page_count=2))
+
+    assert not result.ok
+    assert any("motif" in error for error in result.errors)
+
+
+def test_image_plan_validator_rejects_missing_visible_reference_ids():
+    image_plan = _image_plan(page_count=2)
+    image_plan["pages"][0]["reference_character_ids"] = []
+
+    result = ImagePlanValidator().validate(image_plan, story_json=_story_json(page_count=2))
+
+    assert not result.ok
+    assert any("reference_character_ids" in error for error in result.errors)
+
+
+def test_image_plan_validator_rejects_missing_important_object_state():
+    image_plan = _image_plan(page_count=2)
+    image_plan["pages"][0]["important_objects"] = ["red pencil"]
+
+    result = ImagePlanValidator().validate(image_plan, story_json=_story_json(page_count=2))
+
+    assert not result.ok
+    assert any("object_states" in error for error in result.errors)
 
 
 def test_normalize_image_plan_adds_missing_hero_footwear_to_prompts():

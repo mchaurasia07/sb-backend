@@ -2163,6 +2163,10 @@ class CustomStoryWorkflowService:
             status=workflow.publish_status or "inactive",
         )
         story_json = await self._copy_story_images_to_final_story_storage(story_json, generic_story.id)
+        workflow.image_plan_json = await self._copy_character_references_to_final_story_storage(
+            workflow.image_plan_json if isinstance(workflow.image_plan_json, dict) else {},
+            generic_story.id,
+        )
         story_json = _sync_story_media_to_language_variants(story_json, include_audio=True)
         workflow.story_json = story_json
         generic_story.cover_image = story_json.get("cover_image_url")
@@ -2183,6 +2187,63 @@ class CustomStoryWorkflowService:
             await self.batch_jobs.update(job)
         await self.generic_stories.flush()
         await self.workflows.update(workflow)
+
+    async def _copy_character_references_to_final_story_storage(
+        self,
+        image_plan: dict[str, Any],
+        story_id: UUID,
+    ) -> dict[str, Any]:
+        if not isinstance(image_plan, dict):
+            return image_plan
+        image_storage = get_image_storage_service()
+        updated = dict(image_plan)
+        manifest = StoryService._character_reference_manifest(updated)
+        visual_bible = updated.get("visual_bible") if isinstance(updated.get("visual_bible"), dict) else {}
+        characters = self._visual_bible_reference_characters(visual_bible)
+
+        for item in manifest:
+            if not isinstance(item, dict):
+                continue
+            character_id = str(item.get("character_id") or "").strip()
+            reference_url = str(item.get("reference_image_url") or item.get("image_url") or "").strip()
+            if not character_id or not reference_url:
+                continue
+            copied_url = await self._copy_story_image_url(
+                image_storage,
+                image_url=reference_url,
+                story_id=story_id,
+                filename=f"character_ref_{character_id}.png",
+            )
+            if not copied_url:
+                continue
+            item["reference_image_url"] = copied_url
+            item["persistent_reference_image_url"] = copied_url
+            for character in characters:
+                if self._same_character_reference(character, item):
+                    character["reference_image_url"] = copied_url
+                    character["persistent_reference_image_url"] = copied_url
+        return updated
+
+    @staticmethod
+    def _visual_bible_reference_characters(visual_bible: dict[str, Any]) -> list[dict[str, Any]]:
+        characters: list[dict[str, Any]] = []
+        hero = visual_bible.get("hero") if isinstance(visual_bible.get("hero"), dict) else None
+        if hero is not None:
+            characters.append(hero)
+        recurring = visual_bible.get("recurring_characters")
+        if isinstance(recurring, list):
+            characters.extend(character for character in recurring if isinstance(character, dict))
+        return characters
+
+    @staticmethod
+    def _same_character_reference(character: dict[str, Any], reference: dict[str, Any]) -> bool:
+        character_id = str(character.get("character_id") or "").strip()
+        reference_id = str(reference.get("character_id") or "").strip()
+        if character_id and reference_id and character_id == reference_id:
+            return True
+        character_name = StoryService._character_reference_name_key(str(character.get("name") or ""))
+        reference_name = StoryService._character_reference_name_key(str(reference.get("name") or ""))
+        return bool(character_name and reference_name and character_name == reference_name)
 
     async def _generic_publish_title(self, workflow: CustomStoryWorkflow, story_json: dict[str, Any]) -> str:
         base_title = (
@@ -3229,7 +3290,10 @@ class CustomStoryWorkflowService:
     def _generic_response(workflow: CustomStoryWorkflow) -> GenericStoryWorkflowResponse:
         story_json = workflow.story_json if isinstance(workflow.story_json, dict) else None
         story_plan = workflow.story_plan_json if isinstance(workflow.story_plan_json, dict) else None
-        visual_bible = story_plan.get("visual_bible") if isinstance(story_plan, dict) else None
+        image_plan = workflow.image_plan_json if isinstance(workflow.image_plan_json, dict) else None
+        image_plan_visual_bible = image_plan.get("visual_bible") if isinstance(image_plan, dict) else None
+        story_plan_visual_bible = story_plan.get("visual_bible") if isinstance(story_plan, dict) else None
+        visual_bible = image_plan_visual_bible if isinstance(image_plan_visual_bible, dict) else story_plan_visual_bible
         pages = story_json.get("pages") if isinstance(story_json, dict) and isinstance(story_json.get("pages"), list) else []
         return GenericStoryWorkflowResponse(
             id=workflow.id,

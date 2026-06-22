@@ -1,3 +1,4 @@
+import base64
 from types import SimpleNamespace
 import json
 
@@ -6,7 +7,7 @@ import pytest
 from app.core.exceptions import AppException
 from app.entity.story import AgeGroup
 from app.model.response.story_content import StoryJsonContentResponse
-from app.service.ai.base import TextGenerationResult
+from app.service.ai.base import ImageGenerationResult, TextGenerationResult
 from app.service.story_narration_profile import build_page_narration
 from app.service.story_service import StoryService, _compact_json, _normalize_story_output
 from app.utils.prompt_loader import load_prompt
@@ -581,6 +582,111 @@ async def test_imagined_cast_image_plan_does_not_attach_child_character_referenc
 
     assert result["character_reference_manifest"] == []
     assert "reference_image_url" not in result["visual_bible"]["hero"]
+
+
+@pytest.mark.asyncio
+async def test_imagined_cast_google_image_plan_generates_hero_reference(monkeypatch):
+    png_bytes = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR4nGP4DwQACfsD/WMmxKkAAAAASUVORK5CYII="
+    )
+    calls = {"prompts": [], "saved": [], "deleted": False}
+
+    class _Children:
+        async def get_for_user(self, user_id, child_id):
+            _ = user_id, child_id
+            raise AssertionError("imagined cast should not load child character reference")
+
+    class _AIProvider:
+        async def generate_image(self, prompt, **kwargs):
+            calls["prompts"].append(prompt)
+            calls["kwargs"] = kwargs
+            return ImageGenerationResult(
+                image_bytes=png_bytes,
+                prompt_used=prompt,
+                model="gemini-reference-test",
+                metadata={"provider": "google"},
+            )
+
+    class _Storage:
+        async def save_story_image(self, story_id, image_bytes, filename, folder):
+            calls["saved"].append((story_id, image_bytes, filename, folder))
+            return f"https://cdn.test/{filename}"
+
+        async def delete_story_directory(self, story_id):
+            _ = story_id
+            calls["deleted"] = True
+
+    monkeypatch.setattr("app.service.story_service.get_image_storage_service", lambda: _Storage())
+
+    service = StoryService.__new__(StoryService)
+    service.children = _Children()
+    service._ai_provider = _AIProvider()
+    story = SimpleNamespace(
+        id="story-id",
+        user_id="user-id",
+        child_id=None,
+        use_child_character=False,
+        ai_provider="google",
+        image_model=None,
+        reference_image_model=None,
+        title="Robot Map",
+    )
+    image_plan = {
+        "visual_bible": {
+            "style": "Bright storybook 3D.",
+            "hero": {
+                "name": "Brave Blue Robot",
+                "character_id": "brave_blue_robot",
+                "role": "hero",
+                "appearance": "A small rounded blue robot with square green eyes.",
+                "outfit": "plain blue metal body with one yellow star centered on the chest",
+                "footwear": "tiny black wheels",
+                "body_scale_lock": "short child-sized robot, half a head shorter than adults",
+                "relative_size": "shorter than an early-reader child",
+            },
+            "recurring_characters": [],
+        },
+        "cover": {"title_text": "Robot Map"},
+        "character_reference_manifest": [],
+    }
+
+    result = await service._ensure_image_plan_character_references(story, image_plan)
+
+    hero = result["visual_bible"]["hero"]
+    manifest = result["character_reference_manifest"]
+    assert hero["reference_image_url"] == "https://cdn.test/character_ref_brave_blue_robot.webp"
+    assert hero["reference_image_prompt"] == calls["prompts"][0]
+    assert manifest[0]["character_id"] == "brave_blue_robot"
+    assert manifest[0]["source"] == "visual_bible.hero"
+    assert manifest[0]["reference_image_url"] == hero["reference_image_url"]
+    assert calls["saved"][0][2] == "character_ref_brave_blue_robot.webp"
+    assert calls["deleted"] is False
+    assert "MAIN HERO" in calls["prompts"][0]
+    assert "one yellow star centered on the chest" in calls["prompts"][0]
+
+
+def test_side_character_reference_prompt_includes_full_visual_locks():
+    prompt = StoryService._side_character_reference_prompt(
+        story_title="Ria and the Wonderful Weave",
+        visual_bible={"style": "Premium 3D."},
+        character={
+            "name": "Leo",
+            "role": "Energetic friend",
+            "appearance": "A lively child with bright curious eyes.",
+            "hair_lock": "short spiky light brown hair",
+            "outfit": "orange t-shirt with one rocket patch centered on the chest and denim shorts",
+            "footwear": "blue sneakers",
+            "body_scale_lock": "slightly taller than Ria with consistent child build",
+            "relative_size": "slightly taller than Ria",
+            "signature_item": "small magnifying glass",
+        },
+    )
+
+    assert "Locked outfit/body covering" in prompt
+    assert "one rocket patch centered on the chest" in prompt
+    assert "Locked body scale/build/proportions" in prompt
+    assert "slightly taller than Ria" in prompt
+    assert "Locked signature item/accessory" in prompt
 
 
 def test_story_generation_context_softens_medical_harm_language():

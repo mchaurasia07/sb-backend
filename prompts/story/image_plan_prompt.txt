@@ -152,7 +152,10 @@ Do not redesign characters between pages.
 For every page, cover, and back cover, include reference_character_ids listing
 the stable character_id values for all visible recurring characters. For
 CHILD_HERO, use "hero_child" for the selected child whenever the child appears.
-Use the exact same IDs every time.
+For IMAGINED_CAST, use visual_bible.hero.character_id whenever the invented hero
+appears. Use the exact same IDs every time. If a named character appears in
+characters_present, that same character's stable ID must appear in
+reference_character_ids.
 
 The child profile may describe a face-focused master portrait. Use it to lock
 facial identity, hairstyle, skin tone, age appearance, and distinctive facial
@@ -162,11 +165,13 @@ For CHILD_HERO, treat Character Identity Lock as the COMMON identity lock for
 the cover, every page, and the back cover. Every image_prompt must preserve this
 lock without rewriting it or changing the character.
 
-For IMAGINED_CAST, no character reference image will be attached during image
-generation. The Visual Bible must be the complete model sheet. Every image_prompt
-must repeat enough locked character detail to preserve face/head shape, hair or
-fur, eyes, skin/body color, outfit, shoes, accessories, size, distinctive
-features, color palette, and style across cover, all pages, and back cover.
+For IMAGINED_CAST, generated character reference images may be attached for the
+hero and recurring characters after this plan is created. The Visual Bible must
+still be the complete model sheet used to generate those references. Every
+image_prompt must repeat enough locked character detail to preserve face/head
+shape, hair or fur, eyes, skin/body color, outfit, shoes, accessories, size,
+distinctive features, color palette, and style across cover, all pages, and back
+cover.
 
 Do not treat portrait clothing, portrait crop, white background, or
 head-and-shoulders framing as story requirements.
@@ -205,6 +210,12 @@ implied. Use a concrete phrase such as "white sneakers", "brown sandals",
 "red rain boots", "water shoes", "soft socks", or "bare feet" when story
 etiquette requires no shoes. Repeat that same footwear in the cover, every page,
 and back cover image_prompt.
+
+If any clothing has a motif, patch, logo, star, heart, stripe, dot, flower,
+embroidery, or printed design, lock the exact count and exact placement in the
+Visual Bible and every image_prompt, for example "one red star centered on the
+chest". If no motif is required, explicitly use plain fabric with no motifs,
+logos, patches, or prints.
 
 ## CHILD-SAFE CLOTHING COVERAGE
 
@@ -251,6 +262,14 @@ Maximum:
 
 * 4 supporting objects
 * 4 visible characters
+
+For every story-important object, plan exactly one visible state per image item:
+count, owner or location, held/worn/carried/on-ground state, open/closed state
+when relevant, and whether it is entering or leaving a character's hand. Do not
+duplicate a worn, carried, or held object unless the story explicitly requires
+multiple copies. For picking-up actions, show either the object on the ground
+with the hand reaching toward it, or the object already in the hand, but not
+both unless object_states explicitly says there are two separate objects.
 
 ## VISUAL SIMPLICITY BY AGE
 
@@ -374,6 +393,7 @@ Use this style consistently:
 Use in every image prompt:
 
 "No character redesign, no age change, no outfit change, no hairstyle change, no inconsistent facial features, no oversized eyes, no oversized head, no distorted anatomy, no extra fingers, no cropped face, no horror elements, no dark frightening imagery, no aggressive expressions, no blurry rendering, no watermark. Use modest covered family-friendly water-play outfits when water play appears."
+"No duplicate story-important objects, no duplicate worn/carried bags, no object both on the ground and in hand unless object_states explicitly says there are multiple objects."
 
 ---
 
@@ -387,6 +407,10 @@ Use in every image prompt:
 "appearance": "",
 "outfit": "",
 "footwear": "",
+"hair_lock": "",
+"outfit_lock": "",
+"body_scale_lock": "",
+"relative_size": "",
 "signature_item": ""
 },
 "companion": {
@@ -409,6 +433,8 @@ Use in every image prompt:
 "emotion": "",
 "characters_present": [],
 "reference_character_ids": [],
+"important_objects": [],
+"object_states": {},
 "image_prompt": ""
 },
 
@@ -422,6 +448,8 @@ Use in every image prompt:
 "environment": "",
 "characters_present": [],
 "reference_character_ids": [],
+"important_objects": [],
+"object_states": {},
 "image_prompt": ""
 }
 ],
@@ -430,6 +458,8 @@ Use in every image prompt:
 "emotion": "",
 "characters_present": [],
 "reference_character_ids": [],
+"important_objects": [],
+"object_states": {},
 "image_prompt": ""
 }
 }
@@ -448,5 +478,8 @@ Before generating:
 6. Verify page count matches story.
 7. Verify cover reflects the story.
 8. Verify every image prompt matches its page.
+9. Verify every visible named character has a matching reference_character_ids entry.
+10. Verify every important object has one count, location/owner, and visible state.
+11. Verify every clothing motif has fixed count and placement, or is explicitly absent.
 
 Return ONLY valid JSON.

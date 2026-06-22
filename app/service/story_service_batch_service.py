@@ -1594,15 +1594,20 @@ class StoryServiceBatchService:
             outfit = str(hero.get("outfit") or "").strip()
             footwear = str(hero.get("footwear") or "").strip()
             signature_item = str(hero.get("signature_item") or "").strip()
+            hero_source = (
+                "use the attached hero reference plus the Visual Bible as the face, hairline, hair, eyes, age, outfit, and scale source."
+                if str(hero.get("reference_image_url") or "").strip()
+                else "use the Visual Bible as the face, hairline, hair, eyes, age, outfit, and scale source."
+            )
             locks.append(
                 "\n".join(
                     [
-                        f"- {hero_id} / {hero_name}: use the attached hero reference as the face, hairline, hair, eyes, and age source.",
+                        f"- {hero_id} / {hero_name}: {hero_source}",
                         f"  Locked appearance: {appearance}",
                         f"  Locked story outfit: {outfit}",
                         f"  Locked footwear: {footwear}" if footwear else "",
                         f"  Locked signature item: {signature_item}" if signature_item else "",
-                        "  Hair lock: keep the exact hairstyle from the reference and Visual Bible on every page; no loose hair, no open hair, no shortened hair, no alternate pigtail placement, no changed hairline.",
+                        "  Hair lock: keep the exact hairstyle from the available reference/Visual Bible on every page; no loose hair, no open hair, no shortened hair, no alternate pigtail placement, no changed hairline.",
                         "  Body-scale lock: same reusable child body model in every image; same child height, build, limb proportions, shoulder width, head-to-body ratio, natural child hands and feet, and age appearance.",
                         "  Relative-scale lock: preserve the hero's scale relative to visible companions and nearby objects; camera angle and pose may change, but body build, body proportions, height, hairstyle, and outfit must not change.",
                         "  Footwear etiquette: wear the locked footwear in footwear-appropriate scenes; in temples, prayer rooms, sacred spaces, no-shoe home areas, beds, mattresses, or bedding, use bare feet or socks and place the exact locked footwear neatly nearby if visible.",
@@ -1620,10 +1625,15 @@ class StoryServiceBatchService:
                 continue
             appearance = str(character.get("appearance") or "").strip()
             outfit = str(character.get("outfit") or "").strip()
+            source = (
+                "use only this character's attached reference and Visual Bible lock."
+                if str(character.get("reference_image_url") or "").strip()
+                else "use only this character's Visual Bible lock."
+            )
             locks.append(
                 "\n".join(
                     [
-                        f"- {character_id or name} / {name or character_id}: use only this character's attached reference and Visual Bible lock.",
+                        f"- {character_id or name} / {name or character_id}: {source}",
                         f"  Locked appearance: {appearance}",
                         f"  Locked outfit/accessories: {outfit}" if outfit else "",
                         "  Scale lock: keep the same body scale, build, face/head shape, hair, outfit, and accessories whenever this character appears.",
@@ -1899,11 +1909,17 @@ class StoryServiceBatchService:
     ) -> str:
         reference_images = reference_images or []
         if len(reference_images) <= 1:
-            reference_instruction = (
-                "\nThe only attached image after this prompt is the generated Master Character Reference Portrait "
-                "from character_image_url. It is the PRIMARY visual identity reference. Match the master character's "
-                "face, facial proportions, eye shape, natural eye size, hairstyle, hairline, skin tone, and age appearance. "
-            )
+            if reference_images:
+                reference = reference_images[0]
+                reference_instruction = (
+                    "\nThe only attached image after this prompt is a generated Master Character Reference Portrait "
+                    f"for character_id={reference.character_id}; name={reference.name}; role={reference.role}. "
+                    "It is the PRIMARY visual identity reference for that matching character. Match the character's "
+                    "face/head shape, facial proportions, eye shape, natural eye size, hairstyle or body pattern, "
+                    "hairline, colors, skin/body tone, age appearance, body scale, outfit/accessories, and distinctive features. "
+                )
+            else:
+                reference_instruction = ""
         else:
             reference_lines = [
                 "\nAttached images after this prompt are named character identity references in this exact order.",

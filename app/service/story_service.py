@@ -2315,6 +2315,73 @@ Malformed JSON:
         return [character for character in recurring if isinstance(character, dict)]
 
     @classmethod
+    def _visual_bible_hero_character(cls, image_plan: dict[str, Any]) -> dict[str, Any] | None:
+        visual_bible = image_plan.get("visual_bible") if isinstance(image_plan.get("visual_bible"), dict) else {}
+        hero = visual_bible.get("hero")
+        return hero if isinstance(hero, dict) else None
+
+    @classmethod
+    def _character_reference_prompt(
+        cls,
+        *,
+        story_title: str,
+        character: dict[str, Any],
+        visual_bible: dict[str, Any],
+        source: str,
+    ) -> str:
+        name = str(character.get("name") or "Recurring character").strip()
+        role = str(character.get("role") or "recurring supporting character").strip()
+        appearance = str(character.get("appearance") or "").strip()
+        outfit = str(character.get("outfit") or character.get("outfit_lock") or "").strip()
+        footwear = str(character.get("footwear") or "").strip()
+        hair_lock = str(character.get("hair_lock") or "").strip()
+        outfit_lock = str(character.get("outfit_lock") or outfit).strip()
+        body_scale = str(character.get("body_scale_lock") or character.get("relative_size") or "").strip()
+        relative_size = str(character.get("relative_size") or "").strip()
+        signature_item = str(character.get("signature_item") or "").strip()
+        forbidden = character.get("forbidden_variations")
+        forbidden_text = ", ".join(str(value) for value in forbidden if value) if isinstance(forbidden, list) else ""
+        style = str(
+            visual_bible.get("style")
+            or "Premium semi-realistic 3D children's storybook illustration, cinematic lighting, soft shadows, warm family-film quality."
+        )
+        source_label = "MAIN HERO" if source == "visual_bible.hero" else "RECURRING CHARACTER"
+        parts = [
+            f"Create one reusable full-body character reference portrait/model sheet for the {source_label} of a children's storybook.",
+            f"Story title: {story_title or 'Untitled story'}.",
+            f"Character name: {name}. Role: {role}.",
+            "Show this character alone, centered, in a clean full-body or three-quarter standing view with readable face/head, hair/body pattern, complete outfit/body covering, footwear/anatomy, accessories, and body scale.",
+            "Use a plain light studio background.",
+        ]
+        if appearance:
+            parts.append(f"Locked appearance, face/head/body design: {appearance}.")
+        if hair_lock:
+            parts.append(f"Locked hair/fur/feather/body pattern: {hair_lock}.")
+        if outfit:
+            parts.append(f"Locked outfit/body covering: {outfit}.")
+        if outfit_lock and outfit_lock != outfit:
+            parts.append(f"Locked outfit pattern and motif placement: {outfit_lock}.")
+        if footwear:
+            parts.append(f"Locked footwear/anatomy-safe equivalent: {footwear}.")
+        if body_scale:
+            parts.append(f"Locked body scale/build/proportions: {body_scale}.")
+        if relative_size and relative_size != body_scale:
+            parts.append(f"Locked relative size: {relative_size}.")
+        if signature_item:
+            parts.append(f"Locked signature item/accessory: {signature_item}.")
+        if forbidden_text:
+            parts.append(f"Forbidden variations: {forbidden_text}.")
+        parts.extend(
+            [
+                "This image will be reused as an identity reference for future cover and page illustrations.",
+                "Preserve exact face/head shape, facial proportions, eye shape/color, hair/fur/body pattern, skin/body color, age appearance, height/build/proportions, outfit colors, motif count and placement, footwear, accessories, signature item, and distinctive features.",
+                "Do not include action poses, scene props, text, labels, logos, watermarks, borders, extra characters, alternate outfits, alternate hairstyles, alternate body scale, or alternate ages.",
+                f"Visual style: {style}",
+            ]
+        )
+        return " ".join(parts)
+
+    @classmethod
     def _side_character_reference_prompt(
         cls,
         *,
@@ -2322,23 +2389,125 @@ Malformed JSON:
         character: dict[str, Any],
         visual_bible: dict[str, Any],
     ) -> str:
-        name = str(character.get("name") or "Recurring character").strip()
-        role = str(character.get("role") or "recurring supporting character").strip()
-        appearance = str(character.get("appearance") or "").strip()
-        style = str(
-            visual_bible.get("style")
-            or "Premium semi-realistic 3D children's storybook illustration, cinematic lighting, soft shadows, warm family-film quality."
+        return cls._character_reference_prompt(
+            story_title=story_title,
+            character=character,
+            visual_bible=visual_bible,
+            source="visual_bible.recurring_characters",
         )
-        return (
-            "Create one reusable character reference portrait/model sheet for a children's storybook. "
-            f"Story title: {story_title or 'Untitled story'}. Character name: {name}. Role: {role}. "
-            f"Locked appearance to preserve exactly: {appearance}. "
-            "Show the character alone, centered, clean full-body or three-quarter view with a clearly readable face/head. "
-            "Use a plain light studio background. Preserve the exact hair/fur/body pattern, face/head shape, eyes, "
-            "colors, outfit, accessories, body scale, and one distinctive feature described above. "
-            "This image will be reused as an identity reference for future page illustrations, so avoid action poses, "
-            "scene props, text, labels, logos, watermarks, borders, extra characters, or alternate outfits. "
-            f"Visual style: {style}"
+
+    async def _ensure_visual_bible_character_reference(
+        self,
+        *,
+        story: Story,
+        image_plan: dict[str, Any],
+        visual_bible: dict[str, Any],
+        image_storage: Any,
+        image_model_kwargs: dict[str, str],
+        story_title: str,
+        character: dict[str, Any],
+        source: str,
+        fallback_id: str,
+        priority: int,
+    ) -> None:
+        name = str(character.get("name") or "").strip()
+        appearance = str(character.get("appearance") or "").strip()
+        outfit = str(character.get("outfit") or character.get("outfit_lock") or "").strip()
+        if not name or not (appearance or outfit):
+            return
+
+        character_id = str(
+            character.get("character_id") or self._character_reference_id(name, fallback=fallback_id)
+        ).strip()
+        if not character_id:
+            return
+        character["character_id"] = character_id
+
+        existing_url = str(character.get("reference_image_url") or "").strip()
+        if not existing_url:
+            for manifest_item in self._character_reference_manifest(image_plan):
+                if manifest_item.get("character_id") == character_id and manifest_item.get("reference_image_url"):
+                    existing_url = str(manifest_item.get("reference_image_url") or "").strip()
+                    break
+
+        if existing_url:
+            character["reference_image_url"] = existing_url
+            self._upsert_character_reference_manifest_item(
+                image_plan,
+                {
+                    "character_id": character_id,
+                    "name": name,
+                    "role": character.get("role") or ("hero" if source == "visual_bible.hero" else "recurring_character"),
+                    "source": source,
+                    "reference_image_url": existing_url,
+                    "appearance": appearance,
+                    "outfit": outfit,
+                    "footwear": character.get("footwear"),
+                    "hair_lock": character.get("hair_lock"),
+                    "outfit_lock": character.get("outfit_lock"),
+                    "body_scale_lock": character.get("body_scale_lock"),
+                    "relative_size": character.get("relative_size"),
+                    "signature_item": character.get("signature_item"),
+                    "priority": priority,
+                },
+            )
+            return
+
+        prompt = self._character_reference_prompt(
+            story_title=story_title,
+            character=character,
+            visual_bible=visual_bible,
+            source=source,
+        )
+        logger.info(
+            "Story %s: generating character reference source=%s character_id=%s name=%s",
+            story.id,
+            source,
+            character_id,
+            name,
+        )
+        result = await self.ai_provider.generate_image(
+            prompt,
+            **image_model_kwargs,
+            size=settings.STORY_PAGE_IMAGE_SIZE,
+            quality=settings.STORY_IMAGE_QUALITY,
+            aspect_ratio="1:1",
+        )
+        image_bytes = self._crop_image_bytes_to_aspect_ratio(result.image_bytes, "1:1")
+        webp_bytes = ImageWebPConverter.convert_to_webp(image_bytes, quality=85)
+        image_url = await image_storage.save_story_image(
+            story.id,
+            webp_bytes,
+            f"character_ref_{character_id}.webp",
+            "",
+        )
+        generated_at = datetime.now(UTC).isoformat()
+        character["reference_image_url"] = image_url
+        character["reference_image_prompt"] = prompt
+        character["reference_generated_at"] = generated_at
+        self._upsert_character_reference_manifest_item(
+            image_plan,
+            {
+                "character_id": character_id,
+                "name": name,
+                "role": character.get("role") or ("hero" if source == "visual_bible.hero" else "recurring_character"),
+                "source": source,
+                "reference_image_url": image_url,
+                "reference_image_prompt": prompt,
+                "reference_generated_at": generated_at,
+                "appearance": appearance,
+                "outfit": outfit,
+                "footwear": character.get("footwear"),
+                "hair_lock": character.get("hair_lock"),
+                "outfit_lock": character.get("outfit_lock"),
+                "body_scale_lock": character.get("body_scale_lock"),
+                "relative_size": character.get("relative_size"),
+                "signature_item": character.get("signature_item"),
+                "provider": (result.metadata or {}).get("provider"),
+                "model": result.model,
+                "prompt_used": result.prompt_used,
+                "priority": priority,
+            },
         )
 
     async def _ensure_image_plan_character_references(
@@ -2387,77 +2556,35 @@ Malformed JSON:
 
         image_storage = get_image_storage_service()
         image_model_kwargs = self._story_image_model_kwargs(story)
+        if not self._use_child_character(story):
+            hero = self._visual_bible_hero_character(image_plan)
+            if hero is not None:
+                await self._ensure_visual_bible_character_reference(
+                    story=story,
+                    image_plan=image_plan,
+                    visual_bible=visual_bible,
+                    image_storage=image_storage,
+                    image_model_kwargs=image_model_kwargs,
+                    story_title=story_title,
+                    character=hero,
+                    source="visual_bible.hero",
+                    fallback_id="hero",
+                    priority=0,
+                )
+
         recurring = self._visual_bible_recurring_characters(image_plan)
         for index, character in enumerate(recurring, start=1):
-            name = str(character.get("name") or "").strip()
-            appearance = str(character.get("appearance") or "").strip()
-            if not name or not appearance:
-                continue
-            character_id = str(character.get("character_id") or self._character_reference_id(name, fallback=f"side_{index}"))
-            character["character_id"] = character_id
-            existing_url = character.get("reference_image_url")
-            if not existing_url:
-                for manifest_item in self._character_reference_manifest(image_plan):
-                    if manifest_item.get("character_id") == character_id and manifest_item.get("reference_image_url"):
-                        existing_url = manifest_item.get("reference_image_url")
-                        break
-            if existing_url:
-                character["reference_image_url"] = existing_url
-                self._upsert_character_reference_manifest_item(
-                    image_plan,
-                    {
-                        "character_id": character_id,
-                        "name": name,
-                        "role": character.get("role") or "recurring_character",
-                        "source": "visual_bible.recurring_characters",
-                        "reference_image_url": existing_url,
-                        "appearance": appearance,
-                        "priority": index,
-                    },
-                )
-                continue
-
-            prompt = self._side_character_reference_prompt(
+            await self._ensure_visual_bible_character_reference(
+                story=story,
+                image_plan=image_plan,
+                visual_bible=visual_bible,
+                image_storage=image_storage,
+                image_model_kwargs=image_model_kwargs,
                 story_title=story_title,
                 character=character,
-                visual_bible=visual_bible,
-            )
-            logger.info(
-                "Story %s: generating side character reference character_id=%s name=%s",
-                story.id,
-                character_id,
-                name,
-            )
-            result = await self.ai_provider.generate_image(
-                prompt,
-                **image_model_kwargs,
-                size=settings.STORY_PAGE_IMAGE_SIZE,
-                quality=settings.STORY_IMAGE_QUALITY,
-                aspect_ratio="1:1",
-            )
-            image_bytes = self._crop_image_bytes_to_aspect_ratio(result.image_bytes, "1:1")
-            webp_bytes = ImageWebPConverter.convert_to_webp(image_bytes, quality=85)
-            image_url = await image_storage.save_story_image(
-                story.id,
-                webp_bytes,
-                f"character_ref_{character_id}.webp",
-                "",
-            )
-            character["reference_image_url"] = image_url
-            self._upsert_character_reference_manifest_item(
-                image_plan,
-                {
-                    "character_id": character_id,
-                    "name": name,
-                    "role": character.get("role") or "recurring_character",
-                    "source": "visual_bible.recurring_characters",
-                    "reference_image_url": image_url,
-                    "appearance": appearance,
-                    "provider": (result.metadata or {}).get("provider"),
-                    "model": result.model,
-                    "prompt_used": result.prompt_used,
-                    "priority": index,
-                },
+                source="visual_bible.recurring_characters",
+                fallback_id=f"side_{index}",
+                priority=index,
             )
         return image_plan
 
