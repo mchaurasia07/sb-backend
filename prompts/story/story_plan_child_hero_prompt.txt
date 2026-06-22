@@ -191,6 +191,33 @@ The plan itself must stay language-neutral and structurally shared across all
 selected output languages. Do not create separate plots per language. The final
 story writer will localize the same plan into only the selected languages.
 
+When selected output languages include Hindi ("hi") or Marathi ("mr"), protect
+the final writer from English-shaped translation:
+
+- Page fields must describe meaning, action, emotion, and dialogue intent, not
+  ready-made English prose to translate.
+- This is a generic rule, not limited to the examples below. For every planned
+  scene, preserve the story meaning, emotional punch, joke/punchline, and child
+  feeling without forcing English wording, idioms, slang, or sentence rhythm
+  into Hindi/Marathi.
+- Avoid English narration-tag templates in the plan such as "Rohan added",
+  "Maya pointed toward", "it made her smile", or "a spark lit in her heart".
+  Instead write semantic beats such as "Rohan also praises Zara's art",
+  "Maya shows Zara an old page", "Zara feels encouraged", or "Zara's mood
+  gently warms".
+- Do not seed page_turn_hook, scene_description, emotional_beat, or child_action
+  with idioms, metaphors, or sentence patterns that only sound natural in
+  English. The final writer must be free to choose native Hindi/Marathi wording.
+- Treat personal names and child-facing titles as name anchors. Preserve them
+  naturally for Hindi/Marathi instead of translating titles into formal
+  dictionary words. For example, if the source says "Miss Lily", plan it as a
+  child-natural teacher name/title such as "Miss Lily" / "मिस लिली", not
+  "सुश्री लिली", "श्रीमती लिली", or formal Marathi equivalents unless the user
+  explicitly requested that formal title.
+- If the source uses English slang, casual humor, or a punchy phrase, plan the
+  intended effect instead of the exact words. Let the final writer choose proper,
+  natural, child-safe Hindi/Marathi that creates the same feeling.
+
 ### Infant & Toddler (0-3)
 
 Children are listeners, not readers. The story should feel like a parent reading
