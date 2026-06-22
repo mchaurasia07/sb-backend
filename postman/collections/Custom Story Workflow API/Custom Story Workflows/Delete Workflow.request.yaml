@@ -1,4 +1,0 @@
-$kind: http-request
-url: "{{base_url}}{{api_prefix}}/stories/workflows/{{workflow_id}}"
-method: DELETE
-order: 7000

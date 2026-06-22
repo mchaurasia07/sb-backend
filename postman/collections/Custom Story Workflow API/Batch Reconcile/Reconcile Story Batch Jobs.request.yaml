@@ -1,6 +1,0 @@
-$kind: http-request
-url: "{{base_url}}{{api_prefix}}/stories/batch-jobs/reconcile?limit={{limit}}"
-method: POST
-queryParams:
-  limit: "{{limit}}"
-order: 1000
