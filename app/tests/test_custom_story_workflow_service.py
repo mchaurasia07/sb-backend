@@ -25,7 +25,9 @@ from app.repository.custom_story_workflow_repository import (
 from app.routes.v1 import stories as story_routes
 from app.service import custom_story_workflow_service
 from app.service.custom_story_workflow_service import CustomStoryWorkflowService
+from app.service.image_plan_validator import ImagePlanValidator
 from app.service.story_input_safety_service import StoryInputSafetyInspection, StoryInputSafetyResult
+from app.service.story_service import StoryService
 
 
 def _workflow(**overrides):
@@ -1438,6 +1440,93 @@ async def test_skipped_image_generation_creates_completed_step_record():
 
     assert created_steps[0].status == StepStatus.COMPLETED
     assert created_steps[0].output_json == {"images_skipped": True}
+
+
+@pytest.mark.asyncio
+async def test_image_plan_validation_persists_normalized_outfit_motif_lock():
+    image_plan = {
+        "visual_bible": {
+            "hero": {
+                "character_id": "hero_child",
+                "name": "Mira",
+                "appearance": "A curious child with bright eyes.",
+                "outfit": "blue t-shirt with yellow stars and red shorts",
+                "footwear": "yellow rain boots",
+                "outfit_lock": "blue t-shirt with yellow stars and red shorts",
+                "body_scale_lock": "Same early-reader child height, build, proportions, and age appearance.",
+                "relative_size": "child-sized hero",
+                "signature_item": "Moon map",
+            },
+            "companion": {"appearance": "A small glowing moth."},
+            "recurring_characters": [],
+        },
+        "cover": {
+            "visual_focus": "Mira holding the moon map.",
+            "emotion": "wonder",
+            "characters_present": ["Mira"],
+            "reference_character_ids": ["hero_child"],
+            "image_prompt": "Mira smiles while the glowing moon map opens in a moonlit library.",
+        },
+        "pages": [
+            {
+                "page_number": 1,
+                "story_role": "introduction",
+                "visual_importance": "medium",
+                "emotion": "wonder",
+                "scene_action": "Mira points to a glowing path on the map.",
+                "environment": "Moonlit library with warm shelves.",
+                "characters_present": ["Mira"],
+                "reference_character_ids": ["hero_child"],
+                "image_prompt": "Mira follows a glowing map clue in the library.",
+            }
+        ],
+        "back_cover": {
+            "emotion": "warm joy",
+            "characters_present": ["Mira"],
+            "reference_character_ids": ["hero_child"],
+            "image_prompt": "Mira closes the moon map with a peaceful smile.",
+        },
+    }
+    workflow = _workflow(
+        story_json={"pages": [{"page_number": 1, "text": "Mira listened."}]},
+        image_plan_json=image_plan,
+    )
+    service = CustomStoryWorkflowService.__new__(CustomStoryWorkflowService)
+    service.steps = _StepRepo()
+
+    async def _update_workflow(workflow_arg):
+        return workflow_arg
+
+    async def _commit():
+        return None
+
+    class _Runner:
+        async def _step_validate_image_plan(self, story, image_plan_arg, story_json, flags):
+            _ = story, flags
+            normalized = StoryService._normalize_image_plan(image_plan_arg)
+            result = ImagePlanValidator().validate(normalized, story_json=story_json, skip_footwear_validation=True)
+            assert result.ok, result.errors
+            return normalized
+
+        async def _ensure_image_plan_character_references(self, story, image_plan_arg):
+            _ = story
+            return image_plan_arg
+
+    service.workflows = SimpleNamespace(update=_update_workflow)
+    service.session = SimpleNamespace(commit=_commit)
+
+    await service._execute_step(
+        _Runner(),
+        workflow,
+        CustomStoryWorkflowStep.IMAGE_PLAN_VALIDATION,
+    )
+
+    assert workflow.image_plan_validated is True
+    assert "Motif lock: one star centered on the front." in workflow.image_plan_json["visual_bible"]["hero"]["outfit"]
+    assert "Motif lock: one star centered on the front." in workflow.image_plan_json["visual_bible"]["hero"]["outfit_lock"]
+    step = _step_by_name(service.steps, CustomStoryWorkflowStep.IMAGE_PLAN_VALIDATION)
+    assert step.status == StepStatus.COMPLETED
+    assert step.output_json == workflow.image_plan_json
 
 
 @pytest.mark.asyncio

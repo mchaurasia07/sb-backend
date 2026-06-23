@@ -1774,6 +1774,9 @@ Malformed JSON:
                     "appearance": "",
                     "outfit": "",
                     "footwear": "",
+                    "outfit_lock": "",
+                    "body_scale_lock": "",
+                    "relative_size": "",
                     "signature_item": "",
                 },
                 "companion": {"appearance": ""},
@@ -1845,8 +1848,14 @@ Malformed JSON:
             "body scale, and color palettes stable across pages.\n"
             "- For every recurring character, fill visual_bible locks: appearance, outfit/body covering, footwear or "
             "anatomy-safe equivalent, hair/fur/body lock, outfit_lock, body_scale_lock, relative_size, and signature_item.\n"
+            "- For the hero, fill visual_bible.hero outfit_lock, body_scale_lock, relative_size, and signature_item.\n"
             "- Lock exact footwear for the hero in visual_bible.hero.footwear and include it in visual_bible.hero.outfit.\n"
             "- Never leave shoes/footwear implied; choose one concrete footwear state and repeat it in every image_prompt.\n"
+            "- If clothing has a motif, patch, logo, star, heart, flower, embroidery, or printed design, lock exact "
+            'count and placement, for example "one red star centered on the chest".\n'
+            "- For repeating fabric patterns such as dots, stripes, or polka dots, describe the stable garment-wide "
+            'pattern, for example "small blue polka dots evenly scattered across the yellow dress".\n'
+            "- If no motif is needed, explicitly use plain fabric with no motifs, logos, patches, or prints.\n"
             "- Use modest, family-friendly outfits. For water-play scenes, use covered play clothing and water shoes.\n"
             "- Keep scenes warm, calm, age-appropriate, expressive, and easy for children to understand.\n"
             "- Avoid intense, scary, violent, or unsafe visual wording. State positive visual requirements only.\n"
@@ -2120,8 +2129,187 @@ Malformed JSON:
         if not str(hero.get("outfit_lock") or "").strip():
             hero["outfit_lock"] = str(hero.get("outfit") or "").strip()
 
+        StoryService._normalize_image_plan_outfit_motifs(visual_bible)
         StoryService._append_hero_footwear_to_image_prompts(image_plan, hero["footwear"], hero)
         return image_plan
+
+    @staticmethod
+    def _normalize_image_plan_outfit_motifs(visual_bible: dict[str, Any]) -> None:
+        hero = visual_bible.get("hero")
+        if isinstance(hero, dict):
+            StoryService._normalize_character_outfit_motif(hero)
+
+        recurring = visual_bible.get("recurring_characters")
+        if not isinstance(recurring, list):
+            return
+        for character in recurring:
+            if isinstance(character, dict):
+                StoryService._normalize_character_outfit_motif(character)
+
+    @staticmethod
+    def _normalize_character_outfit_motif(character: dict[str, Any]) -> None:
+        for field in ("outfit", "outfit_lock"):
+            value = str(character.get(field) or "").strip()
+            if value:
+                character[field] = StoryService._normalize_plain_outfit_absence_terms(value)
+
+        combined = f"{character.get('outfit') or ''} {character.get('outfit_lock') or ''}".lower()
+        if not combined.strip() or not StoryService._image_plan_outfit_mentions_motif(combined):
+            return
+        if StoryService._image_plan_outfit_has_plain_or_valid_motif_lock(combined):
+            return
+
+        motif = StoryService._image_plan_outfit_motif_label(combined)
+        motif_lock = f"Motif lock: one {motif} centered on the front."
+        for field in ("outfit", "outfit_lock"):
+            value = str(character.get(field) or "").strip()
+            if value:
+                if motif_lock.lower() not in value.lower():
+                    character[field] = f"{value}; {motif_lock}"
+            elif field == "outfit_lock":
+                character[field] = motif_lock
+
+    @staticmethod
+    def _normalize_plain_outfit_absence_terms(text: str) -> str:
+        normalized = re.sub(
+            r"plain fabric\s*(?:with|,)?\s*no motifs?,\s*logos?,\s*patches?,?\s*(?:or\s*)?(?:prints?|printed designs?)",
+            "plain fabric with no print",
+            text,
+            flags=re.IGNORECASE,
+        )
+        normalized = re.sub(
+            r"no motifs?,\s*logos?,\s*patches?,?\s*(?:or\s*)?(?:prints?|printed designs?)",
+            "no print",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        return normalized
+
+    @staticmethod
+    def _image_plan_outfit_mentions_motif(text: str) -> bool:
+        motif_terms = (
+            "star",
+            "heart",
+            "flower",
+            "moon",
+            "sun",
+            "badge",
+            "logo",
+            "motif",
+            "stripe",
+            "dot",
+            "polka",
+            "embroidery",
+            "patch",
+            "printed",
+        )
+        return any(term in text for term in motif_terms)
+
+    @staticmethod
+    def _image_plan_outfit_has_plain_or_valid_motif_lock(text: str) -> bool:
+        plain_terms = (
+            "plain fabric",
+            "plain",
+            "solid color",
+            "solid colour",
+            "no motif",
+            "no motifs",
+            "no print",
+            "no prints",
+            "no logo",
+            "no logos",
+            "no patch",
+            "no patches",
+        )
+        specific_motif_terms = (
+            "star",
+            "heart",
+            "flower",
+            "moon",
+            "sun",
+            "badge",
+            "logo",
+            "stripe",
+            "dot",
+            "polka",
+            "embroidery",
+            "patch",
+            "printed",
+        )
+        plain_only = any(term in text for term in plain_terms) and not any(term in text for term in specific_motif_terms)
+        if plain_only:
+            return True
+        if StoryService._image_plan_has_repeating_garment_pattern(text):
+            return True
+
+        has_count = bool(re.search(r"\b(one|two|three|four|five|single|double|\d+)\b", text))
+        placement_terms = ("center", "centred", "chest", "left", "right", "front", "back", "sleeve", "collar", "hem", "pocket")
+        has_placement = any(term in text for term in placement_terms)
+        return has_count and has_placement
+
+    @staticmethod
+    def _image_plan_has_repeating_garment_pattern(text: str) -> bool:
+        repeating_pattern_terms = (
+            "polka dot",
+            "polka dots",
+            "dotted",
+            "stripes",
+            "striped",
+            "all-over",
+            "all over",
+            "evenly scattered",
+            "repeating pattern",
+            "floral",
+            "floral print",
+            "geometric",
+            "checkered",
+            "plaid",
+            "paisley",
+            "damask",
+            "brocade",
+            "tasseled",
+            "embroidered",
+        )
+        garment_terms = (
+            "dress",
+            "shirt",
+            "t-shirt",
+            "tee",
+            "skirt",
+            "shorts",
+            "pants",
+            "trousers",
+            "overalls",
+            "cardigan",
+            "jacket",
+            "sweater",
+            "fabric",
+            "sleeves",
+        )
+        return any(term in text for term in repeating_pattern_terms) and any(term in text for term in garment_terms)
+
+    @staticmethod
+    def _image_plan_outfit_motif_label(text: str) -> str:
+        motif_labels = (
+            ("star", "star"),
+            ("heart", "heart"),
+            ("flower", "flower"),
+            ("moon", "moon"),
+            ("sun", "sun"),
+            ("badge", "badge"),
+            ("logo", "logo"),
+            ("embroidery", "embroidered motif"),
+            ("patch", "patch"),
+            ("printed", "printed motif"),
+            ("stripe", "stripe motif"),
+            ("dot", "dot motif"),
+            ("polka", "polka-dot motif"),
+            ("motif", "motif"),
+        )
+        for term, label in motif_labels:
+            if term in text:
+                return label
+        return "motif"
 
     @staticmethod
     def _validate_image_plan_page_contract(image_plan: dict[str, Any], story_json: dict[str, Any]) -> None:

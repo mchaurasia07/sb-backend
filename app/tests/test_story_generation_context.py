@@ -1709,6 +1709,11 @@ def test_custom_safe_image_plan_prompt_enforces_story_page_contract():
     assert '"relative_size":""' in prompt
     assert '"signature_item":""' in prompt
     assert "For every recurring character, fill visual_bible locks" in prompt
+    assert "For the hero, fill visual_bible.hero outfit_lock, body_scale_lock, relative_size, and signature_item" in prompt
+    assert "lock exact count and placement" in prompt
+    assert "one red star centered on the chest" in prompt
+    assert "small blue polka dots evenly scattered across the yellow dress" in prompt
+    assert "plain fabric with no motifs, logos, patches, or prints" in prompt
 
 
 def test_validate_image_plan_page_contract_rejects_missing_page():

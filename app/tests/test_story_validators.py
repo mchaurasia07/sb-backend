@@ -371,6 +371,62 @@ def test_image_plan_validator_rejects_unplaced_outfit_motif():
     assert any("motif" in error for error in result.errors)
 
 
+def test_normalize_image_plan_repairs_unplaced_hero_outfit_motif():
+    image_plan = _image_plan(page_count=2)
+    image_plan["visual_bible"]["hero"]["outfit"] = "blue t-shirt with yellow stars and red shorts"
+    image_plan["visual_bible"]["hero"]["outfit_lock"] = "blue t-shirt with yellow stars and red shorts"
+
+    normalized = StoryService._normalize_image_plan(image_plan)
+    result = ImagePlanValidator().validate(normalized, story_json=_story_json(page_count=2))
+
+    assert result.ok, result.errors
+    hero = normalized["visual_bible"]["hero"]
+    assert "Motif lock: one star centered on the front." in hero["outfit"]
+    assert "Motif lock: one star centered on the front." in hero["outfit_lock"]
+
+
+def test_normalize_image_plan_repairs_unplaced_recurring_character_outfit_motif():
+    image_plan = _image_plan(page_count=2)
+    image_plan["visual_bible"]["recurring_characters"] = [
+        {
+            "character_id": "uncle_raj",
+            "name": "Uncle Raj",
+            "role": "mentor",
+            "appearance": "Warm adult mentor with silver glasses and a kind smile.",
+            "outfit": "green shirt with yellow badge and brown trousers",
+            "outfit_lock": "green shirt with yellow badge and brown trousers",
+            "body_scale_lock": "Adult height and slim build, always taller than Mira.",
+            "relative_size": "taller than Mira",
+        }
+    ]
+
+    normalized = StoryService._normalize_image_plan(image_plan)
+    result = ImagePlanValidator().validate(normalized, story_json=_story_json(page_count=2))
+
+    assert result.ok, result.errors
+    character = normalized["visual_bible"]["recurring_characters"][0]
+    assert "Motif lock: one badge centered on the front." in character["outfit"]
+    assert "Motif lock: one badge centered on the front." in character["outfit_lock"]
+
+
+def test_normalize_image_plan_keeps_plain_no_motif_outfit_validator_safe():
+    image_plan = _image_plan(page_count=2)
+    image_plan["visual_bible"]["hero"]["outfit"] = (
+        "blue t-shirt, red shorts, yellow rain boots, plain fabric with no motifs, logos, patches, or prints"
+    )
+    image_plan["visual_bible"]["hero"]["outfit_lock"] = (
+        "blue t-shirt, red shorts, yellow rain boots, plain fabric with no motifs, logos, patches, or prints"
+    )
+
+    normalized = StoryService._normalize_image_plan(image_plan)
+    result = ImagePlanValidator().validate(normalized, story_json=_story_json(page_count=2))
+
+    assert result.ok, result.errors
+    hero = normalized["visual_bible"]["hero"]
+    assert "plain fabric with no print" in hero["outfit"]
+    assert "Motif lock" not in hero["outfit"]
+
+
 def test_image_plan_validator_accepts_repeating_polka_dot_garment_pattern():
     image_plan = _image_plan(page_count=2)
     image_plan["visual_bible"]["hero"]["outfit"] = "soft yellow dress with small blue polka dots and red shoes"
