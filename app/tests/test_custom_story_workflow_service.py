@@ -1013,21 +1013,19 @@ async def test_create_custom_story_workflow_skips_background_when_execution_disa
     calls = {}
 
     class _FakeCustomStoryWorkflowService:
-        def __init__(self, session):
-            calls["session"] = session
-
         async def create(self, requested_user_id, requested_payload):
             calls["create"] = (requested_user_id, requested_payload)
             return response_data
 
-    monkeypatch.setattr(story_routes, "CustomStoryWorkflowService", _FakeCustomStoryWorkflowService)
+    route = story_routes.StoriesRouter().create_custom_story_workflow
+    container = SimpleNamespace(custom_story_workflow=_FakeCustomStoryWorkflowService())
     route_response = Response()
 
-    response = await story_routes.create_custom_story_workflow(
+    response = await route(
         payload,
         route_response,
         SimpleNamespace(id=user_id),
-        object(),
+        container,
     )
 
     assert response.data == response_data
@@ -1050,22 +1048,20 @@ async def test_create_custom_story_workflow_queues_event_when_requested(monkeypa
     response_data.execute_workflow = True
 
     class _FakeCustomStoryWorkflowService:
-        def __init__(self, session):
-            self.session = session
-
         async def create(self, requested_user_id, requested_payload):
             assert requested_user_id == user_id
             assert requested_payload == payload
             return response_data
 
-    monkeypatch.setattr(story_routes, "CustomStoryWorkflowService", _FakeCustomStoryWorkflowService)
+    route = story_routes.StoriesRouter().create_custom_story_workflow
+    container = SimpleNamespace(custom_story_workflow=_FakeCustomStoryWorkflowService())
     route_response = Response()
 
-    response = await story_routes.create_custom_story_workflow(
+    response = await route(
         payload,
         route_response,
         SimpleNamespace(id=user_id),
-        object(),
+        container,
     )
 
     assert response.data == response_data

@@ -76,6 +76,27 @@ class _FakeSessionContext:
         return None
 
 
+class _FakeAppContainer:
+    def __init__(self, *, story_batch_service=None, workflow_service=None):
+        self.story_batch_service = story_batch_service
+        self.workflow_service = workflow_service
+
+    def request(self, session):
+        story_batch_service = self.story_batch_service
+        workflow_service = self.workflow_service
+
+        class _FakeRequestContainer:
+            @property
+            def story_batch(self):
+                return story_batch_service(session) if story_batch_service else None
+
+            @property
+            def custom_story_workflow(self):
+                return workflow_service(session) if workflow_service else None
+
+        return _FakeRequestContainer()
+
+
 @pytest.mark.asyncio
 async def test_reconcile_scheduler_calls_story_and_workflow_services(monkeypatch):
     calls = []
@@ -98,8 +119,11 @@ async def test_reconcile_scheduler_calls_story_and_workflow_services(monkeypatch
 
     monkeypatch.setattr(settings, "STORY_BATCH_RECONCILE_LIMIT", 25)
     monkeypatch.setattr(scheduler_module, "AsyncSessionLocal", _FakeSessionContext)
-    monkeypatch.setattr(scheduler_module, "StoryServiceBatchService", FakeStoryBatchService)
-    monkeypatch.setattr(scheduler_module, "CustomStoryWorkflowService", FakeWorkflowService)
+    monkeypatch.setattr(
+        scheduler_module,
+        "app_container",
+        _FakeAppContainer(story_batch_service=FakeStoryBatchService, workflow_service=FakeWorkflowService),
+    )
 
     scheduler = StoryBatchReconcileScheduler()
     scheduler._reconcile_lock = asyncio.Lock()
@@ -128,7 +152,11 @@ async def test_event_scheduler_calls_workflow_event_processor(monkeypatch):
 
     monkeypatch.setattr(settings, "CUSTOM_WORKFLOW_EVENT_PROCESS_LIMIT", 10)
     monkeypatch.setattr(scheduler_module, "AsyncSessionLocal", _FakeSessionContext)
-    monkeypatch.setattr(scheduler_module, "CustomStoryWorkflowService", FakeWorkflowService)
+    monkeypatch.setattr(
+        scheduler_module,
+        "app_container",
+        _FakeAppContainer(workflow_service=FakeWorkflowService),
+    )
 
     scheduler = StoryBatchReconcileScheduler()
     scheduler._event_lock = asyncio.Lock()
@@ -178,8 +206,11 @@ async def test_scheduler_logs_use_clear_reconcile_and_event_process_labels(monke
     monkeypatch.setattr(scheduler_module, "reconcile_logger", FakeLogger("SCHEDULER-RECONCILE"))
     monkeypatch.setattr(scheduler_module, "event_process_logger", FakeLogger("SCHEDULER-EVENT_PROCESS"))
     monkeypatch.setattr(scheduler_module, "AsyncSessionLocal", _FakeSessionContext)
-    monkeypatch.setattr(scheduler_module, "StoryServiceBatchService", FakeStoryBatchService)
-    monkeypatch.setattr(scheduler_module, "CustomStoryWorkflowService", FakeWorkflowService)
+    monkeypatch.setattr(
+        scheduler_module,
+        "app_container",
+        _FakeAppContainer(story_batch_service=FakeStoryBatchService, workflow_service=FakeWorkflowService),
+    )
 
     scheduler = StoryBatchReconcileScheduler()
     scheduler._reconcile_lock = asyncio.Lock()
@@ -200,8 +231,11 @@ async def test_scheduler_locks_skip_overlapping_runs(monkeypatch):
         def __init__(self, session):
             raise AssertionError("service should not be called while lock is held")
 
-    monkeypatch.setattr(scheduler_module, "StoryServiceBatchService", FailingService)
-    monkeypatch.setattr(scheduler_module, "CustomStoryWorkflowService", FailingService)
+    monkeypatch.setattr(
+        scheduler_module,
+        "app_container",
+        _FakeAppContainer(story_batch_service=FailingService, workflow_service=FailingService),
+    )
 
     scheduler = StoryBatchReconcileScheduler()
     scheduler._reconcile_lock = asyncio.Lock()
@@ -243,8 +277,11 @@ async def test_reconcile_scheduler_skips_new_run_while_previous_run_is_active(mo
 
     monkeypatch.setattr(settings, "STORY_BATCH_RECONCILE_LIMIT", 25)
     monkeypatch.setattr(scheduler_module, "AsyncSessionLocal", _FakeSessionContext)
-    monkeypatch.setattr(scheduler_module, "StoryServiceBatchService", SlowStoryBatchService)
-    monkeypatch.setattr(scheduler_module, "CustomStoryWorkflowService", FakeWorkflowService)
+    monkeypatch.setattr(
+        scheduler_module,
+        "app_container",
+        _FakeAppContainer(story_batch_service=SlowStoryBatchService, workflow_service=FakeWorkflowService),
+    )
 
     scheduler = StoryBatchReconcileScheduler()
     scheduler._reconcile_lock = asyncio.Lock()
@@ -281,7 +318,11 @@ async def test_event_scheduler_skips_new_run_while_previous_run_is_active(monkey
 
     monkeypatch.setattr(settings, "CUSTOM_WORKFLOW_EVENT_PROCESS_LIMIT", 10)
     monkeypatch.setattr(scheduler_module, "AsyncSessionLocal", _FakeSessionContext)
-    monkeypatch.setattr(scheduler_module, "CustomStoryWorkflowService", SlowWorkflowService)
+    monkeypatch.setattr(
+        scheduler_module,
+        "app_container",
+        _FakeAppContainer(workflow_service=SlowWorkflowService),
+    )
 
     scheduler = StoryBatchReconcileScheduler()
     scheduler._event_lock = asyncio.Lock()

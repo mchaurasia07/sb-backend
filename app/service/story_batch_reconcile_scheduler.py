@@ -7,10 +7,9 @@ from contextlib import suppress
 from datetime import datetime, timedelta
 
 from app.core.config import settings
+from app.core.container import app_container
 from app.core.database import AsyncSessionLocal
 from app.core.logger import get_logger
-from app.service.custom_story_workflow_service import CustomStoryWorkflowService
-from app.service.story_service_batch_service import StoryServiceBatchService
 
 logger = get_logger(__name__)
 reconcile_logger = get_logger("SCHEDULER-RECONCILE")
@@ -176,10 +175,11 @@ class StoryBatchReconcileScheduler:
                     limit=settings.STORY_BATCH_RECONCILE_LIMIT,
                 )
                 async with AsyncSessionLocal() as session:
-                    story_result = await StoryServiceBatchService(session).reconcile_batch_jobs(
+                    container = app_container.request(session)
+                    story_result = await container.story_batch.reconcile_batch_jobs(
                         limit=settings.STORY_BATCH_RECONCILE_LIMIT
                     )
-                    custom_story_result = await CustomStoryWorkflowService(session).reconcile_batch_jobs(
+                    custom_story_result = await container.custom_story_workflow.reconcile_batch_jobs(
                         limit=settings.STORY_BATCH_RECONCILE_LIMIT
                     )
                 reconcile_logger.info(
@@ -206,7 +206,7 @@ class StoryBatchReconcileScheduler:
                     limit=settings.CUSTOM_WORKFLOW_EVENT_PROCESS_LIMIT,
                 )
                 async with AsyncSessionLocal() as session:
-                    result = await CustomStoryWorkflowService(session).process_events(
+                    result = await app_container.request(session).custom_story_workflow.process_events(
                         limit=settings.CUSTOM_WORKFLOW_EVENT_PROCESS_LIMIT
                     )
                 event_process_logger.info(

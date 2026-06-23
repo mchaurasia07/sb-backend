@@ -10,13 +10,19 @@ from app.routes.v1.notifications import router as notifications_router
 from app.routes.v1.stories import router as stories_router
 from app.routes.v1.story_narration_routes import router as narration_router
 
-api_router = APIRouter()
-api_router.include_router(auth_router, prefix="/auth", tags=["Auth"])
-api_router.include_router(child_library_router, prefix="/child-library", tags=["Child Library"])
-api_router.include_router(children_router, prefix="/children", tags=["Children"])
-api_router.include_router(generic_audios_router, prefix="/generic-audios", tags=["Generic Audios"])
-api_router.include_router(generic_stories_router, prefix="/generic-stories", tags=["Generic Stories"])
-api_router.include_router(custom_stories_router, prefix="/custom-stories", tags=["Custom Stories"])
-api_router.include_router(notifications_router, prefix="/notifications", tags=["Notifications"])
-api_router.include_router(stories_router, prefix="/stories", tags=["Stories"])
-api_router.include_router(narration_router, prefix="/stories", tags=["Narration"])
+
+class V1Router:
+    def __init__(self):
+        self.router = APIRouter()
+        self.router.include_router(auth_router, prefix="/auth", tags=["Auth"])
+        self.router.include_router(child_library_router, prefix="/child-library", tags=["Child Library"])
+        self.router.include_router(children_router, prefix="/children", tags=["Children"])
+        self.router.include_router(generic_audios_router, prefix="/generic-audios", tags=["Generic Audios"])
+        self.router.include_router(generic_stories_router, prefix="/generic-stories", tags=["Generic Stories"])
+        self.router.include_router(custom_stories_router, prefix="/custom-stories", tags=["Custom Stories"])
+        self.router.include_router(notifications_router, prefix="/notifications", tags=["Notifications"])
+        self.router.include_router(stories_router, prefix="/stories", tags=["Stories"])
+        self.router.include_router(narration_router, prefix="/stories", tags=["Narration"])
+
+
+api_router = V1Router().router

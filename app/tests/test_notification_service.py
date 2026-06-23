@@ -282,19 +282,16 @@ async def test_send_notification_async_route_queues_background_task(monkeypatch)
     )
 
     class _Service:
-        def __init__(self, session):
-            self.session = session
-
         async def queue_manual_async(self, payload):
             return response_data
 
-    monkeypatch.setattr(notification_routes, "NotificationService", _Service)
-
+    route = notification_routes.NotificationsRouter().send_notification_async
+    container = SimpleNamespace(notification=_Service())
     background_tasks = BackgroundTasks()
-    response = await notification_routes.send_notification_async(
+    response = await route(
         _async_payload(user_ids=[uuid4()]),
         background_tasks,
-        session=object(),
+        container=container,
     )
 
     assert response.success is True
