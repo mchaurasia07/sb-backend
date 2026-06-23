@@ -24,6 +24,47 @@ class CustomStoryWorkflowRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
+    @staticmethod
+    def _list_load_columns():
+        return (
+            CustomStoryWorkflow.id,
+            CustomStoryWorkflow.user_id,
+            CustomStoryWorkflow.child_id,
+            CustomStoryWorkflow.story_id,
+            CustomStoryWorkflow.generic_story_id,
+            CustomStoryWorkflow.request_number,
+            CustomStoryWorkflow.story_type,
+            CustomStoryWorkflow.generation_mode,
+            CustomStoryWorkflow.processing_mode,
+            CustomStoryWorkflow.age_group,
+            CustomStoryWorkflow.category,
+            CustomStoryWorkflow.learning_goal,
+            CustomStoryWorkflow.context,
+            CustomStoryWorkflow.event_description,
+            CustomStoryWorkflow.language,
+            CustomStoryWorkflow.languages,
+            CustomStoryWorkflow.genre,
+            CustomStoryWorkflow.publish_status,
+            CustomStoryWorkflow.source_title,
+            CustomStoryWorkflow.input_request,
+            CustomStoryWorkflow.reader_category,
+            CustomStoryWorkflow.use_child_character,
+            CustomStoryWorkflow.execute_image,
+            CustomStoryWorkflow.execute_narration,
+            CustomStoryWorkflow.skip_validation,
+            CustomStoryWorkflow.execute_workflow,
+            CustomStoryWorkflow.status,
+            CustomStoryWorkflow.current_step,
+            CustomStoryWorkflow.error_message,
+            CustomStoryWorkflow.title,
+            CustomStoryWorkflow.summary,
+            CustomStoryWorkflow.moral,
+            CustomStoryWorkflow.ai_provider,
+            CustomStoryWorkflow.text_model,
+            CustomStoryWorkflow.created_at,
+            CustomStoryWorkflow.updated_at,
+        )
+
     async def create(self, **kwargs) -> CustomStoryWorkflow:
         if kwargs.get("request_number") is None:
             kwargs["request_number"] = await self.next_request_number()
@@ -93,14 +134,24 @@ class CustomStoryWorkflowRepository:
                     )
                 )
         total = await self.session.scalar(select(func.count()).select_from(CustomStoryWorkflow).where(*filters))
-        result = await self.session.execute(
-            select(CustomStoryWorkflow)
+        id_result = await self.session.execute(
+            select(CustomStoryWorkflow.id)
             .where(*filters)
             .order_by(CustomStoryWorkflow.created_at.desc())
             .offset((page - 1) * page_size)
             .limit(page_size)
         )
-        return list(result.scalars().all()), int(total or 0)
+        workflow_ids = list(id_result.scalars().all())
+        if not workflow_ids:
+            return [], int(total or 0)
+
+        result = await self.session.execute(
+            select(CustomStoryWorkflow)
+            .options(load_only(*self._list_load_columns()))
+            .where(CustomStoryWorkflow.id.in_(workflow_ids))
+        )
+        workflows_by_id = {workflow.id: workflow for workflow in result.scalars().all()}
+        return [workflows_by_id[workflow_id] for workflow_id in workflow_ids if workflow_id in workflows_by_id], int(total or 0)
 
     async def update(self, workflow: CustomStoryWorkflow) -> CustomStoryWorkflow:
         for field_name in ("story_plan_json", "story_json", "image_plan_json", "input_request", "languages"):

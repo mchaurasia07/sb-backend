@@ -3329,8 +3329,6 @@ class CustomStoryWorkflowService:
 
     @staticmethod
     def _generic_list_response(workflow: CustomStoryWorkflow) -> GenericStoryWorkflowListResponse:
-        story_json = workflow.story_json if isinstance(workflow.story_json, dict) else {}
-        pages = story_json.get("pages") if isinstance(story_json.get("pages"), list) else []
         return GenericStoryWorkflowListResponse(
             id=workflow.id,
             user_id=workflow.user_id,
@@ -3343,17 +3341,17 @@ class CustomStoryWorkflowService:
             age_group=CustomStoryWorkflowService._status_value(workflow.age_group),
             language=workflow.language or DEFAULT_STORY_LANGUAGE,
             languages=CustomStoryWorkflowService._workflow_languages(workflow),
-            requested_pages=len(pages) or None,
+            requested_pages=None,
             title=workflow.title,
             summary=workflow.summary,
             theme=workflow.category,
             genre=workflow.genre,
             moral=workflow.moral,
             learning_goal=workflow.learning_goal,
-            cover_image=story_json.get("cover_image_url"),
+            cover_image=None,
             ai_provider=workflow.ai_provider or "google",
             text_model=workflow.text_model,
-            image_model=workflow.image_model,
+            image_model=None,
             created_at=workflow.created_at,
             updated_at=workflow.updated_at,
         )

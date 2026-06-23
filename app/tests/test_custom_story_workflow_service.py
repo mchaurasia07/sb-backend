@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from app.core.exceptions import AppException
 from app.entity.custom_story_workflow import (
+    CustomStoryWorkflow,
     CustomStoryWorkflowEventStatus,
     CustomStoryWorkflowStatus,
     CustomStoryWorkflowStep,
@@ -21,6 +22,7 @@ from app.model.response.custom_story_workflow import CustomStoryWorkflowResponse
 from app.repository.custom_story_workflow_repository import (
     CustomStoryBatchJobRepository,
     CustomStoryWorkflowEventRepository,
+    CustomStoryWorkflowRepository,
 )
 from app.routes.v1 import stories as story_routes
 from app.service import custom_story_workflow_service
@@ -468,6 +470,22 @@ async def test_batch_job_repository_lists_custom_workflow_jobs_newest_first():
     assert total == 0
     assert "custom_story_batch_jobs" in statement_sql
     assert "ORDER BY custom_story_batch_jobs.created_at DESC, custom_story_batch_jobs.id DESC" in statement_sql
+
+
+def test_workflow_list_projection_excludes_heavy_json_and_model_columns():
+    selected_columns = {column.key for column in CustomStoryWorkflowRepository._list_load_columns()}
+
+    assert "id" in selected_columns
+    assert "created_at" in selected_columns
+    assert "updated_at" in selected_columns
+    assert "title" in selected_columns
+    assert "input_request" in selected_columns
+    assert "story_plan_json" not in selected_columns
+    assert "story_json" not in selected_columns
+    assert "image_plan_json" not in selected_columns
+    assert "image_model" not in selected_columns
+    assert "reference_image_model" not in selected_columns
+    assert {column.key for column in CustomStoryWorkflow.__table__.columns} >= selected_columns
 
 
 def test_custom_story_workflow_step_order_includes_publish_last():
