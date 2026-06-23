@@ -28,10 +28,7 @@ from app.model.response.generic_story import (
     GenericStoryAudioUploadResponse,
     GenericStoryBatchJobResponse,
     GenericStoryBatchJobCancelResponse,
-    GenericStoryBatchImageSubmitResponse,
-    GenericStoryBatchNarrationSubmitResponse,
     GenericStoryImageUploadResponse,
-    GenericStoryNarrationPromptResponse,
     GenericStoryResponse,
 )
 from app.model.response.generic_story_workflow import (
@@ -364,106 +361,6 @@ async def upload_generic_story_workflow_audio(
         updated_languages=story.available_languages,
     )
     return success_response(data, "Generic story audio uploaded successfully")
-
-
-@router.post(
-    "/{generic_story_id}/images/batch",
-    response_model=ApiResponse[GenericStoryBatchImageSubmitResponse],
-    status_code=status.HTTP_202_ACCEPTED,
-)
-async def submit_generic_story_image_batch(
-    generic_story_id: UUID,
-    force: bool = Query(False, description="Regenerate all images even when existing image URLs are readable"),
-    provider: str = Query("google", pattern="^(google|openai)$", description="Batch provider to use for image generation"),
-    pages: list[int] | None = Query(
-        default=None,
-        description="Optional page numbers to submit, for example ?force=true&pages=7",
-    ),
-    current_user: User = Depends(get_current_user),
-    session: AsyncSession = Depends(get_db_session),
-) -> ApiResponse[GenericStoryBatchImageSubmitResponse]:
-    _ = current_user, session, force, provider, pages
-    raise AppException(
-        "Generic image batch generation now runs through /api/v1/generic-stories/workflows.",
-        status.HTTP_410_GONE,
-        "GENERIC_STORY_LEGACY_BATCH_DISABLED",
-    )
-
-
-@router.post(
-    "/{generic_story_id}/narration/batch",
-    response_model=ApiResponse[GenericStoryBatchNarrationSubmitResponse],
-    status_code=status.HTTP_202_ACCEPTED,
-)
-async def submit_generic_story_narration_batch(
-    generic_story_id: UUID,
-    language: str = Query("en", pattern="^(en|hi|mr)$", description="Story content language to narrate"),
-    force: bool = Query(False, description="Regenerate narration even when existing audio metadata is present"),
-    current_user: User = Depends(get_current_user),
-    session: AsyncSession = Depends(get_db_session),
-) -> ApiResponse[GenericStoryBatchNarrationSubmitResponse]:
-    _ = current_user, session, generic_story_id, language, force
-    raise AppException(
-        "Generic narration batch generation now runs through /api/v1/generic-stories/workflows.",
-        status.HTTP_410_GONE,
-        "GENERIC_STORY_LEGACY_BATCH_DISABLED",
-    )
-
-
-@router.get(
-    "/{generic_story_id}/narration/prompt",
-    response_model=ApiResponse[GenericStoryNarrationPromptResponse],
-)
-async def get_generic_story_narration_prompt(
-    generic_story_id: UUID,
-    language: str = Query("en", pattern="^(en|hi|mr)$", description="Story content language to preview"),
-    current_user: User = Depends(get_current_user),
-    session: AsyncSession = Depends(get_db_session),
-) -> ApiResponse[GenericStoryNarrationPromptResponse]:
-    _ = current_user, session, generic_story_id, language
-    raise AppException(
-        "Generic narration prompt preview from legacy batch service is disabled for unified workflows.",
-        status.HTTP_410_GONE,
-        "GENERIC_STORY_LEGACY_BATCH_DISABLED",
-    )
-
-
-@router.post(
-    "/{generic_story_id}/images/multi-generate-test",
-    response_model=ApiResponse[dict],
-)
-async def multi_generate_generic_story_images_test(
-    generic_story_id: UUID,
-    request: Request,
-    language: str = Query("en", min_length=2, max_length=16),
-    current_user: User = Depends(get_current_user),
-    session: AsyncSession = Depends(get_db_session),
-) -> ApiResponse[dict]:
-    _ = current_user, session, generic_story_id, language, request
-    raise AppException(
-        "Generic multi-image test generation from legacy workflow service is disabled for unified workflows.",
-        status.HTTP_410_GONE,
-        "GENERIC_STORY_LEGACY_BATCH_DISABLED",
-    )
-
-
-@router.post(
-    "/{generic_story_id}/images/regenerate",
-    response_model=ApiResponse[GenericStoryBatchImageSubmitResponse],
-    status_code=status.HTTP_202_ACCEPTED,
-)
-async def regenerate_generic_story_page_image(
-    generic_story_id: UUID,
-    page_number: int = Query(..., ge=1, description="Story page number to regenerate"),
-    current_user: User = Depends(get_current_user),
-    session: AsyncSession = Depends(get_db_session),
-) -> ApiResponse[GenericStoryBatchImageSubmitResponse]:
-    _ = current_user, session, generic_story_id, page_number
-    raise AppException(
-        "Generic image regeneration now runs through /api/v1/generic-stories/workflows.",
-        status.HTTP_410_GONE,
-        "GENERIC_STORY_LEGACY_BATCH_DISABLED",
-    )
 
 
 @router.get("/batch-jobs", response_model=ApiResponse[PaginatedResponse[GenericStoryBatchJobResponse]])

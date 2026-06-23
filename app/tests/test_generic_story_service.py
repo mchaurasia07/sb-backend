@@ -210,6 +210,10 @@ async def test_update_generic_story_page_images_updates_all_languages_without_te
     )
     storage = _FakeImageStorage()
     monkeypatch.setattr("app.service.generic_story_service.get_image_storage_service", lambda: storage)
+    monkeypatch.setattr(
+        "app.service.generic_story_service.ImageWebPConverter.convert_to_webp",
+        lambda content, quality=85: b"webp-bytes",
+    )
     monkeypatch.setattr("app.service.generic_story_service.optimize_display_image", lambda content, filename: b"reduced")
     service = GenericStoryService.__new__(GenericStoryService)
     service.generic_stories = _FakeGenericStoryRepository(story)
@@ -221,9 +225,9 @@ async def test_update_generic_story_page_images_updates_all_languages_without_te
         public_base_url="https://api.example.test",
     )
 
-    image_url = f"https://cdn.example.test/stories/{story.id}/page_1.png"
-    assert storage.saved_images == [(story.id, b"image-bytes", "page_1.png", "https://api.example.test")]
-    assert storage.saved_reduced_images == [(story.id, b"reduced", "page_1.png", "https://api.example.test")]
+    image_url = f"https://cdn.example.test/stories/{story.id}/page_1.webp"
+    assert storage.saved_images == [(story.id, b"webp-bytes", "page_1.webp", "https://api.example.test")]
+    assert storage.saved_reduced_images == [(story.id, b"reduced", "page_1.webp", "https://api.example.test")]
     assert story.contents[0].story_json["pages"][0]["text"] == "Mira heard the old bell."
     assert story.contents[0].story_json["pages"][0]["image_url"] == image_url
     assert story.contents[1].story_json["pages"][0]["text"] == "Mira ne purani ghanti suni."

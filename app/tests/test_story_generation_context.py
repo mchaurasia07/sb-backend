@@ -142,7 +142,7 @@ def test_build_story_generation_context_reduces_story_plan_to_narrative_fields()
 
 
 def test_story_generation_prompt_aligns_with_story_plan_contract():
-    prompt = load_prompt("prompts/story/story_generation_prompt.txt")
+    prompt = load_prompt("prompts/story/story_generation_child_hero_prompt.txt")
 
     assert "## STORY SPINE AUTHORITY" in prompt
     assert "Use story_spine as the narrative backbone" in prompt
@@ -153,15 +153,15 @@ def test_story_generation_prompt_aligns_with_story_plan_contract():
     assert "The child remains the actor who changes the outcome" in prompt
     assert "Follow language_profile as the primary guide for vocabulary, sentence length" in prompt
     assert "Age band fallback targets" in prompt
-    assert "read-aloud and audiobook narration" in prompt
+    assert "read-aloud rhythm" in prompt
     assert "The final story page must show the resolution_payoff" in prompt
     assert "before the moral field explains it" in prompt
-    assert "- child_action" in prompt
+    assert "child_action" in prompt
     assert '"pages": [' in prompt
     assert '"page_number": 1' in prompt
     assert '"emotion": ""' in prompt
-    assert '"text": ""' in prompt
-    assert '"moral": ""' in prompt
+    assert '"text": {"en": ""}' in prompt
+    assert '"moral": {"en": ""}' in prompt
 
 
 def test_custom_story_generation_prompts_enforce_exact_page_count():
@@ -741,7 +741,7 @@ def test_story_generation_context_softens_medical_harm_language():
 
 
 def test_story_plan_template_renders_all_current_placeholders():
-    template = load_prompt("prompts/story/story_plan_prompt.txt")
+    template = load_prompt("prompts/story/story_plan_child_hero_prompt.txt")
     story = SimpleNamespace(age_group=AgeGroup.EARLY_READER)
     child = SimpleNamespace(
         first_name="Mira",
@@ -774,7 +774,7 @@ def test_story_plan_template_renders_all_current_placeholders():
 
 
 def test_story_plan_prompt_uses_safe_intent_and_omits_unrelated_trigger_terms():
-    template = load_prompt("prompts/story/story_plan_prompt.txt")
+    template = load_prompt("prompts/story/story_plan_child_hero_prompt.txt")
     story = SimpleNamespace(age_group=AgeGroup.EARLY_READER)
     child = SimpleNamespace(
         first_name="Amayra",
@@ -837,9 +837,9 @@ def test_story_plan_prompt_uses_safe_intent_and_omits_unrelated_trigger_terms():
     assert '"language_profile": {' in prompt
     assert '"sentence_length": ""' in prompt
     assert "Follow language_profile" not in prompt
-    assert "1-8 words per sentence" in prompt
-    assert "5-12 words per sentence" in prompt
-    assert "8-18 words per sentence" in prompt
+    assert "Sentence length: 1-6 words preferred, maximum 8 words." in prompt
+    assert "Sentence length: 5-12 words." in prompt
+    assert "Sentence length: 8-18 words." in prompt
     assert "Each page should happen because of the previous page" in prompt
     assert "The first meaningful attempt must not completely solve the problem" in prompt
     assert '"visual_bible": {' in prompt
@@ -848,8 +848,8 @@ def test_story_plan_prompt_uses_safe_intent_and_omits_unrelated_trigger_terms():
     assert '"outfit_lock": ""' in prompt
     assert '"body_scale_lock": ""' in prompt
     assert '"relative_size": ""' in prompt
-    assert 'visual_bible.hero.character_id must be "hero_child"' in prompt
-    assert "Use the exact Visual Bible names in pages.characters_present" in prompt
+    assert 'visual_bible.hero.character_id must be exactly "hero_child"' in prompt
+    assert "Use exact Visual Bible names in pages.characters_present" in prompt
     assert "same child height, build, proportions" in prompt
     assert '"role": ""' in prompt
 

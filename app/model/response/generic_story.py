@@ -67,24 +67,6 @@ class GenericStoryAudioUploadResponse(BaseModel):
     updated_languages: list[str]
 
 
-class GenericStoryBatchImageSubmitResponse(BaseModel):
-    generic_story_id: UUID
-    workflow_id: UUID
-    batch_job_id: UUID | None = None
-    job_type: str
-    status: str
-    provider_job_name: str | None = None
-    provider_state: str | None = None
-    expected_item_count: int
-    submitted_item_count: int
-    message: str
-
-
-class GenericStoryBatchNarrationSubmitResponse(GenericStoryBatchImageSubmitResponse):
-    language: str
-    language_code: str
-
-
 class GenericStoryBatchJobResponse(BaseModel):
     id: UUID
     generic_story_id: UUID | None
@@ -104,25 +86,6 @@ class GenericStoryBatchJobResponse(BaseModel):
     error_message: str | None
     created_at: datetime
     updated_at: datetime
-
-
-class GenericStoryNarrationPromptPageResponse(BaseModel):
-    page_number: int
-    text: str
-    prompt: str
-    pace: str
-    voice_style: str
-    tone: str
-    emotion: str
-
-
-class GenericStoryNarrationPromptResponse(BaseModel):
-    generic_story_id: UUID
-    language: str
-    language_code: str
-    voice: str
-    page_count: int
-    pages: list[GenericStoryNarrationPromptPageResponse]
 
 
 class GenericStoryBatchJobCancelResponse(BaseModel):
