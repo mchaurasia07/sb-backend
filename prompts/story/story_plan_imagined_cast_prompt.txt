@@ -203,6 +203,60 @@ Anchor count:
 
 Every page should include a useful domain_detail when possible.
 
+### REGIONAL, STATE, CULTURE, AND PLACE STORIES
+
+When Story Context asks for a real place, state, region, culture, festival,
+historical topic, or travel/discovery story, perform a silent coverage audit
+before choosing the story spine.
+
+- Identify the most important age-safe anchors a local parent would expect.
+  These may include major landmarks, nature/wildlife, food, festivals, crafts,
+  history, cities, rural life, transport, language, music, and everyday culture.
+- Choose anchors that are iconic and representative, not random. Do not let the
+  story become a generic tour that could happen anywhere.
+- For a full state or region story, prefer 5-8 high-value anchors when page
+  count allows. Put the chosen anchors in content_anchors.required_names,
+  required_facts, or age_safe_explanations, then use them in page domain_detail.
+- If several famous anchors compete for limited pages, combine compatible
+  anchors naturally in one lived scene instead of listing them as facts.
+- Avoid omitting obvious iconic anchors unless the Story Context, age group, or
+  page count clearly makes them unsuitable.
+- Example only: a Gujarat discovery story should consider anchors such as Rann
+  of Kutch, Somnath, Gir lions, Statue of Unity, Ahmedabad/Sabarmati/Adalaj,
+  garba/dandiya, local food, crafts, and coastal or village life.
+- Example only: a Maharashtra discovery story should consider anchors such as
+  Mumbai/Gateway/local trains, Sahyadri forts, Ajanta/Ellora, Pune, Ganesh
+  festival, Konkan coast, local food, folk art/music, and rural/city contrast.
+
+For travel or discovery structures, preserve route continuity:
+
+- Do not jump magically or suddenly from one far location to another unless the
+  story explicitly uses safe fantasy travel and explains the travel device.
+- Each new location should be reached by a simple child-understandable bridge:
+  map, train, bus, boat, family trip, guide, festival trail, letter, clue, or
+  other planned cause.
+- The hero must have a continuing goal, question, object, map, clue, or promise
+  that carries across locations.
+- Every location scene must change the hero's understanding or choices. Avoid
+  pages where the hero only watches a landmark and moves on.
+- page_turn_hook should usually be an action, clue, choice, or visual reveal
+  that causes the next location or beat.
+- Avoid passive sightseeing structures. The hero should make choices, compare
+  clues, ask someone, try something, help with a small task, or connect one
+  place's lesson to the next place.
+- Avoid repetitive guide transitions such as the same companion nudging,
+  tugging, pointing, or leading on every page. Vary transitions through the
+  hero's own decision, a map clue, dialogue, travel action, sensory discovery,
+  local helper, family plan, or object continuity.
+- Choose animals, companions, foods, festivals, clothing, and cultural details
+  that are locally plausible. If using a non-local or fantasy companion, explain
+  the story reason; otherwise prefer region-appropriate choices.
+- Keep the moral child-concrete. Avoid abstract adult phrasing such as
+  "harmonious blending" or "tapestry of diversity" unless the page action makes
+  it simple and visible for the age group.
+- The final page should pay off the journey with specific remembered moments or
+  lessons, not only a general statement that the place is special.
+
 ## AGE ADAPTATION & LANGUAGE PROFILE
 
 Create language_profile for the story writer. It must match how children in the
