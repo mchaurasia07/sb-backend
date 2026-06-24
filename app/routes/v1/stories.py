@@ -91,12 +91,6 @@ class StoriesRouter:
             response_model=ApiResponse[PaginatedResponse[CustomStoryWorkflowResponse]],
         )
         self.router.add_api_route(
-            "/workflows/batch-jobs",
-            self.list_custom_workflow_batch_jobs,
-            methods=["GET"],
-            response_model=ApiResponse[PaginatedResponse[CustomStoryWorkflowBatchJobResponse]],
-        )
-        self.router.add_api_route(
             "/workflows/events/process",
             self.process_custom_story_workflow_events,
             methods=["POST"],
@@ -119,12 +113,6 @@ class StoriesRouter:
             self.get_custom_story_workflow_steps,
             methods=["GET"],
             response_model=ApiResponse[list[CustomStoryWorkflowStepResponse]],
-        )
-        self.router.add_api_route(
-            "/workflows/{workflow_id}/events",
-            self.get_story_workflow_events,
-            methods=["GET"],
-            response_model=ApiResponse[list[CustomStoryWorkflowEventResponse]],
         )
         self.router.add_api_route(
             "/workflows/{workflow_id}/retry",
@@ -215,27 +203,6 @@ class StoriesRouter:
         )
         return success_response(data, "Custom story workflows retrieved successfully")
 
-    async def list_custom_workflow_batch_jobs(
-        self,
-        page: int = Query(1, ge=1),
-        page_size: int = Query(20, ge=1, le=100),
-        workflow_id: UUID | None = Query(default=None),
-        story_type: CustomStoryWorkflowType | None = Query(default=None),
-        status_filter: StoryBatchJobStatus | None = Query(default=None, alias="status"),
-        current_user: User = Depends(get_current_user),
-        container: RequestContainer = Depends(get_request_container),
-    ) -> ApiResponse[PaginatedResponse[CustomStoryWorkflowBatchJobResponse]]:
-        """List workflow batch jobs with optional filtering."""
-        data = await container.custom_story_workflow.list_batch_jobs(
-            current_user.id,
-            page=page,
-            page_size=page_size,
-            workflow_id=workflow_id,
-            story_type=story_type,
-            status_filter=status_filter,
-        )
-        return success_response(data, "Batch jobs retrieved successfully")
-
     async def process_custom_story_workflow_events(
         self,
         limit: int = Query(10, ge=1, le=100),
@@ -274,15 +241,6 @@ class StoriesRouter:
         data = await container.custom_story_workflow.get_steps(current_user.id, workflow_id)
         return success_response(data, "Custom story workflow steps retrieved successfully")
 
-    async def get_story_workflow_events(
-        self,
-        workflow_id: UUID,
-        story_type: str | None = Query(default=None, pattern="^(CUSTOM|GENERIC)$"),
-        current_user: User = Depends(get_current_user),
-        container: RequestContainer = Depends(get_request_container),
-    ) -> ApiResponse[list[CustomStoryWorkflowEventResponse]]:
-        data = await container.custom_story_workflow.get_events(current_user.id, workflow_id, story_type=story_type)
-        return success_response(data, "Story workflow events retrieved successfully")
 
     async def retry_custom_story_workflow(
         self,
@@ -291,7 +249,7 @@ class StoriesRouter:
         container: RequestContainer = Depends(get_request_container),
     ) -> ApiResponse[CustomStoryWorkflowResponse]:
         data = await container.custom_story_workflow.retry(current_user.id, workflow_id)
-        return success_response(data, "Custom story workflow retry queued successfully")
+        return success_response(data, "Story workflow retry queued successfully")
 
     async def cancel_custom_workflow_batch_job(
         self,

@@ -44,7 +44,7 @@ class CustomStoryWorkflowEventStatus(StrEnum):
     FAILED = "FAILED"
 
 
-class CustomStoryWorkflow(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+class CustomStoryWorkflowEntity(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """Workflow state for customer-created custom stories."""
 
     __tablename__ = "custom_story_workflows"
@@ -78,8 +78,6 @@ class CustomStoryWorkflow(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         default=CustomStoryWorkflowType.CUSTOM,
         server_default=CustomStoryWorkflowType.CUSTOM.value,
     )
-    generation_mode: Mapped[str] = mapped_column(String(32), nullable=False)
-    processing_mode: Mapped[str] = mapped_column(String(32), nullable=False, default="instant")
     age_group: Mapped[AgeGroup] = mapped_column(
         SAEnum(AgeGroup, values_callable=lambda values: [item.value for item in values], native_enum=False),
         nullable=False,
@@ -88,13 +86,8 @@ class CustomStoryWorkflow(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     category: Mapped[str | None] = mapped_column(String(100), nullable=True)
     learning_goal: Mapped[str | None] = mapped_column(String(500), nullable=True)
     context: Mapped[str | None] = mapped_column(Text, nullable=True)
-    event_description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    language: Mapped[str] = mapped_column(String(16), nullable=False, default="en", server_default="en")
     languages: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    genre: Mapped[str | None] = mapped_column(String(100), nullable=True)
     publish_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    source_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    input_request: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     reader_category: Mapped[str | None] = mapped_column(String(64), nullable=True)
     use_child_character: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
     execute_image: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
@@ -126,8 +119,8 @@ class CustomStoryWorkflow(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     reference_image_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     steps = relationship("CustomStoryWorkflowStepRecord", back_populates="workflow", cascade="all, delete-orphan")
-    batch_jobs = relationship("CustomStoryBatchJob", back_populates="workflow", cascade="all, delete-orphan")
-    events = relationship("CustomStoryWorkflowEvent", back_populates="workflow", cascade="all, delete-orphan")
+    batch_jobs = relationship("CustomStoryBatchJobEntity", back_populates="workflow", cascade="all, delete-orphan")
+    events = relationship("CustomStoryWorkflowEventEntity", back_populates="workflow", cascade="all, delete-orphan")
 
 
 class CustomStoryWorkflowStepRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -159,7 +152,7 @@ class CustomStoryWorkflowStepRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    workflow = relationship("CustomStoryWorkflow", back_populates="steps", foreign_keys=[workflow_id])
+    workflow = relationship("CustomStoryWorkflowEntity", back_populates="steps", foreign_keys=[workflow_id])
 
     @property
     def story_id(self) -> UUID:
@@ -174,7 +167,7 @@ class CustomStoryWorkflowStepRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         self.output_json = value
 
 
-class CustomStoryWorkflowEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+class CustomStoryWorkflowEventEntity(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """Event queue item that drives one custom workflow step."""
 
     __tablename__ = "custom_story_workflow_events"
@@ -211,10 +204,10 @@ class CustomStoryWorkflowEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    workflow = relationship("CustomStoryWorkflow", back_populates="events", foreign_keys=[workflow_id])
+    workflow = relationship("CustomStoryWorkflowEntity", back_populates="events", foreign_keys=[workflow_id])
 
 
-class CustomStoryBatchJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+class CustomStoryBatchJobEntity(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """Provider batch job attached to a workflow before final story publish."""
 
     __tablename__ = "custom_story_batch_jobs"
@@ -258,4 +251,4 @@ class CustomStoryBatchJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     response_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    workflow = relationship("CustomStoryWorkflow", back_populates="batch_jobs", foreign_keys=[workflow_id])
+    workflow = relationship("CustomStoryWorkflowEntity", back_populates="batch_jobs", foreign_keys=[workflow_id])

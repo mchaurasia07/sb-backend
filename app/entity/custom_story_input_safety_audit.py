@@ -61,4 +61,4 @@ class CustomStoryInputSafetyAudit(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    workflow = relationship("CustomStoryWorkflow", foreign_keys=[workflow_id])
+    workflow = relationship("CustomStoryWorkflowEntity", foreign_keys=[workflow_id])

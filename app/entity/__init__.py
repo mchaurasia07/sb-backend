@@ -4,10 +4,10 @@ from app.entity.child_book import ChildBook
 from app.entity.child_profile import ChildProfile
 from app.entity.custom_story_input_safety_audit import CustomStoryInputSafetyAudit, CustomStoryInputSafetyAuditStatus
 from app.entity.custom_story_workflow import (
-    CustomStoryBatchJob,
-    CustomStoryWorkflowEvent,
+    CustomStoryBatchJobEntity,
+    CustomStoryWorkflowEventEntity,
     CustomStoryWorkflowEventStatus,
-    CustomStoryWorkflow,
+    CustomStoryWorkflowEntity,
     CustomStoryWorkflowStatus,
     CustomStoryWorkflowStep,
     CustomStoryWorkflowStepRecord,
@@ -38,10 +38,10 @@ __all__ = [
     "ChildProfile",
     "CustomStoryInputSafetyAudit",
     "CustomStoryInputSafetyAuditStatus",
-    "CustomStoryBatchJob",
-    "CustomStoryWorkflowEvent",
+    "CustomStoryBatchJobEntity",
+    "CustomStoryWorkflowEventEntity",
     "CustomStoryWorkflowEventStatus",
-    "CustomStoryWorkflow",
+    "CustomStoryWorkflowEntity",
     "CustomStoryWorkflowStatus",
     "CustomStoryWorkflowStep",
     "CustomStoryWorkflowStepRecord",

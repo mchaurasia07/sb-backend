@@ -15,20 +15,13 @@ class CustomStoryWorkflowResponse(BaseModel):
     status: str
     current_step: str | None
     error_message: str | None = None
-    generation_mode: str
-    processing_mode: str
     reader_category: str | None = None
     age_group: str | None = None
     category: str | None = None
     learning_goal: str | None = None
     context: str | None = None
-    event_description: str | None = None
-    language: str | None = None
     languages: list[str] | None = None
-    genre: str | None = None
     publish_status: str | None = None
-    source_title: str | None = None
-    input_request: dict[str, Any] | None = None
     use_child_character: bool = False
     execute_image: bool = True
     execute_narration: bool = True

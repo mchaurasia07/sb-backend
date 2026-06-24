@@ -11,7 +11,6 @@ from app.core.database import AsyncSessionLocal
 from app.core.dependencies import AuthContext, get_auth_context, get_current_user
 from app.core.exceptions import AppException
 from app.entity.notification import NotificationAudience
-from app.entity.story_batch_job import StoryBatchJobStatus, StoryBatchJobType
 from app.entity.user import User
 from app.model.request.generic_story import (
     GenericStoryCreateRequest,
@@ -19,26 +18,12 @@ from app.model.request.generic_story import (
     GenericStoryStatusUpdateRequest,
     GenericStoryUpdateRequest,
 )
-from app.model.request.generic_story_workflow import (
-    GenericStoryWorkflowCreateRequest,
-    GenericStoryWorkflowExecuteRequest,
-)
 from app.model.response.common import ApiResponse, PaginatedResponse, success_response
 from app.model.response.generic_story import (
-    GenericStoryAudioUploadResponse,
-    GenericStoryBatchJobCancelResponse,
-    GenericStoryBatchJobResponse,
-    GenericStoryImageUploadResponse,
     GenericStoryResponse,
-)
-from app.model.response.generic_story_workflow import (
-    GenericStoryWorkflowListResponse,
-    GenericStoryWorkflowResponse,
-    GenericStoryWorkflowStepDetailResponse,
 )
 from app.model.response.story_catalog import StoryCatalogResponse
 from app.model.response.story_content import StoryContentResponse
-from app.service.custom_story_workflow_service import CustomStoryWorkflowService
 from app.service.image_optimizer import optimize_display_image
 
 logger = logging.getLogger(__name__)
@@ -126,90 +111,10 @@ class GenericStoriesRouter:
             status_code=status.HTTP_201_CREATED,
         )
         self.router.add_api_route(
-            "/workflows",
-            self.create_generic_story_workflow,
-            methods=["POST"],
-            response_model=ApiResponse[GenericStoryWorkflowResponse],
-            status_code=status.HTTP_202_ACCEPTED,
-        )
-        self.router.add_api_route(
-            "/workflow",
-            self.create_generic_story_workflow,
-            methods=["POST"],
-            response_model=ApiResponse[GenericStoryWorkflowResponse],
-            status_code=status.HTTP_202_ACCEPTED,
-        )
-        self.router.add_api_route(
-            "/workflows",
-            self.list_generic_story_workflows,
-            methods=["GET"],
-            response_model=ApiResponse[PaginatedResponse[GenericStoryWorkflowListResponse]],
-        )
-        self.router.add_api_route(
-            "/workflows/{workflow_id}",
-            self.get_generic_story_workflow,
-            methods=["GET"],
-            response_model=ApiResponse[GenericStoryWorkflowResponse],
-        )
-        self.router.add_api_route(
-            "/workflows/{workflow_id}",
-            self.delete_generic_story_workflow,
-            methods=["DELETE"],
-            response_model=ApiResponse[None],
-        )
-        self.router.add_api_route(
-            "/workflows/{workflow_id}/steps",
-            self.get_generic_story_workflow_steps,
-            methods=["GET"],
-            response_model=ApiResponse[list[GenericStoryWorkflowStepDetailResponse]],
-        )
-        self.router.add_api_route(
-            "/workflows/{workflow_id}/execute",
-            self.execute_generic_story_workflow,
-            methods=["POST"],
-            response_model=ApiResponse[GenericStoryWorkflowResponse],
-        )
-        self.router.add_api_route(
-            "/workflows/{workflow_id}/retry",
-            self.retry_generic_story_workflow,
-            methods=["POST"],
-            response_model=ApiResponse[GenericStoryWorkflowResponse],
-        )
-        self.router.add_api_route(
             "/images/reduce",
             self.reduce_generic_story_image_for_preview,
             methods=["POST"],
             response_class=Response,
-        )
-        self.router.add_api_route(
-            "/workflows/{workflow_id}/stories/{generic_story_id}/images",
-            self.upload_generic_story_workflow_images,
-            methods=["POST"],
-            response_model=ApiResponse[GenericStoryImageUploadResponse],
-        )
-        self.router.add_api_route(
-            "/workflows/{workflow_id}/stories/{generic_story_id}/audio",
-            self.upload_generic_story_workflow_audio,
-            methods=["POST"],
-            response_model=ApiResponse[GenericStoryAudioUploadResponse],
-        )
-        self.router.add_api_route(
-            "/batch-jobs",
-            self.list_generic_story_batch_jobs,
-            methods=["GET"],
-            response_model=ApiResponse[PaginatedResponse[GenericStoryBatchJobResponse]],
-        )
-        self.router.add_api_route(
-            "/batch-jobs/reconcile",
-            self.reconcile_generic_story_batch_jobs,
-            methods=["POST"],
-            response_model=ApiResponse[dict],
-        )
-        self.router.add_api_route(
-            "/{generic_story_id}/batch-jobs/{batch_job_id}/cancel",
-            self.cancel_generic_story_batch_job,
-            methods=["POST"],
-            response_model=ApiResponse[GenericStoryBatchJobCancelResponse],
         )
         self.router.add_api_route(
             "/{generic_story_id}",
@@ -283,99 +188,6 @@ class GenericStoriesRouter:
             )
         return success_response(data, "Generic story created successfully")
 
-    async def create_generic_story_workflow(
-        self,
-        payload: GenericStoryWorkflowCreateRequest,
-        response: Response,
-        current_user: User = Depends(get_current_user),
-        container: RequestContainer = Depends(get_request_container),
-    ) -> ApiResponse[GenericStoryWorkflowResponse]:
-        data = await container.custom_story_workflow.create_generic(current_user.id, payload)
-        response.status_code = status.HTTP_202_ACCEPTED
-        return success_response(data, "Generic story workflow queued successfully")
-
-    async def list_generic_story_workflows(
-        self,
-        page: int = Query(1, ge=1),
-        page_size: int = Query(20, ge=1, le=100),
-        user_id: UUID | None = Query(None),
-        title: str | None = Query(default=None, max_length=255),
-        current_user: User = Depends(get_current_user),
-        container: RequestContainer = Depends(get_request_container),
-    ) -> ApiResponse[PaginatedResponse[GenericStoryWorkflowListResponse]]:
-        data = await container.custom_story_workflow.list_generic(
-            user_id=user_id or current_user.id,
-            title=title,
-            page=page,
-            page_size=page_size,
-        )
-        return success_response(data, "Generic story workflows retrieved successfully")
-
-    async def get_generic_story_workflow(
-        self,
-        workflow_id: UUID,
-        current_user: User = Depends(get_current_user),
-        container: RequestContainer = Depends(get_request_container),
-    ) -> ApiResponse[GenericStoryWorkflowResponse]:
-        data = await container.custom_story_workflow.get_generic(current_user.id, workflow_id)
-        return success_response(data, "Generic story workflow retrieved successfully")
-
-    async def delete_generic_story_workflow(
-        self,
-        workflow_id: UUID,
-        current_user: User = Depends(get_current_user),
-        container: RequestContainer = Depends(get_request_container),
-    ) -> ApiResponse[None]:
-        await container.custom_story_workflow.delete_generic(current_user.id, workflow_id)
-        return success_response(None, "Generic story workflow deleted successfully")
-
-    async def get_generic_story_workflow_steps(
-        self,
-        workflow_id: UUID,
-        step_name: str | None = Query(default=None),
-        current_user: User = Depends(get_current_user),
-        container: RequestContainer = Depends(get_request_container),
-    ) -> ApiResponse[list[GenericStoryWorkflowStepDetailResponse]]:
-        data = await container.custom_story_workflow.get_generic_steps(
-            current_user.id,
-            workflow_id,
-            step_name=step_name,
-        )
-        return success_response(data, "Generic story workflow steps retrieved successfully")
-
-    async def execute_generic_story_workflow(
-        self,
-        workflow_id: UUID,
-        payload: GenericStoryWorkflowExecuteRequest,
-        request: Request,
-        current_user: User = Depends(get_current_user),
-        container: RequestContainer = Depends(get_request_container),
-    ) -> ApiResponse[GenericStoryWorkflowResponse]:
-        _ = payload, request
-        data = await container.custom_story_workflow.retry_generic(current_user.id, workflow_id)
-        message = (
-            "Generic story workflow completed successfully"
-            if data.status == "COMPLETED"
-            else "Generic story workflow step executed successfully"
-        )
-        return success_response(data, message)
-
-    async def retry_generic_story_workflow(
-        self,
-        workflow_id: UUID,
-        request: Request,
-        current_user: User = Depends(get_current_user),
-        container: RequestContainer = Depends(get_request_container),
-    ) -> ApiResponse[GenericStoryWorkflowResponse]:
-        _ = request
-        data = await container.custom_story_workflow.retry_generic(current_user.id, workflow_id)
-        message = (
-            "Generic story workflow completed successfully"
-            if data.status == "COMPLETED"
-            else "Generic story workflow retry executed successfully"
-        )
-        return success_response(data, message)
-
     async def reduce_generic_story_image_for_preview(
         self,
         image: UploadFile = File(...),
@@ -403,125 +215,6 @@ class GenericStoriesRouter:
             media_type=media_type,
             headers={"Content-Disposition": f'inline; filename="reduced_{filename}"'},
         )
-
-    async def upload_generic_story_workflow_images(
-        self,
-        workflow_id: UUID,
-        generic_story_id: UUID,
-        request: Request,
-        current_user: User = Depends(get_current_user),
-        container: RequestContainer = Depends(get_request_container),
-    ) -> ApiResponse[GenericStoryImageUploadResponse]:
-        uploads = await _read_uploads_from_form(
-            request,
-            duplicate_code="GENERIC_STORY_IMAGE_UPLOAD_DUPLICATE_FIELD",
-        )
-        workflow = await container.custom_story_workflow.get_generic(current_user.id, workflow_id)
-        if workflow.generic_story_id != generic_story_id:
-            raise AppException("Generic story does not belong to this workflow", status.HTTP_404_NOT_FOUND, "GENERIC_STORY_WORKFLOW_NOT_FOUND")
-        story = await container.generic_story.update_page_images(
-            generic_story_id,
-            uploads,
-            language=workflow.language,
-            public_base_url=str(request.base_url).rstrip("/"),
-        )
-        pages = story.story_json.get("pages") if isinstance(story.story_json, dict) else []
-        data = GenericStoryImageUploadResponse(
-            workflow_id=workflow_id,
-            generic_story_id=generic_story_id,
-            cover_image_url=story.cover_image or "",
-            page_image_urls={
-                int(page.get("page_number")): str(page.get("image_url"))
-                for page in pages
-                if isinstance(page, dict) and page.get("page_number") and page.get("image_url")
-            },
-            updated_languages=story.available_languages,
-        )
-        return success_response(data, "Generic story images uploaded successfully")
-
-    async def upload_generic_story_workflow_audio(
-        self,
-        workflow_id: UUID,
-        generic_story_id: UUID,
-        request: Request,
-        language: str = Query(..., min_length=2, max_length=16),
-        current_user: User = Depends(get_current_user),
-        container: RequestContainer = Depends(get_request_container),
-    ) -> ApiResponse[GenericStoryAudioUploadResponse]:
-        uploads = await _read_uploads_from_form(
-            request,
-            duplicate_code="GENERIC_STORY_AUDIO_UPLOAD_DUPLICATE_FIELD",
-        )
-        workflow = await container.custom_story_workflow.get_generic(current_user.id, workflow_id)
-        if workflow.generic_story_id != generic_story_id:
-            raise AppException("Generic story does not belong to this workflow", status.HTTP_404_NOT_FOUND, "GENERIC_STORY_WORKFLOW_NOT_FOUND")
-        story = await container.generic_story.update_page_audio(
-            generic_story_id,
-            uploads,
-            language,
-        )
-        pages = story.story_json.get("pages") if isinstance(story.story_json, dict) else []
-        data = GenericStoryAudioUploadResponse(
-            workflow_id=workflow_id,
-            generic_story_id=generic_story_id,
-            language=language,
-            page_audio_urls={
-                int(page.get("page_number")): str(page.get("audio_url"))
-                for page in pages
-                if isinstance(page, dict) and page.get("page_number") and page.get("audio_url")
-            },
-            updated_languages=story.available_languages,
-        )
-        return success_response(data, "Generic story audio uploaded successfully")
-
-    async def list_generic_story_batch_jobs(
-        self,
-        page: int = Query(1, ge=1),
-        page_size: int = Query(20, ge=1, le=100),
-        generic_story_id: UUID | None = Query(default=None),
-        workflow_id: UUID | None = Query(default=None),
-        status_filter: StoryBatchJobStatus | None = Query(default=None, alias="status"),
-        job_type: StoryBatchJobType | None = Query(default=None),
-        provider: str | None = Query(default=None, min_length=1, max_length=32),
-        current_user: User = Depends(get_current_user),
-        container: RequestContainer = Depends(get_request_container),
-    ) -> ApiResponse[PaginatedResponse[GenericStoryBatchJobResponse]]:
-        data = await container.custom_story_workflow.list_batch_jobs(
-            current_user.id,
-            page=page,
-            page_size=page_size,
-            workflow_id=workflow_id,
-            status_filter=status_filter,
-            story_type=CustomStoryWorkflowService._workflow_type_generic(),
-            generic_story_id=generic_story_id,
-            job_type=job_type,
-            provider=provider,
-        )
-        return success_response(data, "Generic story batch jobs retrieved successfully")
-
-    async def reconcile_generic_story_batch_jobs(
-        self,
-        limit: int = Query(50, ge=1, le=200),
-        current_user: User = Depends(get_current_user),
-        container: RequestContainer = Depends(get_request_container),
-    ) -> ApiResponse[dict]:
-        _ = current_user
-        data = await container.custom_story_workflow.reconcile_batch_jobs(limit=limit)
-        return success_response(data, "Generic story batch jobs reconciled successfully")
-
-    async def cancel_generic_story_batch_job(
-        self,
-        generic_story_id: UUID,
-        batch_job_id: UUID,
-        current_user: User = Depends(get_current_user),
-        container: RequestContainer = Depends(get_request_container),
-    ) -> ApiResponse[GenericStoryBatchJobCancelResponse]:
-        data = await container.custom_story_workflow.cancel_generic_batch_job(
-            user_id=current_user.id,
-            generic_story_id=generic_story_id,
-            batch_job_id=batch_job_id,
-        )
-        return success_response(GenericStoryBatchJobCancelResponse(**data), data["message"])
 
     async def update_generic_story(
         self,

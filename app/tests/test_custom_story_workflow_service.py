@@ -9,7 +9,7 @@ from pydantic import ValidationError
 
 from app.core.exceptions import AppException
 from app.entity.custom_story_workflow import (
-    CustomStoryWorkflow,
+    CustomStoryWorkflowEntity,
     CustomStoryWorkflowEventStatus,
     CustomStoryWorkflowStatus,
     CustomStoryWorkflowStep,
@@ -25,11 +25,13 @@ from app.repository.custom_story_workflow_repository import (
     CustomStoryWorkflowRepository,
 )
 from app.routes.v1 import stories as story_routes
+from app.routes.v1 import workflows as workflow_routes
 from app.service import custom_story_workflow_service
 from app.service.custom_story_workflow_service import CustomStoryWorkflowService
 from app.service.image_plan_validator import ImagePlanValidator
 from app.service.story_input_safety_service import StoryInputSafetyInspection, StoryInputSafetyResult
 from app.service.story_service import StoryService
+from app.service.workflow_service import WorkflowService
 
 
 def _workflow(**overrides):
@@ -208,6 +210,164 @@ async def test_get_events_returns_any_owned_workflow_events_newest_first():
 
 
 @pytest.mark.asyncio
+async def test_retry_accepts_generic_workflow_and_enqueues_next_step():
+    user_id = uuid4()
+    workflow = _workflow(
+        user_id=user_id,
+        child_id=None,
+        story_type=CustomStoryWorkflowType.GENERIC,
+        generic_story_id=uuid4(),
+        status=CustomStoryWorkflowStatus.PENDING,
+        language="en",
+        languages=["en"],
+    )
+    updated_workflows = []
+    created_events = []
+    commits = []
+
+    async def _get_for_update(requested_user_id, requested_workflow_id):
+        assert requested_user_id == user_id
+        assert requested_workflow_id == workflow.id
+        return workflow
+
+    async def _update_workflow(workflow_arg):
+        updated_workflows.append(workflow_arg)
+        return workflow_arg
+
+    async def _create_event(**kwargs):
+        created_events.append(kwargs)
+
+    async def _commit():
+        commits.append(True)
+
+    async def _first_incomplete_step(_workflow):
+        return CustomStoryWorkflowStep.STORY_GENERATION
+
+    service = CustomStoryWorkflowService.__new__(CustomStoryWorkflowService)
+    service.workflows = SimpleNamespace(get_for_user_for_update=_get_for_update, update=_update_workflow)
+    service.events = SimpleNamespace(create_if_absent=_create_event)
+    service.session = SimpleNamespace(commit=_commit)
+    service._first_incomplete_step = _first_incomplete_step
+
+    response = await service.retry(user_id, workflow.id)
+
+    assert response.story_type == "GENERIC"
+    assert response.generic_story_id == workflow.generic_story_id
+    assert workflow.status == CustomStoryWorkflowStatus.PENDING
+    assert workflow.error_message is None
+    assert workflow.current_step == CustomStoryWorkflowStep.STORY_GENERATION.value
+    assert updated_workflows == [workflow]
+    assert created_events == [
+        {
+            "workflow_id": workflow.id,
+            "step_name": CustomStoryWorkflowStep.STORY_GENERATION,
+            "retry_count": 1,
+            "metadata_json": {"source": "manual_retry"},
+        }
+    ]
+    assert commits == [True]
+
+
+@pytest.mark.asyncio
+async def test_workflows_router_lists_shared_workflows_with_filters():
+    user_id = uuid4()
+    workflow_id = uuid4()
+    data = {"items": [], "total": 0, "page": 2, "page_size": 10, "total_pages": 0}
+    calls = {}
+
+    class _WorkflowService:
+        async def list_workflows(
+            self,
+            requested_user_id,
+            *,
+            page,
+            page_size,
+            workflow_id=None,
+            workflow_type=None,
+        ):
+            calls["user_id"] = requested_user_id
+            calls["page"] = page
+            calls["page_size"] = page_size
+            calls["workflow_id"] = workflow_id
+            calls["workflow_type"] = workflow_type
+            return data
+
+    route = workflow_routes.WorkflowsRouter().list_workflows
+    response = await route(
+        page=2,
+        page_size=10,
+        workflow_id=workflow_id,
+        workflow_type=CustomStoryWorkflowType.GENERIC,
+        current_user=SimpleNamespace(id=user_id),
+        container=SimpleNamespace(workflow_service=_WorkflowService()),
+    )
+
+    assert response.data == data
+    assert response.message == "Workflows retrieved successfully"
+    assert calls == {
+        "user_id": user_id,
+        "page": 2,
+        "page_size": 10,
+        "workflow_id": workflow_id,
+        "workflow_type": CustomStoryWorkflowType.GENERIC,
+    }
+
+
+@pytest.mark.asyncio
+async def test_workflow_service_lists_workflows_with_repository_filters():
+    user_id = uuid4()
+    workflow_id = uuid4()
+    workflow = _workflow(
+        id=workflow_id,
+        user_id=user_id,
+        story_type=CustomStoryWorkflowType.GENERIC,
+        generic_story_id=uuid4(),
+    )
+    calls = {}
+
+    class _WorkflowRepository:
+        async def list_workflows(
+            self,
+            requested_user_id,
+            *,
+            page,
+            page_size,
+            workflow_id=None,
+            workflow_type=None,
+        ):
+            calls["user_id"] = requested_user_id
+            calls["page"] = page
+            calls["page_size"] = page_size
+            calls["workflow_id"] = workflow_id
+            calls["workflow_type"] = workflow_type
+            return [workflow], 1
+
+    service = WorkflowService.__new__(WorkflowService)
+    service.workflow_repo = _WorkflowRepository()
+
+    response = await service.list_workflows(
+        user_id,
+        page=3,
+        page_size=5,
+        workflow_id=workflow_id,
+        workflow_type=CustomStoryWorkflowType.GENERIC,
+    )
+
+    assert calls == {
+        "user_id": user_id,
+        "page": 3,
+        "page_size": 5,
+        "workflow_id": workflow_id,
+        "workflow_type": CustomStoryWorkflowType.GENERIC,
+    }
+    assert response.total == 1
+    assert response.page == 3
+    assert response.page_size == 5
+    assert response.items[0].workflow_id == workflow_id
+    assert response.items[0].story_type == "GENERIC"
+
+
+@pytest.mark.asyncio
 async def test_event_repository_stores_workflow_story_type_on_create():
     workflow_id = uuid4()
     session = SimpleNamespace(added=[], flushed=False)
@@ -348,9 +508,6 @@ async def test_list_batch_jobs_returns_paginated_typed_response_with_filters():
             workflow_id=None,
             status=None,
             story_type=None,
-            generic_story_id=None,
-            job_type=None,
-            provider=None,
         ):
             calls["user_id"] = user_id_arg
             calls["page"] = page
@@ -358,9 +515,6 @@ async def test_list_batch_jobs_returns_paginated_typed_response_with_filters():
             calls["workflow_id"] = workflow_id
             calls["status"] = status
             calls["story_type"] = story_type
-            calls["generic_story_id"] = generic_story_id
-            calls["job_type"] = job_type
-            calls["provider"] = provider
             return [job], 1
 
     service = CustomStoryWorkflowService.__new__(CustomStoryWorkflowService)
@@ -381,9 +535,6 @@ async def test_list_batch_jobs_returns_paginated_typed_response_with_filters():
         "workflow_id": workflow_id,
         "status": StoryBatchJobStatus.RUNNING,
         "story_type": None,
-        "generic_story_id": None,
-        "job_type": None,
-        "provider": None,
     }
     assert response.total == 1
     assert response.page == 1
@@ -411,9 +562,6 @@ async def test_list_batch_jobs_can_filter_by_story_type():
             workflow_id=None,
             status=None,
             story_type=None,
-            generic_story_id=None,
-            job_type=None,
-            provider=None,
         ):
             calls["user_id"] = user_id_arg
             calls["story_type"] = story_type
@@ -479,13 +627,13 @@ def test_workflow_list_projection_excludes_heavy_json_and_model_columns():
     assert "created_at" in selected_columns
     assert "updated_at" in selected_columns
     assert "title" in selected_columns
-    assert "input_request" in selected_columns
+    assert "input_request" not in selected_columns
     assert "story_plan_json" not in selected_columns
     assert "story_json" not in selected_columns
     assert "image_plan_json" not in selected_columns
     assert "image_model" not in selected_columns
     assert "reference_image_model" not in selected_columns
-    assert {column.key for column in CustomStoryWorkflow.__table__.columns} >= selected_columns
+    assert {column.key for column in CustomStoryWorkflowEntity.__table__.columns} >= selected_columns
 
 
 def test_custom_story_workflow_step_order_includes_publish_last():
