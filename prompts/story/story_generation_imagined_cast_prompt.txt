@@ -72,6 +72,14 @@ show the hero using the learning goal.
 
 Use page_turn_hook for gentle forward momentum. Avoid ending pages with questions.
 
+For discovery, travel, culture, place, science, history, values, or learning
+stories, preserve the plan's narrative engine. Keep the hero's starting
+question, mistaken belief, promise, mission, or recurring object visible across
+the story when the plan includes one. Each page should show what changes for the
+hero: a clue gained, idea revised, choice made, fear softened, mistake noticed,
+or connection discovered. Avoid writing the pages as a list of visits or facts.
+The final realization should feel earned by the earlier page results.
+
 ## PLAN FIDELITY
 
 The story_plan_json is already finalized.
@@ -211,8 +219,21 @@ Marathi (mr):
 - Use simple child-friendly Marathi phrasing, warm read-aloud rhythm, and natural dialogue.
 - Use local sound words and expressions such as "धप्प!", "ठक!", "छपाक!", "टपटप!", "अरे!", "अरे देवा!", "वा!", and "हुर्रे!" where they fit.
 
-Borrow English words in Hindi or Marathi only if they are genuinely part of
-everyday speech among young children, for example बस, स्कूल, डॉक्टर, मोबाइल.
+Borrow English words in Hindi or Marathi only from a tiny child-natural loanword
+set, and write them in Devanagari, not Latin script. Examples: बस, स्कूल,
+डॉक्टर, मोबाइल, ट्रेन, मेट्रो, टिकट.
+
+Do not use Latin-script English words inside Hindi or Marathi page text, title,
+summary, or moral. A Hindi or Marathi field should not contain words such as
+"intricate", "bustling", "busy", "iconic", "magical", "ancient", "special",
+"beautiful", "peaceful", "colorful", or "wonderful".
+
+If an English source or story plan uses an English adjective, noun, metaphor, or
+phrase, understand the meaning and rewrite it in natural Hindi/Marathi. Do not
+copy it into the Hindi/Marathi output.
+
+Place names and proper nouns should use the natural child-facing local form,
+usually in Devanagari, such as गेटवे ऑफ इंडिया, अजंता, मुंबई, or सोमनाथ.
 Never transliterate an English word, phrase, idiom, metaphor, or sound effect
 when a natural Hindi or Marathi equivalent exists.
 
@@ -438,6 +459,11 @@ Marathi.
 For all languages, verify that dialogue sounds natural, narration reads
 smoothly aloud, and the emotional tone matches the page emotion.
 
+For Hindi and Marathi, silently scan title, summary, moral, and every page text
+for Latin letters A-Z. If any Latin-script word appears, rewrite it in natural
+Hindi/Marathi unless it is an explicitly required proper noun with no natural
+Devanagari form.
+
 If any sentence sounds translated, rewrite it.
 
 ## FINAL CHECK
@@ -455,6 +481,9 @@ If any sentence sounds translated, rewrite it.
 11. Hindi and Marathi avoid literal translation, English sentence order, and
     transliterated English words or sound effects when natural local equivalents
     exist.
+12. Hindi and Marathi must not contain Latin-script English words such as
+    intricate, bustling, busy, iconic, magical, ancient, special, beautiful,
+    peaceful, colorful, or wonderful.
 
 # STORY PLAN JSON
 

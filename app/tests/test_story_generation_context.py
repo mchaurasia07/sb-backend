@@ -201,7 +201,13 @@ def test_custom_story_generation_prompts_require_native_hindi_marathi_localizati
         assert "बॉन्क!" in prompt
         assert "अरे बाप रे!" in prompt
         assert "अरे देवा!" in prompt
-        assert "Borrow English words in Hindi or Marathi only if they are genuinely part of" in prompt
+        assert "Borrow English words in Hindi or Marathi only from a tiny child-natural loanword" in prompt
+        assert "write them in Devanagari, not Latin script" in prompt
+        assert "Do not use Latin-script English words inside Hindi or Marathi" in prompt
+        assert '"intricate", "bustling", "busy", "iconic"' in prompt
+        assert "silently scan title, summary, moral, and every page text" in prompt
+        assert "for Latin letters A-Z" in prompt
+        assert "must not contain Latin-script English words" in prompt
         assert "Never transliterate an English word, phrase, idiom, metaphor, or sound effect" in prompt
         assert "Hindi and Marathi sound originally authored in those languages" in prompt
 
@@ -399,6 +405,25 @@ def test_story_plan_prompts_require_regional_anchor_coverage_and_route_continuit
         assert "lessons, not only a general statement" in prompt
 
 
+def test_story_plan_prompts_require_narrative_engine_for_discovery_stories():
+    for prompt_path in (
+        "prompts/story/story_plan_child_hero_prompt.txt",
+        "prompts/story/story_plan_imagined_cast_prompt.txt",
+    ):
+        prompt = load_prompt(prompt_path)
+
+        assert "## NARRATIVE ENGINE FOR DISCOVERY AND LEARNING STORIES" in prompt
+        assert "do not plan a sequence of unrelated visits or facts" in prompt
+        assert "starting question, mistaken belief, incomplete idea" in prompt
+        assert "recurring throughline object or device" in prompt
+        assert "map, list, blank drawing, collection pouch, clue card" in prompt
+        assert "Each middle page should test, complicate, or add" in prompt
+        assert "Avoid \"the hero sees X, then sees Y, then sees Z\"" in prompt
+        assert "choose a clue, ask a local helper, try a small task" in prompt
+        assert "final realization must be earned by accumulated page results" in prompt
+        assert "completed object, repaired situation, or new" in prompt
+
+
 def test_story_generation_prompts_keep_moral_separate_from_story_closure():
     for prompt_path in (
         "prompts/story/story_generation_child_hero_prompt.txt",
@@ -435,6 +460,22 @@ def test_story_generation_prompts_preserve_regional_anchors_without_teleporting(
         assert "harmonious blending" in prompt
         assert "tapestry of diversity" in prompt
         assert "joyful\", \"bustling\"" in prompt
+
+
+def test_story_generation_prompts_preserve_narrative_engine():
+    for prompt_path in (
+        "prompts/story/story_generation_child_hero_prompt.txt",
+        "prompts/story/story_generation_imagined_cast_prompt.txt",
+    ):
+        prompt = load_prompt(prompt_path)
+
+        assert "preserve the plan's narrative engine" in prompt
+        assert "starting" in prompt
+        assert "question, mistaken belief, promise, mission" in prompt
+        assert "recurring object visible across" in prompt
+        assert "a clue gained, idea revised, choice made" in prompt
+        assert "Avoid writing the pages as a list of visits or facts" in prompt
+        assert "final realization should feel earned" in prompt
 
 
 def test_story_generation_prompts_require_plan_fidelity_and_silent_review():

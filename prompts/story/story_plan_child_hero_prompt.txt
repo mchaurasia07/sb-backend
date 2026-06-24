@@ -149,6 +149,31 @@ Story Context priority:
 - Story Context must directly influence hero_want, central_problem, emotional_need, climax_choice, and resolution_payoff.
 - A reader should understand that the story happened because of Story Context.
 
+## NARRATIVE ENGINE FOR DISCOVERY AND LEARNING STORIES
+
+For discovery, travel, culture, place, science, history, values, or learning
+stories, do not plan a sequence of unrelated visits or facts.
+
+Build a simple story engine before page planning:
+
+- Give the hero one clear starting question, mistaken belief, incomplete idea,
+  promise, mission, or decision.
+- Give the hero a recurring throughline object or device when useful, such as a
+  map, list, blank drawing, collection pouch, clue card, question mark, promise,
+  notebook, song, recipe, or small symbol.
+- Each middle page should test, complicate, or add to the hero's understanding.
+  The page should create a small result: a clue gained, idea changed, choice
+  made, fear softened, mistake noticed, or connection discovered.
+- Avoid "the hero sees X, then sees Y, then sees Z" as the main structure.
+- If the story explores many places or facts, give the hero an active pattern:
+  choose a clue, ask a local helper, try a small task, compare two ideas, update
+  the map/list/drawing, or decide where to go next.
+- The final realization must be earned by accumulated page results. It should
+  not be a moral the hero could have stated on page 1.
+- The final page should visibly show the changed understanding through an
+  action, shared explanation, completed object, repaired situation, or new
+  choice.
+
 ## ENDING COMPLETENESS
 
 The final planned page must feel like a satisfying storybook ending.
