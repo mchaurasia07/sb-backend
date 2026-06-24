@@ -201,9 +201,54 @@ def test_custom_story_generation_prompts_require_native_hindi_marathi_localizati
         assert "बॉन्क!" in prompt
         assert "अरे बाप रे!" in prompt
         assert "अरे देवा!" in prompt
-        assert "Borrow English words in Hindi or Marathi only if they are genuinely part of" in prompt
+        assert "Borrow English words in Hindi or Marathi only from a tiny child-natural loanword" in prompt
+        assert "write them in Devanagari, not Latin script" in prompt
+        assert "Do not use Latin-script English words inside Hindi or Marathi" in prompt
+        assert '"intricate", "bustling", "busy", "iconic"' in prompt
+        assert "silently scan title, summary, moral, and every page text" in prompt
+        assert "for Latin letters A-Z" in prompt
+        assert "must not contain Latin-script English words" in prompt
         assert "Never transliterate an English word, phrase, idiom, metaphor, or sound effect" in prompt
         assert "Hindi and Marathi sound originally authored in those languages" in prompt
+
+
+def test_custom_story_generation_prompts_include_language_quality_feedback_rules():
+    for prompt_path in (
+        "prompts/story/story_generation_child_hero_prompt.txt",
+        "prompts/story/story_generation_imagined_cast_prompt.txt",
+    ):
+        prompt = load_prompt(prompt_path)
+
+        assert "## TITLE QUALITY" in prompt
+        assert "<Hero>'s Adventure" in prompt
+        assert "Generate a title unique to this story's conflict" in prompt
+        assert "resolution. The title should instantly communicate" in prompt
+        assert "## EMOTIONAL VARIETY" in prompt
+        assert "Show feelings through actions, body language, facial expressions, dialogue, and" in prompt
+        assert "## READ-ALOUD OPTIMIZATION" in prompt
+        assert "The story will be narrated as an audiobook." in prompt
+        assert "Avoid overly long sentences, excessive commas, complex nested clauses" in prompt
+        assert "## LANGUAGE GENERATION PRIORITY" in prompt
+        assert "Never use English output as an intermediate step for Hindi or Marathi" in prompt
+        assert "Generate Hindi directly from the plan." in prompt
+        assert "Generate Marathi directly from the plan." in prompt
+        assert "Never generate one language first and then translate it into another." in prompt
+        assert "## HINDI AND MARATHI NATIVE AUTHORING" in prompt
+        assert "preserve English sentence structure" in prompt
+        assert "Prioritize how a parent would naturally tell the story to a child." in prompt
+        assert "## COMMON TRANSLATION TRAPS" in prompt
+        assert "pure love -> overly formal" in prompt
+        assert "made her smile ->" in prompt
+        assert "Always optimize for natural storytelling, not translation accuracy." in prompt
+        assert "## CHARACTER VOICE CONSISTENCY" in prompt
+        assert "speech style" in prompt
+        assert "Character growth should happen gradually through story events." in prompt
+        assert "## FINAL LANGUAGE VALIDATION" in prompt
+        assert "ensure the narration sounds like a professionally written" in prompt
+        assert "children's book" in prompt
+        assert "remove literal English sentence structures" in prompt
+        assert "remove textbook-style phrasing" in prompt
+        assert "If any sentence sounds translated, rewrite it." in prompt
 
 
 def test_tts_prompt_has_multilingual_voice_rules():
@@ -324,6 +369,61 @@ def test_story_plan_prompts_include_developmental_language_profiles():
         assert '"read_aloud_rhythm": ""' in prompt
 
 
+def test_story_plan_prompts_require_regional_anchor_coverage_and_route_continuity():
+    for prompt_path in (
+        "prompts/story/story_plan_child_hero_prompt.txt",
+        "prompts/story/story_plan_imagined_cast_prompt.txt",
+    ):
+        prompt = load_prompt(prompt_path)
+
+        assert "### REGIONAL, STATE, CULTURE, AND PLACE STORIES" in prompt
+        assert "perform a silent coverage audit" in prompt
+        assert "most important age-safe anchors a local parent would expect" in prompt
+        assert "For a full state or region story, prefer 5-8 high-value anchors" in prompt
+        assert "content_anchors.required_names" in prompt
+        assert "Avoid omitting obvious iconic anchors" in prompt
+        assert "Rann" in prompt
+        assert "of Kutch" in prompt
+        assert "Somnath" in prompt
+        assert "Gir lions" in prompt
+        assert "Statue of Unity" in prompt
+        assert "Mumbai/Gateway/local trains" in prompt
+        assert "Sahyadri forts" in prompt
+        assert "Ajanta/Ellora" in prompt
+        assert "preserve route continuity" in prompt
+        assert "Do not jump magically or suddenly from one far location to another" in prompt
+        assert "map, train, bus, boat, family trip, guide, festival trail, letter, clue" in prompt
+        assert "Every location scene must change the hero's understanding or choices" in prompt
+        assert "Avoid passive sightseeing structures" in prompt
+        assert "Avoid repetitive guide transitions" in prompt
+        assert "nudging" in prompt
+        assert "tugging, pointing, or leading" in prompt
+        assert "locally plausible" in prompt
+        assert "harmonious blending" in prompt
+        assert "tapestry of diversity" in prompt
+        assert "specific remembered moments" in prompt
+        assert "lessons, not only a general statement" in prompt
+
+
+def test_story_plan_prompts_require_narrative_engine_for_discovery_stories():
+    for prompt_path in (
+        "prompts/story/story_plan_child_hero_prompt.txt",
+        "prompts/story/story_plan_imagined_cast_prompt.txt",
+    ):
+        prompt = load_prompt(prompt_path)
+
+        assert "## NARRATIVE ENGINE FOR DISCOVERY AND LEARNING STORIES" in prompt
+        assert "do not plan a sequence of unrelated visits or facts" in prompt
+        assert "starting question, mistaken belief, incomplete idea" in prompt
+        assert "recurring throughline object or device" in prompt
+        assert "map, list, blank drawing, collection pouch, clue card" in prompt
+        assert "Each middle page should test, complicate, or add" in prompt
+        assert "Avoid \"the hero sees X, then sees Y, then sees Z\"" in prompt
+        assert "choose a clue, ask a local helper, try a small task" in prompt
+        assert "final realization must be earned by accumulated page results" in prompt
+        assert "completed object, repaired situation, or new" in prompt
+
+
 def test_story_generation_prompts_keep_moral_separate_from_story_closure():
     for prompt_path in (
         "prompts/story/story_generation_child_hero_prompt.txt",
@@ -337,6 +437,45 @@ def test_story_generation_prompts_keep_moral_separate_from_story_closure():
         assert "It must not replace the" in prompt
         assert "final page's emotional closure" in prompt
         assert "final page closes the conflict and feels complete" in prompt
+
+
+def test_story_generation_prompts_preserve_regional_anchors_without_teleporting():
+    for prompt_path in (
+        "prompts/story/story_generation_child_hero_prompt.txt",
+        "prompts/story/story_generation_imagined_cast_prompt.txt",
+    ):
+        prompt = load_prompt(prompt_path)
+
+        assert "For regional, state, culture, or travel/discovery stories:" in prompt
+        assert "Preserve every planned iconic anchor" in prompt
+        assert "Do not present anchors as a checklist of facts" in prompt
+        assert "Keep route continuity clear" in prompt
+        assert "Avoid \"suddenly they were...\" location jumps" in prompt
+        assert "Each location must affect the hero's goal, emotion, choice, or lesson" in prompt
+        assert "Avoid repeating the same transition gesture" in prompt
+        assert "nudging, tugging, pointing, or leading" in prompt
+        assert "do not blur garba and dandiya/raas" in prompt
+        assert "non-local animal" in prompt
+        assert "specific moments the hero now remembers" in prompt
+        assert "harmonious blending" in prompt
+        assert "tapestry of diversity" in prompt
+        assert "joyful\", \"bustling\"" in prompt
+
+
+def test_story_generation_prompts_preserve_narrative_engine():
+    for prompt_path in (
+        "prompts/story/story_generation_child_hero_prompt.txt",
+        "prompts/story/story_generation_imagined_cast_prompt.txt",
+    ):
+        prompt = load_prompt(prompt_path)
+
+        assert "preserve the plan's narrative engine" in prompt
+        assert "starting" in prompt
+        assert "question, mistaken belief, promise, mission" in prompt
+        assert "recurring object visible across" in prompt
+        assert "a clue gained, idea revised, choice made" in prompt
+        assert "Avoid writing the pages as a list of visits or facts" in prompt
+        assert "final realization should feel earned" in prompt
 
 
 def test_story_generation_prompts_require_plan_fidelity_and_silent_review():

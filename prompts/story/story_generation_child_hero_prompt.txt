@@ -38,6 +38,19 @@ and makes the planned climax choice to reach the planned resolution."
 
 Every page must support that spine.
 
+## TITLE QUALITY
+
+The title must reflect the hero, central challenge, emotional journey, and story
+outcome.
+
+Avoid repetitive title patterns such as "<Hero>'s Adventure", "<Hero>'s Big
+Day", "<Hero>'s Journey", and "<Hero>'s Surprise".
+
+Do not repeatedly use the hero's name as the primary title structure across
+different stories. Generate a title unique to this story's conflict and
+resolution. The title should instantly communicate what makes this story
+special.
+
 ## CAUSE AND EFFECT
 
 The story must feel like one connected journey, not separate page descriptions.
@@ -50,6 +63,14 @@ learning goal should become clearer through action and choice. The climax must
 show the child using the learning goal.
 
 Use page_turn_hook for gentle forward momentum. Avoid ending pages with questions.
+
+For discovery, travel, culture, place, science, history, values, or learning
+stories, preserve the plan's narrative engine. Keep the hero's starting
+question, mistaken belief, promise, mission, or recurring object visible across
+the story when the plan includes one. Each page should show what changes for the
+hero: a clue gained, idea revised, choice made, fear softened, mistake noticed,
+or connection discovered. Avoid writing the pages as a list of visits or facts.
+The final realization should feel earned by the earlier page results.
 
 ## PLAN FIDELITY
 
@@ -84,6 +105,15 @@ Avoid page-summary writing such as "On this page," "Then they learned," or
 "This scene shows." Avoid moral lectures, lesson summaries, repetitive
 explanations, and textbook-like facts.
 
+## EMOTIONAL VARIETY
+
+Avoid repeating the same emotional expression across multiple pages.
+
+Show feelings through actions, body language, facial expressions, dialogue, and
+decisions rather than repeatedly naming emotions.
+
+Vary emotional descriptions throughout the story.
+
 ## LANGUAGE AND AUDIOBOOK STYLE
 
 Follow language_profile as the primary guide for vocabulary, sentence length,
@@ -100,10 +130,46 @@ those language keys, no extra languages.
   exactly story_plan_json.selected_languages. If selected_languages is ["hi"],
   output only "hi". If it is ["en","hi","mr"], output exactly those three keys.
 
+## READ-ALOUD OPTIMIZATION
+
+The story will be narrated as an audiobook.
+
+Every page must sound natural when spoken aloud.
+
+Prefer clear sentence flow, natural pauses, child-friendly rhythm, and simple
+spoken dialogue.
+
+Avoid overly long sentences, excessive commas, complex nested clauses, and dense
+descriptive passages.
+
+The narration should feel smooth and engaging when read aloud.
+
 ## LANGUAGE LOCALIZATION
 
-Generate each language directly from the STORY PLAN, not from another language's
-output.
+Generate each language directly from the STORY PLAN.
+
+Never use English output as an intermediate step for Hindi or Marathi
+generation.
+
+Think independently in the target language before writing.
+
+## LANGUAGE GENERATION PRIORITY
+
+For every page:
+
+1. Understand the page intent from the STORY PLAN.
+2. Generate English directly from the plan.
+3. Generate Hindi directly from the plan.
+4. Generate Marathi directly from the plan.
+
+Never generate one language first and then translate it into another.
+
+Each language must be independently authored from the STORY PLAN and should feel
+as if it was originally written by a native children's author in that language.
+
+All languages must preserve plot, character actions, emotional beats, learning
+moments, page progression, and moral meaning while using the most natural
+storytelling style for that language.
 
 Treat English, Hindi, and Marathi as independent children's stories that share
 the same plot, characters, emotions, page sequence, and moral. For every
@@ -145,8 +211,21 @@ Marathi (mr):
 - Use simple child-friendly Marathi phrasing, warm read-aloud rhythm, and natural dialogue.
 - Use local sound words and expressions such as "धप्प!", "ठक!", "छपाक!", "टपटप!", "अरे!", "अरे देवा!", "वा!", and "हुर्रे!" where they fit.
 
-Borrow English words in Hindi or Marathi only if they are genuinely part of
-everyday speech among young children, for example बस, स्कूल, डॉक्टर, मोबाइल.
+Borrow English words in Hindi or Marathi only from a tiny child-natural loanword
+set, and write them in Devanagari, not Latin script. Examples: बस, स्कूल,
+डॉक्टर, मोबाइल, ट्रेन, मेट्रो, टिकट.
+
+Do not use Latin-script English words inside Hindi or Marathi page text, title,
+summary, or moral. A Hindi or Marathi field should not contain words such as
+"intricate", "bustling", "busy", "iconic", "magical", "ancient", "special",
+"beautiful", "peaceful", "colorful", or "wonderful".
+
+If an English source or story plan uses an English adjective, noun, metaphor, or
+phrase, understand the meaning and rewrite it in natural Hindi/Marathi. Do not
+copy it into the Hindi/Marathi output.
+
+Place names and proper nouns should use the natural child-facing local form,
+usually in Devanagari, such as गेटवे ऑफ इंडिया, अजंता, मुंबई, or सोमनाथ.
 Never transliterate an English word, phrase, idiom, metaphor, or sound effect
 when a natural Hindi or Marathi equivalent exists.
 
@@ -157,6 +236,44 @@ natural child-story form of teacher titles and name titles. For example,
 it, "लिली मैम" / "लिली मॅडम". Do not write "सुश्री लिली", "श्रीमती लिली",
 "कुमारी लिली", or formal Marathi equivalents unless the user explicitly asked
 for that formal title.
+
+## HINDI AND MARATHI NATIVE AUTHORING
+
+Hindi and Marathi must sound naturally written by native children's authors,
+not translated from English.
+
+For Hindi, use everyday spoken Hindi commonly heard in homes, classrooms, and
+picture books. Prefer warm conversational language over formal literary
+language. Avoid overly Sanskritized vocabulary, textbook-style wording, and
+unnatural English-shaped phrasing. Use natural Hindi sound words and
+expressions.
+
+For Marathi, use everyday spoken Marathi commonly heard in homes and children's
+books. Prefer warm parent-to-child storytelling language. Avoid highly literary
+or textbook Marathi, overly Sanskritized wording, and unnatural English-shaped
+phrasing. Use natural Marathi expressions and sound words.
+
+For both Hindi and Marathi, never translate English idioms literally, never
+preserve English sentence structure, and never transliterate English sound
+effects when a natural local equivalent exists. Rewrite any sentence that sounds
+translated. Prioritize how a parent would naturally tell the story to a child.
+
+If a sentence sounds like English could easily be reconstructed from it, rewrite
+it more naturally.
+
+## COMMON TRANSLATION TRAPS
+
+Avoid literal translations such as:
+
+- pure love -> overly formal "pure/shuddh love" wording
+- made her smile -> "forced her to smile"
+- take a deep breath -> command-like literal phrasing
+- spark of hope -> word-for-word "spark" metaphor
+- heart filled with joy -> stiff literal heart-filling phrasing
+
+Instead use the most natural child-friendly expression for the language.
+
+Always optimize for natural storytelling, not translation accuracy.
 
 Hindi/Marathi native drafting guardrails:
 
@@ -193,6 +310,9 @@ Hindi/Marathi native drafting guardrails:
 - Do not leave stray English adjectives inside Hindi/Marathi sentences, such as
   "joyful चित्रों". Use natural words like "खुशियों भरे चित्र",
   "रंग-बिरंगे चित्र", Marathi "आनंदी चित्रं", or "रंगीत चित्रं".
+- Do not leave stray English travel or emotion words inside Hindi/Marathi, such
+  as "joyful", "bustling", "peaceful", "special", or "beautiful", when a
+  natural Hindi/Marathi equivalent exists.
 - Before final JSON, silently read each Hindi/Marathi page aloud. If it sounds
   like English could be reconstructed from the sentence order, rewrite it in
   simpler native Hindi/Marathi.
@@ -218,6 +338,38 @@ locations, goals, and recurring items from visual_bible and continuity_requireme
 
 Use content_anchors and each page's domain_detail naturally.
 
+For regional, state, culture, or travel/discovery stories:
+
+- Preserve every planned iconic anchor unless it is absent from the plan.
+- Weave domain_detail into action, dialogue, sensory experience, or the hero's
+  changing understanding. Do not present anchors as a checklist of facts.
+- Keep route continuity clear. When pages move between distant locations, make
+  the transition feel caused by the plan through a map, clue, vehicle, guide,
+  family trip, festival trail, promise, or other planned bridge.
+- Avoid "suddenly they were..." location jumps unless the plan explicitly
+  establishes fantasy travel and the story keeps that device consistent.
+- Each location must affect the hero's goal, emotion, choice, or lesson. Avoid
+  pages where the hero only observes a place and then moves on.
+- Avoid repeating the same transition gesture across pages, such as a companion
+  nudging, tugging, pointing, or leading every time. Use the planned bridge and
+  vary movement through the hero's choice, map, clue, dialogue, vehicle, helper,
+  sensory discovery, or object continuity.
+- Keep regional facts culturally precise in child-friendly wording. For example,
+  do not blur garba and dandiya/raas if the distinction matters, and do not use
+  a non-local animal as if it naturally belongs to the region.
+- The ending should mention one or more specific moments the hero now remembers
+  or understands, so the emotional payoff feels earned rather than generic.
+
+## CHARACTER VOICE CONSISTENCY
+
+Recurring characters must maintain consistent personality, speech style,
+emotional maturity, confidence level, and behavior patterns.
+
+Character growth should happen gradually through story events.
+
+Do not allow characters to suddenly behave differently unless the story
+explicitly justifies the change.
+
 ## ENDING AND MORAL
 
 The final story page must show the resolution_payoff and the child's emotional
@@ -233,6 +385,9 @@ The moral is a separate short lesson after the story. It must not replace the
 final page's emotional closure.
 
 The moral field must be 1-2 short, child-friendly sentences.
+Use concrete child-facing moral language. Avoid adult abstractions such as
+"harmonious blending," "tapestry of diversity," or similar essay-like phrases
+unless they are rewritten into simple words a child would naturally understand.
 
 ## OUTPUT FORMAT
 
@@ -277,6 +432,31 @@ Before producing the JSON, silently verify that:
 - Hindi and Marathi sound originally authored in those languages, not translated
   from English.
 
+## FINAL LANGUAGE VALIDATION
+
+Before producing the JSON:
+
+For English, ensure the narration sounds like a professionally written
+children's book.
+
+For Hindi, remove literal English sentence structures, remove awkward translated
+phrases, replace formal vocabulary with natural conversational Hindi, and ensure
+the text sounds originally written in Hindi.
+
+For Marathi, remove textbook-style phrasing, replace unnatural translations with
+everyday spoken Marathi, and ensure the text sounds originally written in
+Marathi.
+
+For all languages, verify that dialogue sounds natural, narration reads
+smoothly aloud, and the emotional tone matches the page emotion.
+
+For Hindi and Marathi, silently scan title, summary, moral, and every page text
+for Latin letters A-Z. If any Latin-script word appears, rewrite it in natural
+Hindi/Marathi unless it is an explicitly required proper noun with no natural
+Devanagari form.
+
+If any sentence sounds translated, rewrite it.
+
 ## FINAL CHECK
 
 1. pages.length equals story_plan_json.expected_page_count.
@@ -291,6 +471,9 @@ Before producing the JSON, silently verify that:
 10. Hindi and Marathi avoid literal translation, English sentence order, and
     transliterated English words or sound effects when natural local equivalents
     exist.
+11. Hindi and Marathi must not contain Latin-script English words such as
+    intricate, bustling, busy, iconic, magical, ancient, special, beautiful,
+    peaceful, colorful, or wonderful.
 
 # STORY PLAN JSON
 
