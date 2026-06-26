@@ -36,73 +36,76 @@ class AuthRouter:
         self.router.add_api_route("/me", self.get_me, methods=["GET"], response_model=ApiResponse[UserProfileResponse])
         self.router.add_api_route(
             "/signup",
-            self.signup,
+            self._rate_limited(self.signup, "10/minute"),
             methods=["POST"],
             response_model=ApiResponse[UserResponse],
             status_code=status.HTTP_201_CREATED,
         )
         self.router.add_api_route(
             "/verify-email-otp",
-            self.verify_email_otp,
+            self._rate_limited(self.verify_email_otp, "10/minute"),
             methods=["POST"],
             response_model=ApiResponse[AuthTokenResponse],
         )
         self.router.add_api_route(
             "/login",
-            self.login,
+            self._rate_limited(self.login, "20/minute"),
             methods=["POST"],
             response_model=ApiResponse[AuthTokenResponse | ChildLoginResponse],
         )
         self.router.add_api_route(
             "/child-login",
-            self.child_login,
+            self._rate_limited(self.child_login, "20/minute"),
             methods=["POST"],
             response_model=ApiResponse[ChildLoginResponse],
         )
         self.router.add_api_route(
             "/google-login",
-            self.google_login,
+            self._rate_limited(self.google_login, "20/minute"),
             methods=["POST"],
             response_model=ApiResponse[GoogleLoginResponse],
         )
         self.router.add_api_route("/add-phone", self.add_phone, methods=["POST"], response_model=ApiResponse[UserResponse])
         self.router.add_api_route(
             "/forgot-password",
-            self.forgot_password,
+            self._rate_limited(self.forgot_password, "5/minute"),
             methods=["POST"],
             response_model=ApiResponse[None],
         )
         self.router.add_api_route(
             "/reset-password",
-            self.reset_password,
+            self._rate_limited(self.reset_password, "5/minute"),
             methods=["POST"],
             response_model=ApiResponse[None],
         )
         self.router.add_api_route(
             "/refresh-token",
-            self.refresh_token,
+            self._rate_limited(self.refresh_token, "30/minute"),
             methods=["POST"],
             response_model=ApiResponse[AuthTokenResponse],
         )
         self.router.add_api_route("/logout", self.logout, methods=["POST"], response_model=ApiResponse[None])
         self.router.add_api_route(
             "/validate-email",
-            self.validate_email,
+            self._rate_limited(self.validate_email, "20/minute"),
             methods=["POST"],
             response_model=ApiResponse[ValidateResponse],
         )
         self.router.add_api_route(
             "/validate-phone",
-            self.validate_phone,
+            self._rate_limited(self.validate_phone, "20/minute"),
             methods=["POST"],
             response_model=ApiResponse[ValidateResponse],
         )
+
+    @staticmethod
+    def _rate_limited(endpoint, limit: str):
+        return limiter.limit(limit)(endpoint)
 
     async def get_me(self, current_user: User = Depends(get_current_user)) -> ApiResponse[UserProfileResponse]:
         data = UserProfileResponse.model_validate(current_user)
         return success_response(data, "User profile fetched successfully")
 
-    @limiter.limit("10/minute")
     async def signup(
         self,
         request: Request,
@@ -112,7 +115,6 @@ class AuthRouter:
         data = await container.auth.signup(payload)
         return success_response(data, "Signup successful. Please verify your email OTP.")
 
-    @limiter.limit("10/minute")
     async def verify_email_otp(
         self,
         request: Request,
@@ -122,7 +124,6 @@ class AuthRouter:
         data = await container.auth.verify_email_otp(payload)
         return success_response(data, "Email verified successfully")
 
-    @limiter.limit("20/minute")
     async def login(
         self,
         request: Request,
@@ -133,7 +134,6 @@ class AuthRouter:
         message = "Child login successful" if payload.child_login else "Login successful"
         return success_response(data, message)
 
-    @limiter.limit("20/minute")
     async def child_login(
         self,
         request: Request,
@@ -143,7 +143,6 @@ class AuthRouter:
         data = await container.auth.child_login(payload)
         return success_response(data, "Child login successful")
 
-    @limiter.limit("20/minute")
     async def google_login(
         self,
         request: Request,
@@ -162,7 +161,6 @@ class AuthRouter:
         data = await container.auth.add_phone(current_user, payload)
         return success_response(data, "Phone added successfully")
 
-    @limiter.limit("5/minute")
     async def forgot_password(
         self,
         request: Request,
@@ -172,7 +170,6 @@ class AuthRouter:
         await container.auth.forgot_password(payload)
         return success_response(None, "Password reset OTP sent")
 
-    @limiter.limit("5/minute")
     async def reset_password(
         self,
         request: Request,
@@ -182,7 +179,6 @@ class AuthRouter:
         await container.auth.reset_password(payload)
         return success_response(None, "Password reset successfully")
 
-    @limiter.limit("30/minute")
     async def refresh_token(
         self,
         request: Request,
@@ -200,7 +196,6 @@ class AuthRouter:
         await container.auth.logout(payload)
         return success_response(None, "Logout successful")
 
-    @limiter.limit("20/minute")
     async def validate_email(
         self,
         request: Request,
@@ -210,7 +205,6 @@ class AuthRouter:
         data = await container.auth.validate_email(payload)
         return success_response(data, "Email validation completed")
 
-    @limiter.limit("20/minute")
     async def validate_phone(
         self,
         request: Request,

@@ -1,24 +1,14 @@
 import logging
-from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, Query
 
 from app.core.container import RequestContainer, app_container, get_request_container
 from app.core.database import AsyncSessionLocal
 from app.core.dependencies import get_current_user
-from app.entity.custom_story_workflow import CustomStoryWorkflowType
-from app.entity.story_batch_job import StoryBatchJobStatus
 from app.entity.user import User
-from app.model.request.story import BatchWebPConversionRequest, StoryGenerationRequest
+from app.model.request.story import BatchWebPConversionRequest
 from app.model.response.common import ApiResponse, PaginatedResponse, success_response
-from app.model.response.custom_story_workflow import (
-    CustomStoryWorkflowBatchJobCancelResponse,
-    CustomStoryWorkflowBatchJobResponse,
-    CustomStoryWorkflowEventResponse,
-    CustomStoryWorkflowResponse,
-    CustomStoryWorkflowStepResponse,
-)
 from app.model.response.story import (
     BatchWebPConversionResponse,
     StoryBatchJobCancelResponse,
@@ -78,56 +68,6 @@ class StoriesRouter:
         self.container = container
         self.router = APIRouter()
         self.router.add_api_route(
-            "/workflows",
-            self.create_custom_story_workflow,
-            methods=["POST"],
-            response_model=ApiResponse[CustomStoryWorkflowResponse],
-            status_code=status.HTTP_201_CREATED,
-        )
-        self.router.add_api_route(
-            "/workflows",
-            self.list_custom_story_workflows,
-            methods=["GET"],
-            response_model=ApiResponse[PaginatedResponse[CustomStoryWorkflowResponse]],
-        )
-        self.router.add_api_route(
-            "/workflows/events/process",
-            self.process_custom_story_workflow_events,
-            methods=["POST"],
-            response_model=ApiResponse[dict[str, Any]],
-        )
-        self.router.add_api_route(
-            "/workflows/{workflow_id}",
-            self.get_custom_story_workflow,
-            methods=["GET"],
-            response_model=ApiResponse[CustomStoryWorkflowResponse],
-        )
-        self.router.add_api_route(
-            "/workflows/{workflow_id}",
-            self.delete_custom_story_workflow,
-            methods=["DELETE"],
-            response_model=ApiResponse[None],
-        )
-        self.router.add_api_route(
-            "/workflows/{workflow_id}/steps",
-            self.get_custom_story_workflow_steps,
-            methods=["GET"],
-            response_model=ApiResponse[list[CustomStoryWorkflowStepResponse]],
-        )
-        self.router.add_api_route(
-            "/workflows/{workflow_id}/retry",
-            self.retry_custom_story_workflow,
-            methods=["POST"],
-            response_model=ApiResponse[CustomStoryWorkflowResponse],
-            status_code=status.HTTP_202_ACCEPTED,
-        )
-        self.router.add_api_route(
-            "/workflows/{workflow_id}/batch-jobs/{batch_job_id}/cancel",
-            self.cancel_custom_workflow_batch_job,
-            methods=["POST"],
-            response_model=ApiResponse[CustomStoryWorkflowBatchJobCancelResponse],
-        )
-        self.router.add_api_route(
             "/batch-jobs/reconcile",
             self.reconcile_story_batch_jobs,
             methods=["POST"],
@@ -170,102 +110,6 @@ class StoriesRouter:
             response_model=ApiResponse[PaginatedResponse[StoryResponse]],
         )
 
-    async def create_custom_story_workflow(
-        self,
-        payload: StoryGenerationRequest,
-        response: Response,
-        current_user: User = Depends(get_current_user),
-        container: RequestContainer = Depends(get_request_container),
-    ) -> ApiResponse[CustomStoryWorkflowResponse]:
-        """Create a custom story workflow and enqueue its first event."""
-        data = await container.custom_story_workflow.create(current_user.id, payload)
-        if data.execute_workflow:
-            response.status_code = status.HTTP_202_ACCEPTED
-            return success_response(data, "Custom story workflow queued successfully")
-        response.status_code = status.HTTP_201_CREATED
-        return success_response(data, "Custom story workflow saved successfully; execution skipped")
-
-    async def list_custom_story_workflows(
-        self,
-        child_id: UUID | None = None,
-        status_filter: str | None = Query(default=None, alias="status"),
-        page: int = Query(1, ge=1),
-        page_size: int = Query(20, ge=1, le=100),
-        current_user: User = Depends(get_current_user),
-        container: RequestContainer = Depends(get_request_container),
-    ) -> ApiResponse[PaginatedResponse[CustomStoryWorkflowResponse]]:
-        data = await container.custom_story_workflow.list(
-            current_user.id,
-            child_id=child_id,
-            status_filter=status_filter,
-            page=page,
-            page_size=page_size,
-        )
-        return success_response(data, "Custom story workflows retrieved successfully")
-
-    async def process_custom_story_workflow_events(
-        self,
-        limit: int = Query(10, ge=1, le=100),
-        current_user: User = Depends(get_current_user),
-        container: RequestContainer = Depends(get_request_container),
-    ) -> ApiResponse[dict[str, Any]]:
-        """Process pending custom story workflow events."""
-        _ = current_user
-        data = await container.custom_story_workflow.process_events(limit=limit)
-        return success_response(data, "Custom story workflow events processed successfully")
-
-    async def get_custom_story_workflow(
-        self,
-        workflow_id: UUID,
-        current_user: User = Depends(get_current_user),
-        container: RequestContainer = Depends(get_request_container),
-    ) -> ApiResponse[CustomStoryWorkflowResponse]:
-        data = await container.custom_story_workflow.get(current_user.id, workflow_id)
-        return success_response(data, "Custom story workflow retrieved successfully")
-
-    async def delete_custom_story_workflow(
-        self,
-        workflow_id: UUID,
-        current_user: User = Depends(get_current_user),
-        container: RequestContainer = Depends(get_request_container),
-    ) -> ApiResponse[None]:
-        await container.custom_story_workflow.delete(current_user.id, workflow_id)
-        return success_response(None, "Custom story workflow deleted successfully")
-
-    async def get_custom_story_workflow_steps(
-        self,
-        workflow_id: UUID,
-        current_user: User = Depends(get_current_user),
-        container: RequestContainer = Depends(get_request_container),
-    ) -> ApiResponse[list[CustomStoryWorkflowStepResponse]]:
-        data = await container.custom_story_workflow.get_steps(current_user.id, workflow_id)
-        return success_response(data, "Custom story workflow steps retrieved successfully")
-
-
-    async def retry_custom_story_workflow(
-        self,
-        workflow_id: UUID,
-        current_user: User = Depends(get_current_user),
-        container: RequestContainer = Depends(get_request_container),
-    ) -> ApiResponse[CustomStoryWorkflowResponse]:
-        data = await container.custom_story_workflow.retry(current_user.id, workflow_id)
-        return success_response(data, "Story workflow retry queued successfully")
-
-    async def cancel_custom_workflow_batch_job(
-        self,
-        workflow_id: UUID,
-        batch_job_id: UUID,
-        current_user: User = Depends(get_current_user),
-        container: RequestContainer = Depends(get_request_container),
-    ) -> ApiResponse[CustomStoryWorkflowBatchJobCancelResponse]:
-        """Cancel a submitted Google Batch job for a custom story workflow."""
-        data = await container.custom_story_workflow.cancel_batch_job(
-            user_id=current_user.id,
-            workflow_id=workflow_id,
-            batch_job_id=batch_job_id,
-        )
-        return success_response(CustomStoryWorkflowBatchJobCancelResponse(**data), "Batch job cancelled successfully")
-
     async def reconcile_story_batch_jobs(
         self,
         limit: int = Query(50, ge=1, le=200),
@@ -275,14 +119,8 @@ class StoriesRouter:
         """Manually reconcile submitted/running Google Batch jobs."""
         _ = current_user
         story_data = await container.story_batch.reconcile_batch_jobs(limit=limit)
-        workflow_data = await container.custom_story_workflow.reconcile_batch_jobs(limit=limit)
-        data = {
-            "checked_count": story_data.get("checked_count", 0) + workflow_data.get("checked_count", 0),
-            "processed_count": story_data.get("processed_count", 0) + workflow_data.get("processed_count", 0),
-            "results": [*story_data.get("results", []), *workflow_data.get("results", [])],
-        }
         return success_response(
-            StoryBatchJobReconcileResponse(**data),
+            StoryBatchJobReconcileResponse(**story_data),
             "Story batch jobs reconciled successfully",
         )
 

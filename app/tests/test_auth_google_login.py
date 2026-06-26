@@ -3,9 +3,11 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from starlette.requests import Request
 
 from app.core.exceptions import AuthException
-from app.model.request.auth import GoogleLoginRequest
+from app.model.request.auth import GoogleLoginRequest, LoginRequest
+from app.routes.v1.auth import AuthRouter
 from app.service.auth_service import AuthService
 from app.utils import google_oauth
 
@@ -196,3 +198,30 @@ async def test_verify_google_id_token_rejects_unconfigured_audience(monkeypatch)
 
     with pytest.raises(AuthException, match="audience mismatch"):
         await google_oauth.verify_google_id_token("valid-google-id-token")
+
+
+@pytest.mark.asyncio
+async def test_rate_limited_auth_route_accepts_bound_request_kwargs():
+    router = AuthRouter()
+    endpoint = next(route.endpoint for route in router.router.routes if getattr(route, "path", "") == "/login")
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/v1/auth/login",
+            "headers": [],
+            "client": ("127.0.0.1", 12345),
+        }
+    )
+    payload = LoginRequest(identifier="parent@example.com", password="secret")
+    calls = {}
+
+    class _Auth:
+        async def login(self, payload_arg):
+            calls["payload"] = payload_arg
+            return SimpleNamespace(token="ok")
+
+    response = await endpoint(request=request, payload=payload, container=SimpleNamespace(auth=_Auth()))
+
+    assert calls["payload"] is payload
+    assert response.message == "Login successful"

@@ -398,6 +398,37 @@ def test_custom_visible_character_lock_repeats_hero_hair_outfit_and_body_scale()
     assert "grandma_elara" not in lock
 
 
+def test_custom_visible_character_lock_preserves_animal_appendage_count():
+    visual_bible = {
+        "hero": {
+            "character_id": "hero_child",
+            "name": "Amayra",
+            "appearance": "Dark brown hair in two pigtails.",
+            "outfit": "Lavender tunic and brown boots.",
+        },
+        "recurring_characters": [
+            {
+                "character_id": "golden_lion",
+                "name": "Luma",
+                "appearance": "Warm golden lion cub with one fluffy tail and rounded ears.",
+                "outfit": "small teal story scarf",
+            }
+        ],
+    }
+    page_data = {
+        "characters_present": ["Luma"],
+        "reference_character_ids": ["golden_lion"],
+    }
+
+    lock = StoryServiceBatchService._custom_visible_character_lock_block(visual_bible, page_data)
+
+    assert "golden_lion" in lock
+    assert "one fluffy tail" in lock
+    assert "Anatomy lock" in lock
+    assert "exactly one tail for a tailed animal" in lock
+    assert "hero_child" not in lock
+
+
 def test_custom_story_rendered_image_prompt_adds_lock_and_rewrites_clothing_conflict():
     template = (
         "## Visual Bible\n{visual_bible}\n"

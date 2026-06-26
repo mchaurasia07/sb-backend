@@ -1460,6 +1460,10 @@ def test_story_image_generation_prompt_has_stronger_text_and_consistency_rules()
     assert "Facial expressions must accurately match the page emotion" in prompt
     assert "duplicated objects" in prompt
     assert "duplicated accessories" in prompt
+    assert "natural species anatomy and appendage count" in prompt
+    assert "exactly one tail for a tailed animal" in prompt
+    assert "duplicated tails" in prompt
+    assert "extra tails" in prompt
     assert "repeated background artifacts" in prompt
 
 

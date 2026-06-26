@@ -57,6 +57,7 @@ For recurring side characters, attached references also lock:
 
 * face/head shape
 * hair/fur/feather/body pattern
+* natural species anatomy and appendage count
 * outfit/accessory design
 * color palette
 * body scale and distinctive feature
@@ -177,6 +178,9 @@ identity source for that matching character ID/name. The Visual Bible remains
 the complete model sheet. Preserve every character's locked appearance, outfit,
 colors, facial/head details, body scale, distinctive features, and story style
 exactly across cover, all pages, and back cover.
+For animal characters, preserve natural species anatomy exactly: one head, one
+body, the correct number of legs/wings, and exactly one tail for a tailed animal
+unless the Visual Bible explicitly says otherwise.
 
 Use the Visual Bible for:
 
@@ -221,6 +225,7 @@ Preserve:
 * eye color/shape
 * skin/fur/feather color
 * face/head shape
+* natural species anatomy and appendage count
 * clothing
 * scale
 * accessories
@@ -450,6 +455,8 @@ Maintain consistent rendering quality across all illustrations.
 Maintain:
 
 * natural anatomy
+* natural species anatomy, with one head/body and correct limb, wing, ear, horn,
+  and tail count
 * age-appropriate proportions
 * realistic child proportions
 * symmetrical eyes
@@ -520,6 +527,10 @@ Do not generate:
 * a worn/carried object duplicated on the body
 * duplicated accessories
 * duplicate limbs
+* duplicated tails
+* extra tails
+* extra animal limbs, wings, ears, horns, or body parts
+* merged or forked animal tails unless explicitly required by the Visual Bible
 * repeated background artifacts
 * extra fingers
 * cropped faces
@@ -554,7 +565,7 @@ Before you begin rendering, verify you understand the face lock:
 Internally check:
 1. Face/head/body structure remains locked.
 2. Eyes, hair/fur/body covering, color palette, and distinctive features remain locked.
-3. Outfit/body design and footwear/anatomy-safe equivalent remain locked.
+3. Outfit/body design, footwear/anatomy-safe equivalent, and animal appendage count remain locked.
 4. Reference image, when attached, remains the primary identity source.
 
 Do not render checklist text, labels, captions, or verification statements.

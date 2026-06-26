@@ -1848,6 +1848,8 @@ Malformed JSON:
             "body scale, and color palettes stable across pages.\n"
             "- For every recurring character, fill visual_bible locks: appearance, outfit/body covering, footwear or "
             "anatomy-safe equivalent, hair/fur/body lock, outfit_lock, body_scale_lock, relative_size, and signature_item.\n"
+            "- For every animal recurring character, include a stable anatomy lock in appearance/body_scale_lock: "
+            "one head, one body, correct legs/wings/ears/horns, and exactly one tail for a tailed animal.\n"
             "- For the hero, fill visual_bible.hero outfit_lock, body_scale_lock, relative_size, and signature_item.\n"
             "- Lock exact footwear for the hero in visual_bible.hero.footwear and include it in visual_bible.hero.outfit.\n"
             "- Never leave shoes/footwear implied; choose one concrete footwear state and repeat it in every image_prompt.\n"

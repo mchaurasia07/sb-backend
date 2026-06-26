@@ -195,9 +195,9 @@ async def test_get_events_returns_any_owned_workflow_events_newest_first():
         assert story_type is None
         return events
 
-    service = CustomStoryWorkflowService.__new__(CustomStoryWorkflowService)
-    service.workflows = SimpleNamespace(get_for_user=_get_for_user)
-    service.events = SimpleNamespace(list_by_workflow_desc=_list_by_workflow_desc)
+    service = WorkflowService.__new__(WorkflowService)
+    service.workflow_repo = SimpleNamespace(get_for_user=_get_for_user)
+    service.event_repo = SimpleNamespace(list_by_workflow_desc=_list_by_workflow_desc)
 
     response = await service.get_events(user_id, workflow_id)
 
@@ -282,12 +282,16 @@ async def test_workflows_router_lists_shared_workflows_with_filters():
             *,
             page,
             page_size,
+            child_id=None,
+            status_filter=None,
             workflow_id=None,
             workflow_type=None,
         ):
             calls["user_id"] = requested_user_id
             calls["page"] = page
             calls["page_size"] = page_size
+            calls["child_id"] = child_id
+            calls["status_filter"] = status_filter
             calls["workflow_id"] = workflow_id
             calls["workflow_type"] = workflow_type
             return data
@@ -296,6 +300,8 @@ async def test_workflows_router_lists_shared_workflows_with_filters():
     response = await route(
         page=2,
         page_size=10,
+        child_id=None,
+        status_filter=None,
         workflow_id=workflow_id,
         workflow_type=CustomStoryWorkflowType.GENERIC,
         current_user=SimpleNamespace(id=user_id),
@@ -308,6 +314,8 @@ async def test_workflows_router_lists_shared_workflows_with_filters():
         "user_id": user_id,
         "page": 2,
         "page_size": 10,
+        "child_id": None,
+        "status_filter": None,
         "workflow_id": workflow_id,
         "workflow_type": CustomStoryWorkflowType.GENERIC,
     }
@@ -508,6 +516,9 @@ async def test_list_batch_jobs_returns_paginated_typed_response_with_filters():
             workflow_id=None,
             status=None,
             story_type=None,
+            generic_story_id=None,
+            job_type=None,
+            provider=None,
         ):
             calls["user_id"] = user_id_arg
             calls["page"] = page
@@ -515,10 +526,13 @@ async def test_list_batch_jobs_returns_paginated_typed_response_with_filters():
             calls["workflow_id"] = workflow_id
             calls["status"] = status
             calls["story_type"] = story_type
+            calls["generic_story_id"] = generic_story_id
+            calls["job_type"] = job_type
+            calls["provider"] = provider
             return [job], 1
 
-    service = CustomStoryWorkflowService.__new__(CustomStoryWorkflowService)
-    service.batch_jobs = _BatchJobs()
+    service = WorkflowService.__new__(WorkflowService)
+    service.batch_job_repo = _BatchJobs()
 
     response = await service.list_batch_jobs(
         user_id,
@@ -535,6 +549,9 @@ async def test_list_batch_jobs_returns_paginated_typed_response_with_filters():
         "workflow_id": workflow_id,
         "status": StoryBatchJobStatus.RUNNING,
         "story_type": None,
+        "generic_story_id": None,
+        "job_type": None,
+        "provider": None,
     }
     assert response.total == 1
     assert response.page == 1
@@ -562,13 +579,16 @@ async def test_list_batch_jobs_can_filter_by_story_type():
             workflow_id=None,
             status=None,
             story_type=None,
+            generic_story_id=None,
+            job_type=None,
+            provider=None,
         ):
             calls["user_id"] = user_id_arg
             calls["story_type"] = story_type
             return [], 0
 
-    service = CustomStoryWorkflowService.__new__(CustomStoryWorkflowService)
-    service.batch_jobs = _BatchJobs()
+    service = WorkflowService.__new__(WorkflowService)
+    service.batch_job_repo = _BatchJobs()
 
     response = await service.list_batch_jobs(
         user_id,
@@ -1178,13 +1198,13 @@ async def test_create_custom_story_workflow_skips_background_when_execution_disa
     response_data = _custom_workflow_response(workflow_id)
     calls = {}
 
-    class _FakeCustomStoryWorkflowService:
+    class _FakeWorkflowService:
         async def create(self, requested_user_id, requested_payload):
             calls["create"] = (requested_user_id, requested_payload)
             return response_data
 
-    route = story_routes.StoriesRouter().create_custom_story_workflow
-    container = SimpleNamespace(custom_story_workflow=_FakeCustomStoryWorkflowService())
+    route = workflow_routes.WorkflowsRouter().create_workflow
+    container = SimpleNamespace(workflow_service=_FakeWorkflowService())
     route_response = Response()
 
     response = await route(
@@ -1213,14 +1233,14 @@ async def test_create_custom_story_workflow_queues_event_when_requested(monkeypa
     response_data = _custom_workflow_response(workflow_id)
     response_data.execute_workflow = True
 
-    class _FakeCustomStoryWorkflowService:
+    class _FakeWorkflowService:
         async def create(self, requested_user_id, requested_payload):
             assert requested_user_id == user_id
             assert requested_payload == payload
             return response_data
 
-    route = story_routes.StoriesRouter().create_custom_story_workflow
-    container = SimpleNamespace(custom_story_workflow=_FakeCustomStoryWorkflowService())
+    route = workflow_routes.WorkflowsRouter().create_workflow
+    container = SimpleNamespace(workflow_service=_FakeWorkflowService())
     route_response = Response()
 
     response = await route(

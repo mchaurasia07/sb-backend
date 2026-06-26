@@ -1637,6 +1637,7 @@ class StoryServiceBatchService:
                         f"  Locked appearance: {appearance}",
                         f"  Locked outfit/accessories: {outfit}" if outfit else "",
                         "  Scale lock: keep the same body scale, build, face/head shape, hair, outfit, and accessories whenever this character appears.",
+                        "  Anatomy lock: preserve natural species anatomy and appendage count; one head, one body, correct legs/wings/ears/horns, and exactly one tail for a tailed animal unless this Visual Bible explicitly says otherwise.",
                     ]
                 )
             )
@@ -1893,7 +1894,8 @@ class StoryServiceBatchService:
             "is attached. Use the Visual Bible inside the rendered prompt as the complete model sheet for every "
             "character. Character consistency is more important than decorative scene details. Preserve each "
             "character's locked face or head shape, hair or fur, eyes, skin or body color, outfit, shoes, "
-            "accessories, size, distinctive features, color palette, and the single storybook style across the "
+            "accessories, size, distinctive features, natural species anatomy and appendage count, color palette, "
+            "and the single storybook style across the "
             "cover, every page, and the back cover. Respect basic scene etiquette: in temples, prayer rooms, "
             "sacred spaces, no-shoe home areas, beds, mattresses, or bedding, do not draw outdoor shoes on feet "
             "or on the bed; use bare feet or socks and place the exact locked footwear neatly nearby if visible. "
@@ -1916,7 +1918,8 @@ class StoryServiceBatchService:
                     f"for character_id={reference.character_id}; name={reference.name}; role={reference.role}. "
                     "It is the PRIMARY visual identity reference for that matching character. Match the character's "
                     "face/head shape, facial proportions, eye shape, natural eye size, hairstyle or body pattern, "
-                    "hairline, colors, skin/body tone, age appearance, body scale, outfit/accessories, and distinctive features. "
+                    "hairline, colors, skin/body tone, age appearance, body scale, outfit/accessories, distinctive "
+                    "features, and natural species anatomy including exactly one tail for a tailed animal. "
                 )
             else:
                 reference_instruction = ""
@@ -1931,7 +1934,8 @@ class StoryServiceBatchService:
                 )
             reference_lines.append(
                 "Preserve each attached character's face/head shape, facial proportions, eyes, hairstyle or "
-                "fur/body pattern, colors, age/scale, outfit/accessories, and distinctive features. "
+                "fur/body pattern, colors, age/scale, outfit/accessories, distinctive features, and natural "
+                "species anatomy including exactly one tail for a tailed animal. "
             )
             reference_instruction = "\n".join(reference_lines)
 
@@ -1941,7 +1945,9 @@ class StoryServiceBatchService:
             "the child look older or younger. Use the Character Identity Lock inside the rendered prompt for written "
             "identity and age guidance. "
             "Use the Visual Bible and scene prompt for the single locked story outfit, shoes, accessories, "
-            "body scale, rendering style, and environment. Respect basic scene etiquette: in temples, prayer rooms, "
+            "body scale, natural species anatomy, rendering style, and environment. For animal characters, keep "
+            "one head, one body, correct legs/wings/ears/horns, and exactly one tail for a tailed animal. "
+            "Respect basic scene etiquette: in temples, prayer rooms, "
             "sacred spaces, no-shoe home areas, beds, mattresses, or bedding, do not draw outdoor shoes on feet "
             "or on the bed; use bare feet or socks and place the exact locked footwear neatly nearby if visible. "
             "This does not change the locked footwear design. Do not copy portrait clothing, portrait crop, "
