@@ -114,8 +114,13 @@ class StoryServiceBatchService:
         logger.info("[story_batch] event=%s %s", event, details)
 
     @staticmethod
+    def _set_current_step_if_present(story: Any, value: str | None) -> None:
+        if hasattr(story, "current_step"):
+            story.current_step = value
+
+    @staticmethod
     def _reference_image_model(story: Story) -> str:
-        model = story.reference_image_model or settings.GOOGLE_REFERENCE_IMAGE_MODEL
+        model = getattr(story, "reference_image_model", None) or settings.GOOGLE_REFERENCE_IMAGE_MODEL
         if model == "gemini-2.5-flash-image":
             model = settings.GOOGLE_REFERENCE_IMAGE_MODEL
         return model.removeprefix("models/")
@@ -178,7 +183,7 @@ class StoryServiceBatchService:
             StoryStatus.AUDIO_RETRY_REQUIRED,
         }:
             story.status = StoryStatus.FAILED
-            story.current_step = None
+            self._set_current_step_if_present(story, None)
             story.error_message = f"Batch {job.job_type.value} job cancelled by user request"
             await self.stories.update(story)
 
@@ -302,7 +307,7 @@ class StoryServiceBatchService:
             return story
 
         await self.workflow._ensure_story_ai_config(story)
-        if (story.ai_provider or settings.AI_PROVIDER).lower() != "google":
+        if (getattr(story, "ai_provider", None) or settings.AI_PROVIDER).lower() != "google":
             raise AppException(
                 "Delayed batch story generation currently requires AI_PROVIDER=google",
                 code="BATCH_REQUIRES_GOOGLE",
@@ -340,10 +345,6 @@ class StoryServiceBatchService:
                     await self.session.commit()
                     return story
 
-            story.story_plan_json = story_plan
-            story.image_plan_json = image_plan
-            await self.stories.update(story)
-            await self.session.commit()
             self._log_event("workflow_deferred_after_image_submit", story_id=story.id)
             logger.info("Story %s: delayed batch workflow deferred to reconcile scheduler", story.id)
             return story
@@ -351,7 +352,7 @@ class StoryServiceBatchService:
             self._log_event("workflow_failed", story_id=story.id, error=str(exc))
             logger.exception("Story %s: delayed batch workflow failed: %s", story.id, exc)
             story.status = StoryStatus.FAILED
-            story.current_step = None
+            self._set_current_step_if_present(story, None)
             story.error_message = str(exc)
             await self.stories.update(story)
             await self.session.commit()
@@ -364,23 +365,18 @@ class StoryServiceBatchService:
         *,
         resume: bool,
     ) -> dict[str, Any]:
-        if resume and story.story_plan_validated and isinstance(story.story_plan_json, dict) and story.story_plan_json.get("pages"):
+        story_plan = await self.workflow._load_story_plan_checkpoint(story) if resume else None
+        if story_plan is not None:
             self._log_event("checkpoint_reused", story_id=story.id, checkpoint="story_plan")
-            return story.story_plan_json
+            return story_plan
 
         self._log_event("step_started", story_id=story.id, step=StoryStepName.STORY_PLAN_GENERATION.value)
         await self.workflow._set_current_step(story, StoryStepName.STORY_PLAN_GENERATION)
         story_plan = await self.workflow._step_generate_plan(story, flags)
-        story.story_plan_json = story_plan
-        story.story_plan_validated = False
-        await self.stories.update(story)
-        await self.session.commit()
 
         self._log_event("step_started", story_id=story.id, step=StoryStepName.STORY_PLAN_VALIDATION.value)
         await self.workflow._set_current_step(story, StoryStepName.STORY_PLAN_VALIDATION)
         story_plan = await self.workflow._step_validate_plan(story, story_plan, flags)
-        story.story_plan_json = story_plan
-        story.story_plan_validated = True
         await self.stories.update(story)
         await self.session.commit()
         return story_plan
@@ -418,28 +414,22 @@ class StoryServiceBatchService:
         *,
         resume: bool,
     ) -> dict[str, Any]:
-        if resume and story.image_plan_validated and isinstance(story.image_plan_json, dict) and story.image_plan_json.get("pages"):
+        image_plan = await self.workflow._load_image_plan_checkpoint(story) if resume else None
+        if image_plan is not None:
             self._log_event("checkpoint_reused", story_id=story.id, checkpoint="image_plan")
-            return story.image_plan_json
+            return image_plan
 
         self._log_event("step_started", story_id=story.id, step=StoryStepName.IMAGE_PLAN_GENERATION.value)
         await self.workflow._set_current_step(story, StoryStepName.IMAGE_PLAN_GENERATION)
         image_plan = await self.workflow._step_generate_image_plan(story, story_plan, story_json, flags)
-        story.image_plan_json = image_plan
-        story.image_plan_validated = False
-        await self.stories.update(story)
-        await self.session.commit()
 
         if not flags.skip_validation:
             self._log_event("step_started", story_id=story.id, step=StoryStepName.IMAGE_PLAN_VALIDATION.value)
             await self.workflow._set_current_step(story, StoryStepName.IMAGE_PLAN_VALIDATION)
             image_plan = await self.workflow._step_validate_image_plan(story, image_plan, story_json, flags)
-            story.image_plan_validated = True
-        else:
-            story.image_plan_validated = True
         if not flags.skip_image_generation:
             image_plan = await self.workflow._ensure_image_plan_character_references(story, image_plan)
-        story.image_plan_json = image_plan
+            await self.workflow._store_image_plan_checkpoint(story, image_plan)
         await self.stories.update(story)
         await self.session.commit()
         return image_plan
@@ -483,7 +473,7 @@ class StoryServiceBatchService:
                 return None
 
             story.status = StoryStatus.IN_PROGRESS
-            story.current_step = StoryStepName.IMAGE_GENERATION.value
+            self._set_current_step_if_present(story, StoryStepName.IMAGE_GENERATION.value)
             await self.stories.update(story)
             await self.session.commit()
             self._log_event(
@@ -810,7 +800,7 @@ class StoryServiceBatchService:
                 if not missing:
                     break
                 story.status = StoryStatus.AUDIO_RETRY_REQUIRED if attempt > 1 else StoryStatus.IN_PROGRESS
-                story.current_step = StoryStepName.NARRATION_GENERATION.value
+                self._set_current_step_if_present(story, StoryStepName.NARRATION_GENERATION.value)
                 await self.stories.update(story)
                 await self.session.commit()
                 self._log_event(
@@ -1028,10 +1018,11 @@ class StoryServiceBatchService:
         story_json = await self.workflow._load_existing_story_json(story)
         if story_json is None:
             raise AppException("Story JSON is missing during image batch reconciliation", code="STORY_JSON_MISSING")
-        if not isinstance(story.image_plan_json, dict):
+        image_plan = await self.workflow._load_image_plan_checkpoint(story)
+        if not isinstance(image_plan, dict):
             raise AppException("Image plan is missing during image batch reconciliation", code="IMAGE_PLAN_MISSING")
 
-        items = await self._build_image_items(story, story_json, story.image_plan_json)
+        items = await self._build_image_items(story, story_json, image_plan)
         request_keys = set(job.request_keys or [])
         if request_keys:
             items = [item for item in items if item.key in request_keys]
@@ -1065,7 +1056,7 @@ class StoryServiceBatchService:
 
         if failed_keys:
             story.status = StoryStatus.FAILED
-            story.current_step = None
+            self._set_current_step_if_present(story, None)
             story.error_message = job.error_message
             await self.stories.update(story)
         await self.session.commit()
@@ -1114,13 +1105,14 @@ class StoryServiceBatchService:
 
         if failed_keys:
             story.status = StoryStatus.FAILED
-            story.current_step = None
+            self._set_current_step_if_present(story, None)
             story.error_message = job.error_message
         else:
             story.status = StoryStatus.COMPLETED
-            story.current_step = None
+            self._set_current_step_if_present(story, None)
             story.error_message = None
-            self.workflow._apply_story_metadata(story, story.story_plan_json or {}, story_json)
+            story_plan = await self.workflow._load_story_plan_checkpoint(story) or {}
+            self.workflow._apply_story_metadata(story, story_plan, story_json)
             await self.stories.upsert_content(story, language=DEFAULT_STORY_LANGUAGE, story_json=story_json)
         await self.stories.update(story)
         await self.session.commit()
@@ -1252,7 +1244,7 @@ class StoryServiceBatchService:
         await self.story_steps.update(step)
 
         story.status = StoryStatus.IN_PROGRESS
-        story.current_step = StoryStepName.NARRATION_GENERATION.value
+        self._set_current_step_if_present(story, StoryStepName.NARRATION_GENERATION.value)
         story.error_message = None
         await self.stories.update(story)
 
@@ -1330,7 +1322,7 @@ class StoryServiceBatchService:
         if story is None:
             return
         story.status = StoryStatus.FAILED
-        story.current_step = None
+        self._set_current_step_if_present(story, None)
         story.error_message = error_message
         await self.stories.update(story)
 
@@ -1734,7 +1726,7 @@ class StoryServiceBatchService:
         return None
 
     async def _load_reference_image_blobs(self, story: Story) -> list[BatchImageReference]:
-        image_plan = getattr(story, "image_plan_json", None)
+        image_plan = await self.workflow._load_image_plan_checkpoint(story)
         manifest = (
             StoryService._character_reference_manifest(image_plan)
             if isinstance(image_plan, dict)

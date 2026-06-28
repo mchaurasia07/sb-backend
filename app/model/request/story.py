@@ -1,10 +1,11 @@
 from enum import Enum
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
 
 from app.core.age_groups import AGE_GROUP_0_3, AGE_GROUP_3_6, AGE_GROUP_6_9, validate_age_group
+from app.entity.custom_story_workflow import CustomStoryWorkflowType
 
 
 class ReaderCategory(str, Enum):
@@ -65,11 +66,21 @@ def reader_category_for_age_group(value) -> ReaderCategory:
 
 
 class StoryGenerationRequest(BaseModel):
-    """Request to generate an input-driven custom story."""
+    """Request to create a custom or generic story workflow."""
 
-    child_id: UUID = Field(description="Child profile ID for library ownership")
+    story_type: CustomStoryWorkflowType = Field(
+        default=CustomStoryWorkflowType.CUSTOM,
+        description="Workflow/story target type. CUSTOM requires child_id; GENERIC publishes to the generic catalog.",
+    )
+    child_id: UUID | None = Field(default=None, description="Child profile ID. Required only when story_type is CUSTOM.")
     reader_category: ReaderCategory = Field(
         description="Reading band used to derive age_group: Infant Toddler, Early Reader, or Growing Reader",
+    )
+    age_group: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=32,
+        description="Canonical age group. Optional when reader_category is provided.",
     )
     use_child_character: bool = Field(
         False,
@@ -80,6 +91,11 @@ class StoryGenerationRequest(BaseModel):
     category: str | None = Field(None, max_length=100, description="Story category (e.g., 'adventure')")
     learning_goal: str | None = Field(None, max_length=500, description="Educational objective")
     context: str | None = Field(None, max_length=2000, description="Additional context or preferences")
+    title: str | None = Field(default=None, min_length=1, max_length=255, description="Optional title idea for generic workflows.")
+    actual_story: str | None = Field(default=None, min_length=1, max_length=50000, description="Legacy generic workflow story idea alias.")
+    theme: str | None = Field(default=None, max_length=100, description="Legacy generic workflow theme alias.")
+    genre: str | None = Field(default=None, max_length=100, description="Legacy generic workflow genre alias.")
+    status: Literal["active", "inactive"] = Field(default="inactive", description="Publish status used when a generic workflow publishes.")
     languages: list[str] = Field(
         default_factory=lambda: ["en"],
         min_length=1,
@@ -94,7 +110,7 @@ class StoryGenerationRequest(BaseModel):
 
     # Testing flags
     skip_image_generation: bool = Field(False, description="Skip image generation for testing")
-    execute_image: bool = Field(True, description="Generate story images. When omitted, this is derived from skip_image_generation.")
+    execute_image: bool | None = Field(None, description="Generate story images. When omitted, this is derived from skip_image_generation.")
     execute_narration: Annotated[bool, Field(
         True,
         validation_alias=AliasChoices("execute_narration", "execute_narration"),
@@ -111,7 +127,7 @@ class StoryGenerationRequest(BaseModel):
             data["languages"] = [data["language"]]
         return data
 
-    @field_validator("category", "learning_goal", "context", "language", mode="before")
+    @field_validator("category", "learning_goal", "context", "language", "title", "actual_story", "theme", "genre", mode="before")
     @classmethod
     def normalize_text(cls, value):
         if value is None:
@@ -149,6 +165,22 @@ class StoryGenerationRequest(BaseModel):
     def normalize_reader_category_value(cls, value):
         return normalize_reader_category(value)
 
+    @field_validator("age_group", mode="before")
+    @classmethod
+    def validate_age_group_value(cls, value):
+        if value is None:
+            return None
+        return validate_age_group(value)
+
+    @field_validator("story_type", mode="before")
+    @classmethod
+    def normalize_story_type(cls, value):
+        if isinstance(value, CustomStoryWorkflowType):
+            return value
+        if value is None:
+            return CustomStoryWorkflowType.CUSTOM
+        return CustomStoryWorkflowType(str(value).strip().upper())
+
     @model_validator(mode="after")
     def validate_story_inputs(self):
         if self.execute_image is None:
@@ -157,10 +189,21 @@ class StoryGenerationRequest(BaseModel):
             self.skip_image_generation = not self.execute_image
         self.language = self.languages[0]
 
+        if self.story_type == CustomStoryWorkflowType.CUSTOM:
+            if self.child_id is None:
+                raise ValueError("child_id is required when story_type is CUSTOM")
+        else:
+            self.child_id = None
+            self.use_child_character = False
+            if self.category is None:
+                self.category = self.theme or self.genre
+            if self.context is None:
+                self.context = self.actual_story
+
         if not (self.category or self.learning_goal or self.context):
-            raise ValueError("Custom stories require category, learning_goal, or context")
-        if not self.execute_image and not self.execute_narration:
-            raise ValueError("Delayed custom stories require image or narration execution")
+            raise ValueError("Story workflows require category, learning_goal, or context")
+        if self.execute_workflow and not self.execute_image and not self.execute_narration:
+            raise ValueError("Executing a story workflow requires image or narration execution")
         return self
 
 

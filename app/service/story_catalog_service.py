@@ -183,13 +183,14 @@ class StoryCatalogService:
             summary=story.summary,
             age_group=_enum_value(story.age_group),
             theme=story.category,
-            genre=_enum_value(story.generation_mode),
+            genre=None,
             moral=story.moral,
             learning_goal=story.learning_goal,
             reading_time_minutes=None,
             character_type=None,
-            total_pages=len(pages) or len(json_pages) or None,
-            cover_image_url=_story_json_cover_image_url(story_json)
+            total_pages=getattr(story, "total_pages", 0) or len(pages) or len(json_pages) or None,
+            cover_image_url=getattr(story, "cover_image", None)
+            or _story_json_cover_image_url(story_json)
             or next((page.image_url for page in pages if page.page_type == "cover"), None),
             available_languages=available_languages or ["en"],
             video_created=bool(getattr(story, "video_created", False)),

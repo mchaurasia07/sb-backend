@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Query
 from app.core.container import RequestContainer, app_container, get_request_container
 from app.core.database import AsyncSessionLocal
 from app.core.dependencies import get_current_user
+from app.entity.story import StoryType
 from app.entity.user import User
 from app.model.request.story import BatchWebPConversionRequest
 from app.model.response.common import ApiResponse, PaginatedResponse, success_response
@@ -13,6 +14,7 @@ from app.model.response.story import (
     BatchWebPConversionResponse,
     StoryBatchJobCancelResponse,
     StoryBatchJobReconcileResponse,
+    StoryListResponse,
     StoryResponse,
     StoryStatusResponse,
     StoryStepResponse,
@@ -107,7 +109,7 @@ class StoriesRouter:
             "",
             self.list_stories,
             methods=["GET"],
-            response_model=ApiResponse[PaginatedResponse[StoryResponse]],
+            response_model=ApiResponse[PaginatedResponse[StoryListResponse]],
         )
 
     async def reconcile_story_batch_jobs(
@@ -188,17 +190,21 @@ class StoriesRouter:
     async def list_stories(
         self,
         child_id: UUID | None = None,
+        story_type: StoryType | None = Query(default=None, alias="type"),
+        age_group: str | None = Query(default=None),
         page: int = Query(1, ge=1),
         page_size: int = Query(20, ge=1, le=100),
         current_user: User = Depends(get_current_user),
         container: RequestContainer = Depends(get_request_container),
-    ) -> ApiResponse[PaginatedResponse[StoryResponse]]:
+    ) -> ApiResponse[PaginatedResponse[StoryListResponse]]:
         """List stories for current user, optionally filtered by child."""
         data = await container.story.list_stories(
             current_user.id,
             child_id,
             page=page,
             page_size=page_size,
+            age_group=age_group,
+            story_type=story_type,
         )
         return success_response(data, "Stories retrieved successfully")
 

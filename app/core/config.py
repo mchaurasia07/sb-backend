@@ -54,6 +54,17 @@ class Settings(BaseSettings):
     EXPO_PUSH_ACCESS_TOKEN: str = ""
     NOTIFICATION_ADMIN_TOKEN: str = ""
 
+    # Razorpay subscription billing.
+    RAZORPAY_KEY_ID: str = ""
+    RAZORPAY_KEY_SECRET: str = ""
+    RAZORPAY_WEBHOOK_SECRET: str = ""
+    RAZORPAY_MONTHLY_PLAN_ID: str = ""
+    RAZORPAY_YEARLY_PLAN_ID: str = ""
+    SUBSCRIPTION_EXPIRY_SCHEDULER_ENABLED: bool = True
+    SUBSCRIPTION_EXPIRY_INTERVAL_MINUTES: int = 60
+    SUBSCRIPTION_EXPIRY_START_MINUTE: int = 6
+    SUBSCRIPTION_EXPIRY_LIMIT: int = 200
+
     # Storage Configuration - supports both relative and absolute paths
     MEDIA_ROOT: str = Field(description="Absolute or relative path for image storage")
     MEDIA_URL_PREFIX: str

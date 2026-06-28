@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
+from fastapi import UploadFile
 from PIL import Image, UnidentifiedImageError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,11 +24,12 @@ from app.core.age_groups import (
 )
 from app.core.config import settings
 from app.core.exceptions import AppException, NotFoundException
-from app.entity.story import Story, StoryStatus
+from app.entity.story import Story, StoryStatus, StoryType
 from app.entity.story_step import StoryStepName, StepStatus
+from app.model.request.generic_story import GenericStoryPageTextUpdateRequest
 from app.model.request.story import StoryGenerationRequest
 from app.model.response.common import PaginatedResponse
-from app.model.response.story import StoryResponse, StoryPageResponse, StoryStatusResponse, StoryStepResponse
+from app.model.response.story import StoryListResponse, StoryPageResponse, StoryResponse, StoryStatusResponse, StoryStepResponse
 from app.model.response.story_content import StoryContentResponse
 from app.repository.child_repository import ChildRepository
 from app.repository.story_repository import StoryRepository
@@ -39,11 +41,15 @@ from app.service.image_storage_provider import get_image_storage_service
 from app.service.image_webp_converter import ImageWebPConverter
 from app.service.plan_validator import PlanValidator
 from app.service.image_plan_validator import ImagePlanValidator
+from app.service.generic_story_service import GenericStoryService
 from app.service.story_input_safety_service import StoryInputSafetyService
 from app.service.story_completion_email_service import StoryCompletionEmailService
 from app.service.story_narration_service import StoryNarrationService
 from app.service.story_narration_profile import build_page_narration, normalize_page_emotion
+from app.service.story_audio_storage_provider import get_story_audio_storage_service
+from app.service.subscription_service import SubscriptionService
 from app.utils.prompt_loader import load_prompt, render_prompt
+from app.utils.word_timestamps import generate_word_timestamps
 
 logger = logging.getLogger(__name__)
 
@@ -246,7 +252,7 @@ def _safe_prompt_value(value: str | None, default: str = "") -> str:
 def _story_source_inputs(story: Any) -> dict[str, str]:
     """Canonical story-driving inputs used by plan, story, and image prompts."""
     return {
-        "category": getattr(story, "category", None) or getattr(story, "event_description", None) or "adventure",
+        "category": getattr(story, "category", None) or "adventure",
         "learning_goal": getattr(story, "learning_goal", None) or "personal growth",
         "context": getattr(story, "context", None) or "",
     }
@@ -609,30 +615,21 @@ class StoryService:
 
     async def _ensure_story_ai_config(self, story: Story) -> None:
         """Persist provider/model choices once so retries do not drift with env changes."""
-        if story.ai_provider:
-            self._ai_provider = get_ai_provider(story.ai_provider)
-            return
-
-        config = self._current_ai_config()
-        story.ai_provider = config["ai_provider"]
-        story.text_model = config["text_model"]
-        story.image_model = config["image_model"]
-        story.reference_image_model = config["reference_image_model"]
-        await self.stories.update(story)
-        await self.session.commit()
-        self._ai_provider = get_ai_provider(story.ai_provider)
+        provider = getattr(story, "ai_provider", None) or settings.AI_PROVIDER
+        self._ai_provider = get_ai_provider(provider.strip().lower())
 
     @staticmethod
     def _story_image_model_kwargs(story: Story) -> dict[str, str]:
         kwargs: dict[str, str] = {}
-        reference_image_model = story.reference_image_model
+        reference_image_model = getattr(story, "reference_image_model", None) or settings.GOOGLE_REFERENCE_IMAGE_MODEL
         if reference_image_model == "gemini-2.5-flash-image":
             reference_image_model = settings.GOOGLE_REFERENCE_IMAGE_MODEL
         if reference_image_model:
             kwargs["model"] = reference_image_model
             kwargs["reference_image_model"] = reference_image_model
-        if story.image_model:
-            kwargs["image_model"] = story.image_model
+        image_model = getattr(story, "image_model", None)
+        if image_model:
+            kwargs["image_model"] = image_model
         return kwargs
 
     @classmethod
@@ -653,7 +650,8 @@ class StoryService:
 
     async def _set_current_step(self, story: Story, step_name: StoryStepName) -> None:
         story.status = StoryStatus.IN_PROGRESS
-        story.current_step = step_name.value
+        if hasattr(story, "current_step"):
+            story.current_step = step_name.value
         await self.stories.update(story)
         await self.session.commit()
 
@@ -698,6 +696,7 @@ class StoryService:
                 "Child must have a generated character image before story generation",
                 code="NO_CHARACTER_IMAGE",
             )
+        await SubscriptionService(self.session).require_can_create_story(user_id=user_id, child_id=child_id)
 
         # Calculate age_group from child's date of birth
         age_group = self._get_age_group_from_dob(child.dob)
@@ -707,14 +706,9 @@ class StoryService:
         story = await self.stories.create(
             user_id=user_id,
             child_id=child_id,
-            generation_mode="INPUT_DRIVEN",
             age_group=age_group,
             category=payload.category,
             learning_goal=payload.learning_goal,
-            context=payload.context,
-            event_description=None,
-            input_request=payload.model_dump(mode="json"),
-            **self._current_ai_config(),
         )
         await self.session.commit()
 
@@ -727,12 +721,11 @@ class StoryService:
             moral=story.moral,
             summary=story.summary,
             status=story.status.value,
-            current_step=story.current_step,
-            generation_mode=story.generation_mode.value,
             age_group=story.age_group.value,
             category=story.category,
             learning_goal=story.learning_goal,
-            context=story.context,
+            total_pages=story.total_pages,
+            cover_image=story.cover_image,
             pages=[],  # No pages yet, story is PENDING
             video_created=bool(story.video_created),
             video_metadata=story.video_metadata,
@@ -758,14 +751,12 @@ class StoryService:
             )
 
         story.status = StoryStatus.PENDING
-        story.current_step = None
         story.error_message = None
         await self.stories.update(story)
         await self.session.commit()
         return StoryStatusResponse(
             story_id=story.id,
             status=story.status.value,
-            current_step=story.current_step,
             error_message=story.error_message,
             updated_at=story.updated_at,
         )
@@ -786,7 +777,6 @@ class StoryService:
             return StoryStatusResponse(
                 story_id=story.id,
                 status=story.status.value,
-                current_step=story.current_step,
                 error_message=story.error_message,
                 updated_at=story.updated_at,
             )
@@ -802,7 +792,6 @@ class StoryService:
             )
 
         story.status = StoryStatus.FAILED
-        story.current_step = None
         story.error_message = (
             f"Story workflow was recovered after being stuck in progress for {int(age.total_seconds() // 60)} minutes"
         )
@@ -811,7 +800,6 @@ class StoryService:
         return StoryStatusResponse(
             story_id=story.id,
             status=story.status.value,
-            current_step=story.current_step,
             error_message=story.error_message,
             updated_at=story.updated_at,
         )
@@ -847,30 +835,19 @@ class StoryService:
         logger.info(f"[WORKFLOW] Story found, starting execution resume={resume}")
         try:
             # Step 1: Story Plan Generation
-            if (
-                resume
-                and story.story_plan_validated
-                and isinstance(story.story_plan_json, dict)
-                and story.story_plan_json.get("pages")
-            ):
-                story_plan = story.story_plan_json
+            story_plan = await self._load_story_plan_checkpoint(story) if resume else None
+            if story_plan is not None:
                 logger.info("Story %s: Reusing existing validated story plan checkpoint", story_id)
             else:
                 await self._set_current_step(story, StoryStepName.STORY_PLAN_GENERATION)
                 logger.info(f"Story {story_id}: Starting step 1 - Story Plan Generation")
                 story_plan = await self._step_generate_plan(story, flags)
-                story.story_plan_json = story_plan
-                story.story_plan_validated = False
-                await self.stories.update(story)
-                await self.session.commit()
 
             # Step 2: Story Plan Validation (with retries)
             await self._set_current_step(story, StoryStepName.STORY_PLAN_VALIDATION)
             logger.info(f"Story {story_id}: Starting step 2 - Story Plan Validation")
 
             story_plan = await self._step_validate_plan(story, story_plan, flags)
-            story.story_plan_json = story_plan
-            story.story_plan_validated = True
             await self.stories.update(story)
             await self.session.commit()
 
@@ -886,46 +863,33 @@ class StoryService:
                 logger.info(f"Story {story_id}: Starting step 3 - Story Generation")
                 story_json = await self._step_generate_story(story, story_plan, flags)
                 self._apply_story_metadata(story, story_plan, story_json)
-                input_request = story.input_request or {}
-                story_json["use_child_character"] = input_request.get("use_child_character", False)
+                story_json["use_child_character"] = bool(getattr(story, "use_child_character", False))
                 await self.stories.update(story)
                 await self._persist_story_content(story, story_json)
 
             # Step 4: Image Plan Generation
-            if (
-                resume
-                and story.image_plan_validated
-                and isinstance(story.image_plan_json, dict)
-                and story.image_plan_json.get("pages")
-            ):
-                image_plan = story.image_plan_json
+            image_plan = await self._load_image_plan_checkpoint(story) if resume else None
+            if image_plan is not None:
                 logger.info("Story %s: Reusing existing validated image plan checkpoint", story_id)
             else:
                 await self._set_current_step(story, StoryStepName.IMAGE_PLAN_GENERATION)
                 logger.info(f"Story {story_id}: Starting step 4 - Image Plan Generation")
                 image_plan = await self._step_generate_image_plan(story, story_plan, story_json, flags)
-                story.image_plan_json = image_plan
-                story.image_plan_validated = False
-                await self.stories.update(story)
-                await self.session.commit()
 
             # Step 5: Image Plan Validation (optional, can skip)
             if not flags.skip_validation:
                 await self._set_current_step(story, StoryStepName.IMAGE_PLAN_VALIDATION)
                 logger.info(f"Story {story_id}: Starting step 5 - Image Plan Validation")
                 image_plan = await self._step_validate_image_plan(story, image_plan, story_json, flags)
-                story.image_plan_json = image_plan
-                story.image_plan_validated = True
                 await self.stories.update(story)
                 await self.session.commit()
             else:
-                story.image_plan_validated = True
                 await self.stories.update(story)
                 await self.session.commit()
 
             if not flags.skip_image_generation:
                 image_plan = await self._ensure_image_plan_character_references(story, image_plan)
-                story.image_plan_json = image_plan
+                await self._store_image_plan_checkpoint(story, image_plan)
                 await self.stories.update(story)
                 await self.session.commit()
 
@@ -948,12 +912,10 @@ class StoryService:
 
             # Mark story as completed
             story.status = StoryStatus.COMPLETED
-            story.current_step = None
             self._apply_story_metadata(story, story_plan, story_json)
-            story.story_plan_json = story_plan
-            story.image_plan_json = image_plan
             await self.stories.upsert_content(story, language=DEFAULT_STORY_LANGUAGE, story_json=story_json)
             await self.stories.update(story)
+            await SubscriptionService(self.session).increment_story_usage(user_id=story.user_id, child_id=story.child_id)
             await self.session.commit()
             await StoryCompletionEmailService(self.session).send_story_completed(story, story_json)
 
@@ -964,10 +926,64 @@ class StoryService:
             logger.exception(f"Story {story_id}: Workflow failed with error: {str(e)}")
             story.status = StoryStatus.FAILED
             story.error_message = str(e)
-            story.current_step = None
             await self.stories.update(story)
             await self.session.commit()
             raise
+
+    async def _load_story_plan_checkpoint(self, story: Story) -> dict[str, Any] | None:
+        for step_name in (StoryStepName.STORY_PLAN_VALIDATION, StoryStepName.STORY_PLAN_GENERATION):
+            step = await self.story_steps.latest_for_story_step(story.id, step_name)
+            if step is None or step.status != StepStatus.COMPLETED:
+                continue
+            story_plan = self._story_plan_from_step_response(step.response)
+            if story_plan is not None:
+                return story_plan
+        return None
+
+    async def _load_image_plan_checkpoint(self, story: Story) -> dict[str, Any] | None:
+        for step_name in (StoryStepName.IMAGE_PLAN_VALIDATION, StoryStepName.IMAGE_PLAN_GENERATION):
+            step = await self.story_steps.latest_for_story_step(story.id, step_name)
+            if step is None or step.status != StepStatus.COMPLETED:
+                continue
+            image_plan = self._image_plan_from_step_response(step.response)
+            if image_plan is not None:
+                return image_plan
+        return None
+
+    async def _store_image_plan_checkpoint(self, story: Story, image_plan: dict[str, Any]) -> None:
+        step = await self.story_steps.latest_for_story_step(story.id, StoryStepName.IMAGE_PLAN_VALIDATION)
+        if step is None:
+            step = await self.story_steps.latest_for_story_step(story.id, StoryStepName.IMAGE_PLAN_GENERATION)
+        if step is None:
+            return
+        response = step.response if isinstance(step.response, dict) else {}
+        if "valid" in response:
+            step.response = {**response, "image_plan": image_plan}
+        else:
+            step.response = image_plan
+        await self.story_steps.update(step)
+
+    @staticmethod
+    def _story_plan_from_step_response(response: Any) -> dict[str, Any] | None:
+        if not isinstance(response, dict):
+            return None
+        story_plan = response.get("story_plan")
+        if isinstance(story_plan, dict) and isinstance(story_plan.get("pages"), list):
+            return story_plan
+        if isinstance(response.get("pages"), list):
+            return response
+        return None
+
+    @staticmethod
+    def _image_plan_from_step_response(response: Any) -> dict[str, Any] | None:
+        if not isinstance(response, dict):
+            return None
+        image_plan = response.get("image_plan")
+        if isinstance(image_plan, dict) and isinstance(image_plan.get("pages"), list):
+            return image_plan
+        if isinstance(response.get("pages"), list):
+            return response
+        return None
 
     async def _step_generate_narration(self, story: Story, story_json: dict[str, Any]) -> dict[str, Any]:
         """Step 7: Generate narration audio and timing metadata for story JSON."""
@@ -1054,6 +1070,28 @@ class StoryService:
             raise
 
     @staticmethod
+    def _story_total_pages(story_json: dict[str, Any]) -> int:
+        pages = story_json.get("pages") if isinstance(story_json, dict) else None
+        return len(pages) if isinstance(pages, list) else 0
+
+    @staticmethod
+    def _story_cover_image(story_json: dict[str, Any]) -> str | None:
+        if not isinstance(story_json, dict):
+            return None
+        cover = story_json.get("cover") if isinstance(story_json.get("cover"), dict) else {}
+        value = (
+            story_json.get("cover_image_url")
+            or story_json.get("coverImageUrl")
+            or story_json.get("cover_image")
+            or story_json.get("coverImage")
+            or story_json.get("image_url")
+            or story_json.get("imageUrl")
+            or cover.get("image_url")
+            or cover.get("imageUrl")
+        )
+        return str(value) if value else None
+
+    @staticmethod
     def _apply_story_metadata(story: Story, story_plan: dict[str, Any], story_json: dict[str, Any]) -> None:
         """Copy generated metadata into searchable top-level story columns."""
         source_inputs = story_json.get("source_inputs") or story_plan.get("source_inputs") or {}
@@ -1087,7 +1125,6 @@ class StoryService:
                 source_inputs.get("category") if isinstance(source_inputs, dict) else None,
                 story_plan.get("theme"),
                 story_plan.get("category"),
-                getattr(story, "event_description", None),
             ),
             100,
         )
@@ -1098,6 +1135,8 @@ class StoryService:
             ),
             500,
         )
+        story.total_pages = StoryService._story_total_pages(story_json)
+        story.cover_image = StoryService._story_cover_image(story_json) or getattr(story, "cover_image", None)
 
     async def _step_generate_plan(self, story: Story, flags: StoryGenerationFlags) -> dict[str, Any]:
         """Step 1: Generate story plan using LLM."""
@@ -1106,7 +1145,14 @@ class StoryService:
             raise NotFoundException("Child profile not found during plan generation")
 
         # Load the cast-mode-specific planner prompt so the LLM receives no contradictory hero rules.
-        template = load_prompt(self._story_plan_prompt_path(story))
+        prompt_template = self._story_plan_prompt_path(story)
+        self._log_prompt_selected(
+            story,
+            StoryStepName.STORY_PLAN_GENERATION.value,
+            prompt_template=prompt_template,
+            cast_mode=self._cast_mode(story),
+        )
+        template = load_prompt(prompt_template)
 
         # Prepare variables
         pages = self._get_page_count_for_age_group(story.age_group)
@@ -1252,6 +1298,7 @@ class StoryService:
                 step.completed_at = datetime.utcnow()
                 step.response = {
                     "valid": True,
+                    "story_plan": plan,
                     "_workflow_usage": {
                         "validator": "local",
                         "retry_text_generations": retry_usages,
@@ -1380,7 +1427,14 @@ class StoryService:
         step.status = StepStatus.IN_PROGRESS
         step.started_at = datetime.utcnow()
 
-        template = load_prompt(self._story_generation_prompt_path(story))
+        prompt_template = self._story_generation_prompt_path(story)
+        self._log_prompt_selected(
+            story,
+            StoryStepName.STORY_GENERATION.value,
+            prompt_template=prompt_template,
+            cast_mode=self._cast_mode(story),
+        )
+        template = load_prompt(prompt_template)
         prompt_plan = self._build_story_generation_context(plan, languages=_normalize_story_languages(story))
 
         # Convert to compact JSON - this ensures proper escaping of special characters
@@ -1935,12 +1989,22 @@ Malformed JSON:
         step.status = StepStatus.IN_PROGRESS
         step.started_at = datetime.utcnow()
 
-        template = load_prompt("prompts/story/image_plan_prompt.txt")
+        prompt_template = "prompts/story/image_plan_prompt.txt"
+        template = load_prompt(prompt_template)
 
         child = await self.children.get_for_user(story.user_id, story.child_id)
         if child is None:
             raise NotFoundException("Child profile not found during image plan generation")
         character_context = self._build_story_cast_context(story, child, story_plan=story_plan)
+        self._log_prompt_selected(
+            story,
+            StoryStepName.IMAGE_PLAN_GENERATION.value,
+            prompt_template=prompt_template,
+            cast_mode=character_context.get("cast_mode"),
+            prompt_source="custom_safe_image_plan_prompt"
+            if self._is_custom_story_workflow_record(story)
+            else "template",
+        )
         compact_story_plan, compact_story_json = self._build_image_plan_context(story_plan, story_json)
         is_custom_story_workflow = self._is_custom_story_workflow_record(story)
 
@@ -2079,6 +2143,7 @@ Malformed JSON:
             step.completed_at = datetime.utcnow()
             step.response = {
                 "valid": True,
+                "image_plan": image_plan,
                 "_workflow_usage": {
                     "validator": "local",
                     "token_usage": None,
@@ -2809,7 +2874,7 @@ Malformed JSON:
         if not manifest:
             return []
 
-        model = story.reference_image_model or settings.GOOGLE_REFERENCE_IMAGE_MODEL
+        model = getattr(story, "reference_image_model", None) or settings.GOOGLE_REFERENCE_IMAGE_MODEL
         max_refs = self._max_character_references_for_model(model)
         explicit_ids = {
             str(value).strip()
@@ -2875,7 +2940,14 @@ Malformed JSON:
             back_cover = image_plan.get("back_cover", {})
             image_pages = image_plan.get("pages", [])
             visual_bible = image_plan.get("visual_bible", {})
-            image_generation_template = load_prompt("prompts/story/image_generation_prompt.txt")
+            image_generation_prompt_template = "prompts/story/image_generation_prompt.txt"
+            self._log_prompt_selected(
+                story,
+                StoryStepName.IMAGE_GENERATION.value,
+                prompt_template=image_generation_prompt_template,
+                cast_mode=self._cast_mode(story),
+            )
+            image_generation_template = load_prompt(image_generation_prompt_template)
             child = await self.children.get_for_user(story.user_id, story.child_id)
             if child is None:
                 raise NotFoundException("Child profile not found during image generation")
@@ -3158,9 +3230,10 @@ Malformed JSON:
                 "child_age_label": character_context["child_age_label"],
                 "rendered_image_prompts": generated_image_prompts,
                 "_workflow_usage": {
-                    "provider": story.ai_provider or settings.AI_PROVIDER,
-                    "image_model": story.image_model,
-                    "reference_image_model": story.reference_image_model,
+                    "provider": getattr(story, "ai_provider", None) or settings.AI_PROVIDER,
+                    "image_model": getattr(story, "image_model", None) or settings.GOOGLE_IMAGE_MODEL,
+                    "reference_image_model": getattr(story, "reference_image_model", None)
+                    or settings.GOOGLE_REFERENCE_IMAGE_MODEL,
                     "image_items": len(generated_image_prompts),
                     "generated_image_count": len(
                         [item for item in generated_image_prompts if not item.get("skipped_existing")]
@@ -3973,11 +4046,18 @@ Malformed JSON:
 
     @classmethod
     def _cast_mode(cls, story: Any) -> str:
+        story_type = getattr(story, "story_type", None)
+        story_type_value = story_type.value if hasattr(story_type, "value") else story_type
+        if isinstance(story_type_value, str) and story_type_value.upper() == "GENERIC":
+            return cls.CAST_MODE_IMAGINED
         if hasattr(story, "use_child_character"):
             return cls.CAST_MODE_CHILD_HERO if bool(getattr(story, "use_child_character")) else cls.CAST_MODE_IMAGINED
         request = getattr(story, "input_request", None)
         if not isinstance(request, dict):
             return cls.CAST_MODE_CHILD_HERO
+        request_story_type = request.get("story_type")
+        if isinstance(request_story_type, str) and request_story_type.upper() == "GENERIC":
+            return cls.CAST_MODE_IMAGINED
         cast_mode = request.get("cast_mode")
         if isinstance(cast_mode, str) and cast_mode.strip():
             normalized = cast_mode.strip().upper()
@@ -3986,6 +4066,30 @@ Malformed JSON:
         if "use_child_character" in request:
             return cls.CAST_MODE_CHILD_HERO if bool(request.get("use_child_character")) else cls.CAST_MODE_IMAGINED
         return cls.CAST_MODE_CHILD_HERO
+
+    @classmethod
+    def _log_prompt_selected(
+        cls,
+        story: Any,
+        step_name: str,
+        *,
+        prompt_template: str,
+        cast_mode: str | None = None,
+        prompt_source: str = "template",
+    ) -> None:
+        story_type = getattr(story, "story_type", None)
+        story_type_value = story_type.value if hasattr(story_type, "value") else story_type
+        logger.info(
+            "[STORY_PROMPT] workflow_id=%s story_type=%s step=%s prompt_source=%s "
+            "prompt_template=%s cast_mode=%s use_child_character=%s",
+            getattr(story, "id", None),
+            story_type_value or "CUSTOM",
+            step_name,
+            prompt_source,
+            prompt_template,
+            cast_mode or cls._cast_mode(story),
+            cls._use_child_character(story),
+        )
 
     @classmethod
     def _use_child_character(cls, story: Any) -> bool:
@@ -4377,12 +4481,11 @@ Malformed JSON:
             moral=story.moral,
             summary=story.summary,
             status=story.status.value,
-            current_step=story.current_step,
-            generation_mode=story.generation_mode.value,
             age_group=story.age_group.value,
             category=story.category,
             learning_goal=story.learning_goal,
-            context=story.context,
+            total_pages=story.total_pages,
+            cover_image=story.cover_image,
             pages=pages,
             video_created=bool(story.video_created),
             video_metadata=story.video_metadata,
@@ -4400,7 +4503,6 @@ Malformed JSON:
         return StoryStatusResponse(
             story_id=row.id,
             status=status,
-            current_step=row.current_step,
             error_message=row.error_message,
             updated_at=row.updated_at,
         )
@@ -4411,9 +4513,9 @@ Malformed JSON:
         story_id: UUID,
         language: str = DEFAULT_STORY_LANGUAGE,
     ) -> StoryContentResponse:
-        """Retrieve a custom story's language-specific story JSON."""
+        """Retrieve a custom or migrated generic story's language-specific story JSON."""
         normalized_language = language.strip().lower()
-        story = await self.stories.get_for_user(user_id, story_id)
+        story = await self.stories.get_for_user_or_generic(user_id, story_id)
         if story is None:
             raise NotFoundException("Story not found", "STORY_NOT_FOUND")
 
@@ -4425,9 +4527,189 @@ Malformed JSON:
         if content is None:
             raise NotFoundException("Story content not found", "STORY_CONTENT_NOT_FOUND")
 
+        story_type = story.story_type.value if hasattr(story.story_type, "value") else str(story.story_type)
         return StoryContentResponse(
             story_id=story.id,
-            story_type="custom",
+            story_type="generic" if story_type == StoryType.GENERIC.value else "custom",
+            language=str(content.language),
+            story_json=content.story_json,
+        )
+
+    async def update_story_page_text(
+        self,
+        user_id: UUID,
+        story_id: UUID,
+        payload: GenericStoryPageTextUpdateRequest,
+        language: str = DEFAULT_STORY_LANGUAGE,
+    ) -> StoryContentResponse:
+        normalized_language = language.strip().lower()
+        story = await self.stories.get_for_user_or_generic_for_update(user_id, story_id)
+        if story is None:
+            raise NotFoundException("Story not found", "STORY_NOT_FOUND")
+        content = await self.stories.get_content_by_story_and_language(
+            story_id=story.id,
+            language=normalized_language,
+        )
+        if content is None:
+            raise NotFoundException("Story content not found", "STORY_CONTENT_NOT_FOUND")
+
+        story_json = copy.deepcopy(content.story_json)
+        pages = self._story_content_pages(story_json)
+        pages_by_number = self._story_pages_by_number(pages)
+        for item in payload.pages:
+            GenericStoryService._require_story_page(pages_by_number, item.page_number, normalized_language)
+            pages_by_number[item.page_number]["text"] = item.text
+
+        content.story_json = story_json
+        await self.stories.update_content(content)
+        await self._touch_story(story)
+        return self._story_content_response(story, content)
+
+    async def update_story_page_images(
+        self,
+        user_id: UUID,
+        story_id: UUID,
+        page_image_uploads: dict[str, UploadFile],
+        language: str = DEFAULT_STORY_LANGUAGE,
+        *,
+        public_base_url: str = "",
+    ) -> StoryContentResponse:
+        normalized_language = language.strip().lower()
+        page_uploads = GenericStoryService._extract_page_image_uploads(page_image_uploads)
+        if not page_uploads:
+            raise AppException(
+                "At least one page image upload is required",
+                code="STORY_PAGE_IMAGE_UPLOAD_REQUIRED",
+            )
+
+        story = await self.stories.get_for_user_or_generic_for_update(user_id, story_id)
+        if story is None:
+            raise NotFoundException("Story not found", "STORY_NOT_FOUND")
+        content = await self.stories.get_content_by_story_and_language(
+            story_id=story.id,
+            language=normalized_language,
+        )
+        if content is None:
+            raise NotFoundException("Story content not found", "STORY_CONTENT_NOT_FOUND")
+
+        story_json = copy.deepcopy(content.story_json)
+        pages_by_number = self._story_pages_by_number(self._story_content_pages(story_json))
+        for page_number in page_uploads:
+            GenericStoryService._require_story_page(pages_by_number, page_number, normalized_language)
+
+        image_storage = get_image_storage_service()
+        page_image_urls: dict[int, str] = {}
+        for page_number, upload in page_uploads.items():
+            page_image_urls[page_number] = await GenericStoryService._save_uploaded_page_image(
+                image_storage,
+                story_id=story.id,
+                page_number=page_number,
+                upload=upload,
+                public_base_url=public_base_url,
+            )
+
+        selected_content = content
+        for story_content in await self.stories.list_contents_by_story(story.id):
+            content_story_json = copy.deepcopy(story_content.story_json)
+            if not isinstance(content_story_json, dict):
+                if str(story_content.language).lower() == normalized_language:
+                    raise AppException("Story content has no pages array", code="STORY_CONTENT_PAGES_MISSING")
+                continue
+            GenericStoryService._apply_page_image_urls(content_story_json, page_image_urls)
+            story_content.story_json = content_story_json
+            await self.stories.update_content(story_content)
+            if str(story_content.language).lower() == normalized_language:
+                selected_content = story_content
+
+        await self._touch_story(story)
+        return self._story_content_response(story, selected_content)
+
+    async def update_story_page_audio(
+        self,
+        user_id: UUID,
+        story_id: UUID,
+        page_audio_uploads: dict[str, UploadFile],
+        language: str = DEFAULT_STORY_LANGUAGE,
+    ) -> StoryContentResponse:
+        normalized_language = language.strip().lower()
+        page_uploads = GenericStoryService._extract_page_audio_uploads(page_audio_uploads)
+        if not page_uploads:
+            raise AppException(
+                "At least one page audio upload is required",
+                code="STORY_PAGE_AUDIO_UPLOAD_REQUIRED",
+            )
+
+        story = await self.stories.get_for_user_or_generic_for_update(user_id, story_id)
+        if story is None:
+            raise NotFoundException("Story not found", "STORY_NOT_FOUND")
+        content = await self.stories.get_content_by_story_and_language(
+            story_id=story.id,
+            language=normalized_language,
+        )
+        if content is None:
+            raise NotFoundException("Story content not found", "STORY_CONTENT_NOT_FOUND")
+
+        story_json = copy.deepcopy(content.story_json)
+        pages_by_number = self._story_pages_by_number(self._story_content_pages(story_json))
+        for page_number in page_uploads:
+            GenericStoryService._require_story_page(pages_by_number, page_number, normalized_language)
+
+        audio_storage = get_story_audio_storage_service()
+        page_audio_urls: dict[int, str] = {}
+        page_audio_metadata: dict[int, dict[str, Any]] = {}
+        for page_number, upload in page_uploads.items():
+            audio_bytes = await GenericStoryService._read_uploaded_page_audio(upload)
+            extension, content_type = GenericStoryService._upload_audio_storage_metadata(upload)
+            page_text = str(pages_by_number[page_number].get("text") or "")
+            duration = GenericStoryService._uploaded_audio_duration_seconds(audio_bytes)
+            page_audio_metadata[page_number] = {
+                "duration": round(duration, 2),
+                "word_timestamps": generate_word_timestamps(page_text, duration),
+            }
+            page_audio_urls[page_number] = await audio_storage.save_story_page_audio(
+                story_id=story.id,
+                language=normalized_language,
+                page_number=page_number,
+                audio_bytes=audio_bytes,
+                extension=extension,
+                content_type=content_type,
+            )
+
+        GenericStoryService._apply_page_audio_urls(
+            story_json,
+            page_audio_urls=page_audio_urls,
+            page_audio_metadata=page_audio_metadata,
+        )
+        content.story_json = story_json
+        await self.stories.update_content(content)
+        await self._touch_story(story)
+        return self._story_content_response(story, content)
+
+    @staticmethod
+    def _story_content_pages(story_json: dict[str, Any]) -> list[dict]:
+        pages = story_json.get("pages") if isinstance(story_json, dict) else None
+        if not isinstance(pages, list):
+            raise AppException("Story content has no pages array", code="STORY_CONTENT_PAGES_MISSING")
+        return pages
+
+    @staticmethod
+    def _story_pages_by_number(pages: list[dict]) -> dict[int, dict]:
+        return {
+            page_number: page
+            for page in pages
+            if isinstance(page, dict) and (page_number := GenericStoryService._story_page_number(page)) is not None
+        }
+
+    async def _touch_story(self, story: Story) -> None:
+        story.updated_at = datetime.now(UTC)
+        await self.stories.update(story)
+
+    @staticmethod
+    def _story_content_response(story: Story, content) -> StoryContentResponse:
+        story_type = story.story_type.value if hasattr(story.story_type, "value") else str(story.story_type)
+        return StoryContentResponse(
+            story_id=story.id,
+            story_type="generic" if story_type == StoryType.GENERIC.value else "custom",
             language=str(content.language),
             story_json=content.story_json,
         )
@@ -4439,48 +4721,44 @@ Malformed JSON:
         *,
         page: int = 1,
         page_size: int = 20,
-    ) -> PaginatedResponse[StoryResponse]:
+        age_group: str | None = None,
+        story_type: StoryType | str | None = None,
+    ) -> PaginatedResponse[StoryListResponse]:
         """List user's stories, optionally filtered by child."""
         stories, total = await self.stories.list_by_user_paginated(
             user_id,
             child_id,
             page=page,
             page_size=page_size,
+            age_group=age_group,
+            story_type=story_type,
+            include_details=False,
+        )
+        available_languages_by_story_id = await self.stories.get_available_languages_by_story_ids(
+            [story.id for story in stories]
         )
         results = []
         for story in stories:
-            pages = [
-                StoryPageResponse(
-                    id=page.id,
-                    page_number=page.page_number,
-                    page_type=page.page_type,
-                    text=page.text,
-                    image_prompt=page.image_prompt,
-                    image_url=page.image_url,
-                )
-                for page in story.pages
-            ]
             results.append(
-                StoryResponse(
+                StoryListResponse(
                     id=story.id,
                     title=story.title,
                     moral=story.moral,
                     summary=story.summary,
                     status=story.status.value,
-                    current_step=story.current_step,
-                    generation_mode=story.generation_mode.value,
                     age_group=story.age_group.value,
                     category=story.category,
                     learning_goal=story.learning_goal,
-                    context=story.context,
-                    pages=pages,
+                    total_pages=story.total_pages,
+                    cover_image=story.cover_image,
+                    available_languages=available_languages_by_story_id.get(story.id, []),
                     video_created=bool(story.video_created),
                     video_metadata=story.video_metadata,
                     created_at=story.created_at,
                     updated_at=story.updated_at,
                 )
             )
-        return PaginatedResponse[StoryResponse].create(
+        return PaginatedResponse[StoryListResponse].create(
             items=results,
             total=total,
             page=page,

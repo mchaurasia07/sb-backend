@@ -1,7 +1,7 @@
 from enum import Enum
 from uuid import UUID
 
-from sqlalchemy import Boolean, Enum as SAEnum, ForeignKey, Index, JSON, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Enum as SAEnum, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.age_groups import AgeGroup
@@ -21,11 +21,11 @@ class StoryStatus(str, Enum):
     FAILED = "FAILED"
 
 
-class StoryGenerationMode(str, Enum):
-    """Story generation mode."""
+class StoryType(str, Enum):
+    """Story ownership/source type."""
 
-    INPUT_DRIVEN = "INPUT_DRIVEN"
-    EVENT_DRIVEN = "EVENT_DRIVEN"
+    CUSTOM = "CUSTOM"
+    GENERIC = "GENERIC"
 
 
 class Story(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -35,27 +35,33 @@ class Story(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (
         Index("ix_stories_user_id", "user_id"),
         Index("ix_stories_child_id", "child_id"),
+        Index("ix_stories_story_type", "story_type"),
         Index("ix_stories_status", "status"),
         Index("ix_stories_created_at", "created_at"),
     )
 
     # Ownership
-    user_id: Mapped[UUID] = mapped_column(
-        HyphenatedUUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    user_id: Mapped[UUID | None] = mapped_column(
+        HyphenatedUUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=True
     )
-    child_id: Mapped[UUID] = mapped_column(
-        HyphenatedUUID(), ForeignKey("child_profiles.id", ondelete="CASCADE"), nullable=False
+    child_id: Mapped[UUID | None] = mapped_column(
+        HyphenatedUUID(), ForeignKey("child_profiles.id", ondelete="CASCADE"), nullable=True
+    )
+    story_type: Mapped[StoryType] = mapped_column(
+        SAEnum(StoryType, native_enum=False),
+        nullable=False,
+        default=StoryType.CUSTOM,
+        server_default=StoryType.CUSTOM.value,
     )
 
     # Story metadata
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     moral: Mapped[str | None] = mapped_column(String(255), nullable=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    total_pages: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    cover_image: Mapped[str | None] = mapped_column(String(1024), nullable=True)
 
     # Generation parameters
-    generation_mode: Mapped[StoryGenerationMode] = mapped_column(
-        SAEnum(StoryGenerationMode, native_enum=False), nullable=False
-    )
     age_group: Mapped[AgeGroup] = mapped_column(
         SAEnum(AgeGroup, values_callable=lambda values: [item.value for item in values], native_enum=False),
         nullable=False,
@@ -64,32 +70,15 @@ class Story(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # Input-driven parameters (nullable for event-driven)
     category: Mapped[str | None] = mapped_column(String(100), nullable=True)
     learning_goal: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    context: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-    # Event-driven parameters (nullable for input-driven)
-    event_description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Workflow tracking
     status: Mapped[StoryStatus] = mapped_column(
         SAEnum(StoryStatus, native_enum=False), nullable=False, default=StoryStatus.PENDING
     )
-    current_step: Mapped[str | None] = mapped_column(String(50), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # JSON storage for workflow planning data
-    story_plan_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    story_plan_validated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
-    image_plan_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    image_plan_validated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
-    input_request: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     video_created: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
     video_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-
-    # AI configuration locked at story creation so retries use the same provider/models.
-    ai_provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    text_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    image_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    reference_image_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     # Relationships
     user = relationship("User", foreign_keys=[user_id])

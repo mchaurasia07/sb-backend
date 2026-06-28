@@ -148,24 +148,6 @@ class GenericStoriesRouter:
             response_model_exclude_none=True,
         )
         self.router.add_api_route(
-            "/{generic_story_id}/content/page-text",
-            self.update_generic_story_page_text,
-            methods=["PATCH"],
-            response_model=ApiResponse[GenericStoryResponse],
-        )
-        self.router.add_api_route(
-            "/{generic_story_id}/content/page-images",
-            self.update_generic_story_page_images,
-            methods=["PATCH"],
-            response_model=ApiResponse[GenericStoryResponse],
-        )
-        self.router.add_api_route(
-            "/{generic_story_id}/content/page-audio",
-            self.update_generic_story_page_audio,
-            methods=["PATCH"],
-            response_model=ApiResponse[GenericStoryResponse],
-        )
-        self.router.add_api_route(
             "/{generic_story_id}",
             self.get_generic_story,
             methods=["GET"],

@@ -25,6 +25,11 @@ from app.entity import (
     StoryContent,
     StoryPage,
     StoryStep,
+    SubscriptionEvent,
+    SubscriptionPlan,
+    ChildSubscription,
+    PurchaseOrder,
+    Payment,
     User,
 )
 

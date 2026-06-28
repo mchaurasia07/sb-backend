@@ -91,7 +91,7 @@ class ChildLibraryService:
     @staticmethod
     def _custom_book_to_response(child_book, story) -> ChildLibraryBookResponse:
         pages = list(getattr(story, "pages", []) or [])
-        cover_image = child_book.cover_image or next(
+        cover_image = child_book.cover_image or getattr(story, "cover_image", None) or next(
             (page.image_url for page in pages if page.page_type == "cover"),
             None,
         )
@@ -115,12 +115,12 @@ class ChildLibraryService:
             summary=story.summary,
             age_group=_enum_value(story.age_group),
             theme=story.category,
-            genre=_enum_value(story.generation_mode),
+            genre=None,
             moral=story.moral,
             learning_goal=story.learning_goal,
             reading_time_minutes=None,
             character_type=None,
-            total_pages=len(pages) or len(json_pages) or None,
+            total_pages=getattr(story, "total_pages", 0) or len(pages) or len(json_pages) or None,
             cover_image=cover_image,
             story_status=_enum_value(story.status) or "",
             book_status=child_book.status,

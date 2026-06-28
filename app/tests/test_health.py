@@ -39,5 +39,6 @@ def test_swagger_alias_and_openapi_tags() -> None:
         "Workflows",
         "Notifications",
         "Help & Support",
+        "Subscriptions",
         "Health",
     ]

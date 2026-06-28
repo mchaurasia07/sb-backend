@@ -40,6 +40,8 @@ class WorkflowService(CustomStoryWorkflowService):
         self.batch_jobs = self.batch_job_repo
 
     async def create(self, user_id: UUID, payload: StoryGenerationRequest) -> CustomStoryWorkflowResponse:
+        if payload.story_type == CustomStoryWorkflowType.GENERIC:
+            return await super().create_generic(user_id, payload)
         return await super().create(user_id, payload)
 
     async def list_workflows(

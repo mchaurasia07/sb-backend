@@ -70,6 +70,7 @@ from app.service.story_service import (
 )
 from app.service.story_completion_email_service import StoryCompletionEmailService
 from app.service.story_service_batch_service import StoryServiceBatchService
+from app.service.subscription_service import SubscriptionService
 from app.utils.prompt_loader import load_prompt
 
 logger = logging.getLogger(__name__)
@@ -218,10 +219,12 @@ class CustomStoryWorkflowService:
                 "Child must have a generated character image when used as the story hero",
                 code="NO_CHARACTER_IMAGE",
             )
+        await SubscriptionService(self.session).require_can_create_story(user_id=user_id, child_id=payload.child_id)
 
         story_service = StoryService(self.session)
         safety_service = StoryInputSafetyService()
-        age_group = age_group_for_reader_category(payload.reader_category)
+        age_group = payload.age_group or age_group_for_reader_category(payload.reader_category)
+        payload.age_group = age_group
         execute_workflow = self._effective_execute_workflow(payload)
         inspection = await safety_service.inspect(payload)
         audit = await self.input_safety_audits.create(
@@ -299,8 +302,159 @@ class CustomStoryWorkflowService:
                 workflow_id=workflow.id,
                 step_name=CustomStoryWorkflowStep.STORY_PLAN_GENERATION,
             )
+            logger.info(
+                "[CUSTOM_WORKFLOW_CREATE] workflow_id=%s story_type=%s action=event_queued "
+                "execute_workflow=%s first_step=%s",
+                workflow.id,
+                CustomStoryWorkflowType.CUSTOM.value,
+                execute_workflow,
+                CustomStoryWorkflowStep.STORY_PLAN_GENERATION.value,
+            )
+        else:
+            logger.info(
+                "[CUSTOM_WORKFLOW_CREATE] workflow_id=%s story_type=%s action=saved_without_event "
+                "execute_workflow=%s reason=execute_workflow_false",
+                workflow.id,
+                CustomStoryWorkflowType.CUSTOM.value,
+                execute_workflow,
+            )
         await self.session.commit()
         return self._response(workflow)
+
+    async def create_generic(
+        self,
+        user_id: UUID,
+        payload: StoryGenerationRequest,
+    ) -> CustomStoryWorkflowResponse:
+        """Create an AI workflow that publishes into the generic story catalog."""
+        story_service = StoryService(self.session)
+        safety_service = StoryInputSafetyService()
+        context = self._generic_context(payload)
+        category = payload.category or payload.theme or payload.genre or "adventure"
+        age_group = payload.age_group or age_group_for_reader_category(payload.reader_category)
+        payload.age_group = age_group
+        safety_payload = SimpleNamespace(
+            title=payload.title,
+            category=category,
+            learning_goal=payload.learning_goal,
+            context=context,
+            age_group=age_group,
+            language=payload.language,
+            story_type=CustomStoryWorkflowType.GENERIC.value,
+        )
+        inspection = await safety_service.inspect(safety_payload)
+        audit = await self.input_safety_audits.create(
+            user_id=user_id,
+            child_id=None,
+            provider=inspection.provider,
+            model=inspection.model,
+            request_json=inspection.request_json,
+            request_idea_json={
+                "category": category,
+                "learning_goal": payload.learning_goal or "",
+                "context": context,
+            },
+            prompt=inspection.prompt,
+            status=CustomStoryInputSafetyAuditStatus.IN_PROGRESS,
+            response_text=inspection.response_text,
+            response_json=inspection.response_json,
+            safe=inspection.result.safe if inspection.result is not None else None,
+            risk_level=inspection.result.risk_level if inspection.result is not None else None,
+            blocked_categories=inspection.result.blocked_categories if inspection.result is not None else None,
+            reason=inspection.result.reason if inspection.result is not None else None,
+            safe_rewrite=inspection.result.safe_rewrite if inspection.result is not None else None,
+            error_code=inspection.error_code,
+            error_message=inspection.error_message,
+        )
+        if inspection.error_message:
+            audit.status = CustomStoryInputSafetyAuditStatus.ERROR
+            await self.input_safety_audits.update(audit)
+            await self.session.commit()
+            raise AppException(
+                inspection.error_message,
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                inspection.error_code or "STORY_INPUT_SAFETY_UNAVAILABLE",
+            )
+        if inspection.result is None:
+            audit.status = CustomStoryInputSafetyAuditStatus.ERROR
+            audit.error_code = "STORY_INPUT_SAFETY_UNAVAILABLE"
+            audit.error_message = "Story safety validation returned an unexpected response. Please try again."
+            await self.input_safety_audits.update(audit)
+            await self.session.commit()
+            raise AppException(
+                "Story safety validation returned an unexpected response. Please try again.",
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "STORY_INPUT_SAFETY_UNAVAILABLE",
+            )
+
+        audit.status = (
+            CustomStoryInputSafetyAuditStatus.SAFE
+            if inspection.result.safe
+            else CustomStoryInputSafetyAuditStatus.UNSAFE
+        )
+        await self.input_safety_audits.update(audit)
+        await self.session.commit()
+        if not inspection.result.safe:
+            self._raise_input_safety_failure(inspection.result, audit)
+
+        workflow = await self.workflows.create(
+            user_id=user_id,
+            child_id=None,
+            story_type=CustomStoryWorkflowType.GENERIC,
+            age_group=age_group,
+            category=category,
+            learning_goal=payload.learning_goal,
+            context=context,
+            languages=payload.languages,
+            publish_status=payload.status,
+            reader_category=reader_category_for_age_group(age_group).value,
+            use_child_character=False,
+            execute_image=bool(payload.execute_image),
+            execute_narration=payload.execute_narration,
+            skip_validation=payload.skip_validation,
+            execute_workflow=payload.execute_workflow,
+            status=CustomStoryWorkflowStatus.PENDING,
+            title=payload.title,
+            **story_service._current_ai_config(),
+        )
+        audit.workflow_id = workflow.id
+        await self.input_safety_audits.update(audit)
+        if payload.execute_workflow:
+            await self.events.create_if_absent(
+                workflow_id=workflow.id,
+                step_name=CustomStoryWorkflowStep.STORY_PLAN_GENERATION,
+            )
+            logger.info(
+                "[CUSTOM_WORKFLOW_CREATE] workflow_id=%s story_type=%s action=event_queued "
+                "execute_workflow=%s first_step=%s",
+                workflow.id,
+                CustomStoryWorkflowType.GENERIC.value,
+                payload.execute_workflow,
+                CustomStoryWorkflowStep.STORY_PLAN_GENERATION.value,
+            )
+        else:
+            logger.info(
+                "[CUSTOM_WORKFLOW_CREATE] workflow_id=%s story_type=%s action=saved_without_event "
+                "execute_workflow=%s reason=execute_workflow_false",
+                workflow.id,
+                CustomStoryWorkflowType.GENERIC.value,
+                payload.execute_workflow,
+            )
+        await self.session.commit()
+        return self._response(workflow)
+
+    @staticmethod
+    def _generic_context(payload: StoryGenerationRequest) -> str:
+        parts: list[str] = []
+        if payload.title:
+            parts.append(f"Requested title idea: {payload.title}")
+        if payload.context:
+            parts.append(f"Story idea/context: {payload.context}")
+        if payload.actual_story and payload.actual_story != payload.context:
+            parts.append(f"Story idea/context: {payload.actual_story}")
+        if payload.genre:
+            parts.append(f"Genre: {payload.genre}")
+        return " ".join(parts)
 
     @staticmethod
     def _effective_execute_workflow(payload: StoryGenerationRequest) -> bool:
@@ -318,6 +472,8 @@ class CustomStoryWorkflowService:
 
     @staticmethod
     def _use_child_character_enabled(workflow: CustomStoryWorkflowEntity) -> bool:
+        if CustomStoryWorkflowService._is_generic_workflow(workflow):
+            return False
         return bool(getattr(workflow, "use_child_character", False))
 
     @staticmethod
@@ -854,7 +1010,14 @@ class CustomStoryWorkflowService:
             child = await self._prompt_child_context(workflow)
             if child is None and self._use_child_character_enabled(workflow):
                 raise NotFoundException("Child profile not found during plan generation")
-            template = load_prompt(runner._story_plan_prompt_path(workflow))
+            prompt_template = runner._story_plan_prompt_path(workflow)
+            self._log_prompt_selected(
+                workflow,
+                step,
+                prompt_template=prompt_template,
+                cast_mode=runner._cast_mode(workflow),
+            )
+            template = load_prompt(prompt_template)
             source_inputs = _story_source_inputs(workflow)
             character_context = runner._build_story_cast_context(workflow, child)
             prompt = runner._render_story_plan_prompt(
@@ -870,7 +1033,14 @@ class CustomStoryWorkflowService:
             return prompt, runner.PLAN_MAX_TOKENS, 0.4
 
         if step == CustomStoryWorkflowStep.STORY_GENERATION:
-            template = load_prompt(runner._story_generation_prompt_path(workflow))
+            prompt_template = runner._story_generation_prompt_path(workflow)
+            self._log_prompt_selected(
+                workflow,
+                step,
+                prompt_template=prompt_template,
+                cast_mode=runner._cast_mode(workflow),
+            )
+            template = load_prompt(prompt_template)
             prompt_plan = runner._build_story_generation_context(
                 workflow.story_plan_json or {},
                 languages=self._workflow_languages(workflow),
@@ -883,6 +1053,13 @@ class CustomStoryWorkflowService:
             if child is None and self._use_child_character_enabled(workflow):
                 raise NotFoundException("Child profile not found during image plan generation")
             character_context = runner._build_story_cast_context(workflow, child, story_plan=workflow.story_plan_json or {})
+            self._log_prompt_selected(
+                workflow,
+                step,
+                prompt_template="prompts/story/image_plan_prompt.txt",
+                cast_mode=character_context.get("cast_mode"),
+                prompt_source="custom_safe_image_plan_prompt",
+            )
             compact_story_plan, compact_story_json = runner._build_image_plan_context(
                 workflow.story_plan_json or {},
                 workflow.story_json or {},
@@ -891,6 +1068,29 @@ class CustomStoryWorkflowService:
             return prompt, runner._image_plan_max_tokens(workflow.age_group), 0.2
 
         raise AppException(f"Unsupported text batch step: {step}", code="CUSTOM_STORY_TEXT_BATCH_STEP_INVALID")
+
+    @staticmethod
+    def _log_prompt_selected(
+        workflow: CustomStoryWorkflowEntity,
+        step: CustomStoryWorkflowStep,
+        *,
+        prompt_template: str,
+        cast_mode: str | None = None,
+        prompt_source: str = "template",
+    ) -> None:
+        logger.info(
+            "[CUSTOM_WORKFLOW_PROMPT] workflow_id=%s story_type=%s step=%s prompt_source=%s "
+            "prompt_template=%s cast_mode=%s use_child_character=%s",
+            workflow.id,
+            CustomStoryWorkflowService._status_value(
+                getattr(workflow, "story_type", CustomStoryWorkflowType.CUSTOM)
+            ),
+            step.value,
+            prompt_source,
+            prompt_template,
+            cast_mode,
+            CustomStoryWorkflowService._use_child_character_enabled(workflow),
+        )
 
     async def _prompt_child_context(self, workflow: CustomStoryWorkflowEntity) -> Any:
         if workflow.child_id is not None:
@@ -1257,25 +1457,18 @@ class CustomStoryWorkflowService:
         story = await self.stories.create(
             user_id=workflow.user_id,
             child_id=workflow.child_id,
-            generation_mode="INPUT_DRIVEN",
             age_group=workflow.age_group.value,
             category=workflow.category,
             learning_goal=workflow.learning_goal,
-            context=workflow.context,
-            event_description=None,
-            input_request=self._request_snapshot_from_columns(workflow),
-            ai_provider=workflow.ai_provider,
-            text_model=workflow.text_model,
-            image_model=workflow.image_model,
-            reference_image_model=workflow.reference_image_model,
         )
         story.status = StoryStatus.COMPLETED
-        story.current_step = None
         story.title = workflow.title
         story.summary = workflow.summary
         story.moral = workflow.moral
         story_json = await self._copy_story_images_to_final_story_storage(story_json, story.id)
         story_json = _sync_story_media_to_language_variants(story_json, include_audio=True)
+        story.total_pages = StoryService._story_total_pages(story_json)
+        story.cover_image = StoryService._story_cover_image(story_json)
         workflow.story_json = story_json
         for language, variant_json in self._story_json_variants_for_publish(workflow).items():
             await self.stories.upsert_content(story, language=language, story_json=variant_json)
@@ -1286,6 +1479,8 @@ class CustomStoryWorkflowService:
         for job in await self.batch_jobs.list_by_workflow(workflow.id):
             job.story_id = story.id
             await self.batch_jobs.update(job)
+        if hasattr(self, "session"):
+            await SubscriptionService(self.session).increment_story_usage(user_id=workflow.user_id, child_id=workflow.child_id)
         await self.workflows.update(workflow)
 
     async def _send_completion_notifications(self, workflow: CustomStoryWorkflowEntity) -> None:
@@ -3041,6 +3236,7 @@ class CustomStoryWorkflowService:
             created_at=workflow.created_at,
             updated_at=workflow.updated_at,
         )
+
 
     @staticmethod
     def _step_response(step) -> CustomStoryWorkflowStepResponse:

@@ -9,6 +9,7 @@ from app.routes.v1.generic_stories import router as generic_stories_router
 from app.routes.v1.notifications import router as notifications_router
 from app.routes.v1.stories import router as stories_router
 from app.routes.v1.story_narration_routes import router as narration_router
+from app.routes.v1.subscriptions import router as subscriptions_router
 from app.routes.v1.support import router as support_router
 from app.routes.v1.workflows import router as workflows_router
 
@@ -27,6 +28,7 @@ class V1Router:
         self.router.include_router(stories_router, prefix="/stories", tags=["Stories"])
         self.router.include_router(narration_router, prefix="/stories", tags=["Narration"])
         self.router.include_router(support_router, prefix="/user", tags=["Help & Support"])
+        self.router.include_router(subscriptions_router, tags=["Subscriptions"])
 
 
 api_router = V1Router().router

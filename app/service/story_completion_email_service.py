@@ -38,7 +38,7 @@ class StoryCompletionEmailService:
                 user.email,
                 story_title=title,
                 story_summary=summary,
-                story_input=story.input_request,
+                story_input=getattr(story, "input_request", None),
             )
         except Exception:
             logger.exception(

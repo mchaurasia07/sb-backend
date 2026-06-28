@@ -15,6 +15,7 @@ from app.middleware.auth import AuthenticationContextMiddleware
 from app.middleware.request_context import RequestContextMiddleware
 from app.routes.v1 import api_router
 from app.service.story_batch_reconcile_scheduler import StoryBatchReconcileScheduler
+from app.service.subscription_expiry_scheduler import SubscriptionExpiryScheduler
 
 logger = get_logger(__name__)
 
@@ -64,6 +65,10 @@ OPENAPI_TAGS = [
         "description": "Parent support queries, conversations, and query closure.",
     },
     {
+        "name": "Subscriptions",
+        "description": "Child subscription plans, checkout, billing history, cancellation, and Razorpay webhooks.",
+    },
+    {
         "name": "Health",
         "description": "Application health and operational readiness checks.",
     },
@@ -78,10 +83,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     illustration_styles = load_illustration_styles()
     logger.info("illustration_styles_loaded", style_count=len(illustration_styles))
     scheduler = StoryBatchReconcileScheduler()
+    subscription_scheduler = SubscriptionExpiryScheduler()
     scheduler.start()
+    subscription_scheduler.start()
     try:
         yield
     finally:
+        await subscription_scheduler.stop()
         await scheduler.stop()
         logger.info("application_stopping", app_name=settings.APP_NAME)
 

@@ -8,7 +8,7 @@ from app.core.dependencies import get_current_user
 from app.entity.custom_story_workflow import CustomStoryWorkflowType
 from app.entity.story_batch_job import StoryBatchJobStatus, StoryBatchJobType
 from app.entity.user import User
-from app.model.request.story import StoryGenerationRequest
+from app.model.request.story import StoryGenerationRequest, age_group_for_reader_category
 from app.model.response.common import ApiResponse, PaginatedResponse, success_response
 from app.model.response.custom_story_workflow import (
     CustomStoryWorkflowBatchJobCancelResponse,
@@ -106,12 +106,14 @@ class WorkflowsRouter:
         current_user: User = Depends(get_current_user),
         container: RequestContainer = Depends(get_request_container),
     ) -> ApiResponse[CustomStoryWorkflowResponse]:
+        self._populate_age_group_from_reader_category(payload)
         data = await container.workflow_service.create(current_user.id, payload)
+        workflow_label = "Generic story" if data.story_type == "GENERIC" else "Custom story"
         if data.execute_workflow:
             response.status_code = status.HTTP_202_ACCEPTED
-            return success_response(data, "Custom story workflow queued successfully")
+            return success_response(data, f"{workflow_label} workflow queued successfully")
         response.status_code = status.HTTP_201_CREATED
-        return success_response(data, "Custom story workflow saved successfully; execution skipped")
+        return success_response(data, f"{workflow_label} workflow saved successfully; execution skipped")
 
     async def list_workflows(
         self,
@@ -252,6 +254,11 @@ class WorkflowsRouter:
             batch_job_id=batch_job_id,
         )
         return success_response(CustomStoryWorkflowBatchJobCancelResponse(**data), "Batch job cancelled successfully")
+
+    @staticmethod
+    def _populate_age_group_from_reader_category(payload: StoryGenerationRequest) -> None:
+        if payload.reader_category:
+            payload.age_group = age_group_for_reader_category(payload.reader_category)
 
 
 router = WorkflowsRouter(app_container).router

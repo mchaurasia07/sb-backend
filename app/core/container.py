@@ -21,6 +21,7 @@ from app.service.story_narration_service import StoryNarrationService
 from app.service.story_service import StoryService
 from app.service.story_service_batch_service import StoryServiceBatchService
 from app.service.story_video_service import StoryVideoService
+from app.service.subscription_service import SubscriptionService
 from app.service.support_service import SupportService
 from app.service.workflow_service import WorkflowService
 
@@ -98,6 +99,10 @@ class RequestContainer:
     @cached_property
     def story_video(self) -> StoryVideoService:
         return StoryVideoService(self.session)
+
+    @cached_property
+    def subscription(self) -> SubscriptionService:
+        return SubscriptionService(self.session)
 
     @cached_property
     def support(self) -> SupportService:

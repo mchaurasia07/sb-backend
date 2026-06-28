@@ -678,6 +678,7 @@ def test_story_generation_request_defaults_to_delayed_and_execute_flags():
     )
 
     assert payload.reader_category == ReaderCategory.EARLY_READER
+    assert payload.age_group is None
     assert payload.execute_image is True
     assert payload.execute_narration is True
     assert payload.skip_image_generation is False
@@ -1215,6 +1216,7 @@ async def test_create_custom_story_workflow_skips_background_when_execution_disa
     assert response.message == "Custom story workflow saved successfully; execution skipped"
     assert route_response.status_code == 201
     assert calls["create"] == (user_id, payload)
+    assert payload.age_group == "3-6"
 
 
 @pytest.mark.asyncio
@@ -1250,6 +1252,7 @@ async def test_create_custom_story_workflow_queues_event_when_requested(monkeypa
     assert response.data == response_data
     assert response.message == "Custom story workflow queued successfully"
     assert route_response.status_code == 202
+    assert payload.age_group == "3-6"
 
 
 @pytest.mark.asyncio
@@ -1865,7 +1868,9 @@ async def test_publish_story_creates_final_story_and_sets_workflow_story_id():
     await service._publish_story(workflow)
 
     assert workflow.story_id == story_id
-    assert calls["create"]["generation_mode"] == "INPUT_DRIVEN"
+    assert "generation_mode" not in calls["create"]
+    assert calls["updated_story"].total_pages == 1
+    assert calls["updated_story"].cover_image == "https://cdn.test/cover.png"
     assert calls["content"][0] == story_id
     assert len(calls["pages"]) == 2
     assert calls["copy"] == story_id

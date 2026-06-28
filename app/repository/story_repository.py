@@ -1,12 +1,12 @@
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.orm import selectinload
 
 from app.core.age_groups import AgeGroup, validate_age_group
-from app.entity.story import Story, StoryContent, StoryGenerationMode, StoryStatus
+from app.entity.story import Story, StoryContent, StoryStatus, StoryType
 
 
 class StoryRepository:
@@ -19,18 +19,26 @@ class StoryRepository:
         self,
         user_id: UUID,
         child_id: UUID,
-        generation_mode: str,
         age_group: str,
         **kwargs,
     ) -> Story:
         """Create a new story record."""
         # Remove status from kwargs if present (always use PENDING for new stories)
         kwargs.pop("status", None)
+        for removed_column in (
+            "ai_provider",
+            "text_model",
+            "image_model",
+            "reference_image_model",
+            "input_request",
+            "current_step",
+            "context",
+        ):
+            kwargs.pop(removed_column, None)
 
         story = Story(
             user_id=user_id,
             child_id=child_id,
-            generation_mode=StoryGenerationMode(generation_mode),
             age_group=AgeGroup(validate_age_group(age_group)),
             status=StoryStatus.PENDING,
             **kwargs,
@@ -45,6 +53,28 @@ class StoryRepository:
             select(Story)
             .options(selectinload(Story.pages), selectinload(Story.contents))
             .where(Story.id == story_id, Story.user_id == user_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_for_user_or_generic(self, user_id: UUID, story_id: UUID) -> Story | None:
+        """Retrieve an owned custom story or a shared generic story."""
+        result = await self.session.execute(
+            select(Story).where(
+                Story.id == story_id,
+                or_(Story.user_id == user_id, Story.story_type == StoryType.GENERIC),
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_for_user_or_generic_for_update(self, user_id: UUID, story_id: UUID) -> Story | None:
+        """Retrieve an owned custom story or shared generic story for editing."""
+        result = await self.session.execute(
+            select(Story)
+            .where(
+                Story.id == story_id,
+                or_(Story.user_id == user_id, Story.story_type == StoryType.GENERIC),
+            )
+            .with_for_update()
         )
         return result.scalar_one_or_none()
 
@@ -79,7 +109,6 @@ class StoryRepository:
             select(
                 Story.id,
                 Story.status,
-                Story.current_step,
                 Story.error_message,
                 Story.updated_at,
             ).where(Story.id == story_id, Story.user_id == user_id)
@@ -104,6 +133,12 @@ class StoryRepository:
         flag_modified(content, "story_json")
         await self.session.flush()
         return content
+
+    async def list_contents_by_story(self, story_id: UUID) -> list[StoryContent]:
+        result = await self.session.execute(
+            select(StoryContent).where(StoryContent.story_id == story_id).order_by(StoryContent.language)
+        )
+        return list(result.scalars().all())
 
     async def upsert_content(
         self,
@@ -163,23 +198,36 @@ class StoryRepository:
         page: int,
         page_size: int,
         status_filter: str | None = None,
+        age_group: str | None = None,
+        story_type: StoryType | str | None = None,
+        include_details: bool = True,
     ) -> tuple[list[Story], int]:
         """List stories for user with pagination metadata."""
-        filters = [Story.user_id == user_id]
+        normalized_story_type = StoryType(story_type) if story_type is not None else None
+        filters = []
+        if normalized_story_type == StoryType.GENERIC:
+            filters.append(Story.story_type == StoryType.GENERIC)
+        else:
+            filters.append(Story.user_id == user_id)
+            if normalized_story_type is not None:
+                filters.append(Story.story_type == normalized_story_type)
         if child_id:
             filters.append(Story.child_id == child_id)
         if status_filter:
             filters.append(Story.status == status_filter)
+        if age_group:
+            filters.append(Story.age_group == AgeGroup(validate_age_group(age_group)))
 
         total = await self.session.scalar(select(func.count()).select_from(Story).where(*filters))
         query = (
             select(Story)
-            .options(selectinload(Story.pages), selectinload(Story.contents))
             .where(*filters)
             .order_by(Story.created_at.desc())
             .offset((page - 1) * page_size)
             .limit(page_size)
         )
+        if include_details:
+            query = query.options(selectinload(Story.pages), selectinload(Story.contents))
         result = await self.session.execute(query)
         return list(result.scalars().all()), int(total or 0)
 

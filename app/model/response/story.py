@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class StoryPageResponse(BaseModel):
@@ -26,13 +26,34 @@ class StoryResponse(BaseModel):
     moral: str | None
     summary: str | None
     status: str
-    current_step: str | None
-    generation_mode: str
     age_group: str
     category: str | None = None
     learning_goal: str | None = None
-    context: str | None = None
+    total_pages: int = 0
+    cover_image: str | None = None
     pages: list[StoryPageResponse] = []
+    video_created: bool = False
+    video_metadata: dict[str, Any] | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class StoryListResponse(BaseModel):
+    """Story metadata for paginated story lists."""
+
+    id: UUID
+    title: str | None
+    moral: str | None
+    summary: str | None
+    status: str
+    age_group: str
+    category: str | None = None
+    learning_goal: str | None = None
+    total_pages: int = 0
+    cover_image: str | None = None
+    available_languages: list[str] = Field(default_factory=list)
     video_created: bool = False
     video_metadata: dict[str, Any] | None = None
     created_at: datetime
@@ -46,7 +67,6 @@ class StoryStatusResponse(BaseModel):
 
     story_id: UUID
     status: str
-    current_step: str | None
     error_message: str | None
     updated_at: datetime
 

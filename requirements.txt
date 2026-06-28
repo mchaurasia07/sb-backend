@@ -11,6 +11,7 @@ bcrypt==4.0.1
 email-validator==2.2.0
 python-multipart==0.0.20
 httpx==0.28.1
+python-dateutil==2.9.0.post0
 slowapi==0.1.9
 structlog==24.4.0
 openai==1.57.0
