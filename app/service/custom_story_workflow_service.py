@@ -278,8 +278,6 @@ class CustomStoryWorkflowService:
             user_id=user_id,
             child_id=payload.child_id,
             story_type=CustomStoryWorkflowType.CUSTOM,
-            generation_mode="INPUT_DRIVEN",
-            processing_mode="delayed",
             age_group=age_group,
             category=payload.category,
             learning_goal=payload.learning_goal,
@@ -478,7 +476,6 @@ class CustomStoryWorkflowService:
             await self.session.commit()
             return
 
-        workflow.processing_mode = "delayed"
         workflow.status = CustomStoryWorkflowStatus.IN_PROGRESS
         workflow.current_step = step.value
         workflow.error_message = None
@@ -498,7 +495,7 @@ class CustomStoryWorkflowService:
             await self.session.commit()
             return
 
-        if step == CustomStoryWorkflowStep.NARRATION_GENERATION and workflow.processing_mode == "delayed":
+        if step == CustomStoryWorkflowStep.NARRATION_GENERATION:
             language = self._event_language(event, workflow)
             if language is None:
                 await self._enqueue_narration_language_events(workflow)
@@ -905,13 +902,11 @@ class CustomStoryWorkflowService:
         if self._status_value(workflow.status) == CustomStoryWorkflowStatus.COMPLETED.value:
             return workflow
         if (
-            workflow.processing_mode == "delayed"
-            and self._status_value(workflow.status) == CustomStoryWorkflowStatus.FAILED.value
+            self._status_value(workflow.status) == CustomStoryWorkflowStatus.FAILED.value
             and await self._failed_delayed_batch_job(workflow) is not None
         ):
             return workflow
 
-        workflow.processing_mode = "delayed"
         workflow.status = CustomStoryWorkflowStatus.IN_PROGRESS
         workflow.error_message = None
         await self.workflows.update(workflow)
@@ -928,11 +923,7 @@ class CustomStoryWorkflowService:
                         await self.workflows.update(workflow)
                         await self.session.commit()
                     continue
-                if (
-                    workflow.processing_mode == "delayed"
-                    and step == CustomStoryWorkflowStep.PUBLISH_STORY
-                    and not await self._delayed_outputs_completed(workflow)
-                ):
+                if step == CustomStoryWorkflowStep.PUBLISH_STORY and not await self._delayed_outputs_completed(workflow):
                     failed_job = await self._failed_delayed_batch_job(workflow)
                     if failed_job is not None:
                         await self._mark_workflow_failed(
@@ -979,11 +970,10 @@ class CustomStoryWorkflowService:
         flags = self._flags(workflow)
         step_input = self._step_input(workflow, step)
         logger.info(
-            "[CUSTOM_WORKFLOW_STEP] workflow=%s step=%s action=started processing_mode=%s execute_image=%s "
+            "[CUSTOM_WORKFLOW_STEP] workflow=%s step=%s action=started execute_image=%s "
             "execute_narration=%s skip_validation=%s",
             workflow.id,
             step.value,
-            workflow.processing_mode,
             self._execute_image_enabled(workflow),
             self._execute_narration_enabled(workflow),
             flags.skip_validation,
@@ -1130,69 +1120,65 @@ class CustomStoryWorkflowService:
             return
 
         if step == CustomStoryWorkflowStep.NARRATION_GENERATION:
-            if workflow.processing_mode == "delayed":
-                if not hasattr(self, "events"):
-                    batch_runner = self._batch_runner(workflow)
-                    existing_job = await self._active_delayed_batch_job(workflow, step)
-                    if existing_job is not None:
-                        await self._record_submitted_batch_step(
-                            workflow,
-                            step,
-                            step_input,
-                            existing_job,
-                            "Existing narration batch job is still active; retry reused it instead of submitting a duplicate.",
-                        )
-                        workflow.status = CustomStoryWorkflowStatus.IN_PROGRESS
-                        workflow.current_step = step.value
-                        return
-                    message = await batch_runner._ensure_audio_batch_submitted(workflow)
-                    latest_job = await self.batch_jobs.latest_for_workflow_type(
-                        workflow.id,
-                        self._job_type_for_step(step),
+            if not hasattr(self, "events"):
+                batch_runner = self._batch_runner(workflow)
+                existing_job = await self._active_delayed_batch_job(workflow, step)
+                if existing_job is not None:
+                    await self._record_submitted_batch_step(
+                        workflow,
+                        step,
+                        step_input,
+                        existing_job,
+                        "Existing narration batch job is still active; retry reused it instead of submitting a duplicate.",
                     )
-                    if latest_job is not None and self._status_value(latest_job.status) in {
-                        StoryBatchJobStatus.SUBMITTED.value,
-                        StoryBatchJobStatus.RUNNING.value,
-                    }:
-                        await self._record_submitted_batch_step(workflow, step, step_input, latest_job, message)
-                    elif self._story_has_audio(workflow.story_json or {}):
-                        await self._record_completed_step(
-                            workflow,
-                            step,
-                            step_input,
-                            {"narration_generated": True, "message": message},
-                        )
                     workflow.status = CustomStoryWorkflowStatus.IN_PROGRESS
                     workflow.current_step = step.value
                     return
-                if self._workflow_has_audio_for_all_languages(workflow):
+                message = await batch_runner._ensure_audio_batch_submitted(workflow)
+                latest_job = await self.batch_jobs.latest_for_workflow_type(
+                    workflow.id,
+                    self._job_type_for_step(step),
+                )
+                if latest_job is not None and self._status_value(latest_job.status) in {
+                    StoryBatchJobStatus.SUBMITTED.value,
+                    StoryBatchJobStatus.RUNNING.value,
+                }:
+                    await self._record_submitted_batch_step(workflow, step, step_input, latest_job, message)
+                elif self._story_has_audio(workflow.story_json or {}):
                     await self._record_completed_step(
                         workflow,
                         step,
                         step_input,
-                        {"narration_generated": True, "languages": self._workflow_languages(workflow)},
+                        {"narration_generated": True, "message": message},
                     )
-                else:
-                    await self._enqueue_narration_language_events(workflow)
-                    step_record = await self.steps.latest_for_workflow_step(workflow.id, step)
-                    if step_record is None:
-                        step_record = await self.steps.create(workflow.id, step.value)
-                    step_record.status = StepStatus.SUBMITTED_BATCH_JOB
-                    step_record.started_at = step_record.started_at or datetime.now(UTC)
-                    step_record.completed_at = None
-                    step_record.input_json = step_input
-                    step_record.output_json = {
-                        "deferred": True,
-                        "mode": "language_scoped_audio_events",
-                        "languages": self._workflow_languages(workflow),
-                    }
-                    step_record.error_message = None
-                    await self.steps.update(step_record)
                 workflow.status = CustomStoryWorkflowStatus.IN_PROGRESS
                 workflow.current_step = step.value
                 return
-            workflow.story_json = await runner._step_generate_narration(workflow, workflow.story_json or {})
-            await self._annotate_latest_step(workflow, step, step_input, workflow.story_json or {})
+            if self._workflow_has_audio_for_all_languages(workflow):
+                await self._record_completed_step(
+                    workflow,
+                    step,
+                    step_input,
+                    {"narration_generated": True, "languages": self._workflow_languages(workflow)},
+                )
+            else:
+                await self._enqueue_narration_language_events(workflow)
+                step_record = await self.steps.latest_for_workflow_step(workflow.id, step)
+                if step_record is None:
+                    step_record = await self.steps.create(workflow.id, step.value)
+                step_record.status = StepStatus.SUBMITTED_BATCH_JOB
+                step_record.started_at = step_record.started_at or datetime.now(UTC)
+                step_record.completed_at = None
+                step_record.input_json = step_input
+                step_record.output_json = {
+                    "deferred": True,
+                    "mode": "language_scoped_audio_events",
+                    "languages": self._workflow_languages(workflow),
+                }
+                step_record.error_message = None
+                await self.steps.update(step_record)
+            workflow.status = CustomStoryWorkflowStatus.IN_PROGRESS
+            workflow.current_step = step.value
             return
 
         if step == CustomStoryWorkflowStep.PUBLISH_STORY:
@@ -1265,7 +1251,7 @@ class CustomStoryWorkflowService:
         story = await self.stories.create(
             user_id=workflow.user_id,
             child_id=workflow.child_id,
-            generation_mode=workflow.generation_mode,
+            generation_mode="INPUT_DRIVEN",
             age_group=workflow.age_group.value,
             category=workflow.category,
             learning_goal=workflow.learning_goal,
@@ -2774,12 +2760,10 @@ class CustomStoryWorkflowService:
         if step == CustomStoryWorkflowStep.IMAGE_GENERATION:
             if not self._execute_image_enabled(workflow):
                 return True
-            if workflow.processing_mode == "delayed":
-                if self._story_has_images(workflow.story_json or {}):
-                    return True
-                latest = await self.batch_jobs.latest_for_workflow_type(workflow.id, self._job_type_for_step(step))
-                return latest is not None and self._status_value(latest.status) == "SUCCEEDED"
-            return self._story_has_images(workflow.story_json or {})
+            if self._story_has_images(workflow.story_json or {}):
+                return True
+            latest = await self.batch_jobs.latest_for_workflow_type(workflow.id, self._job_type_for_step(step))
+            return latest is not None and self._status_value(latest.status) == "SUCCEEDED"
         if step == CustomStoryWorkflowStep.NARRATION_GENERATION:
             if not self._execute_narration_enabled(workflow):
                 return True

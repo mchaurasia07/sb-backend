@@ -243,12 +243,12 @@ def _safe_prompt_value(value: str | None, default: str = "") -> str:
     return text.replace("\n", " ").replace('"', '\\"')
 
 
-def _story_source_inputs(story: Story) -> dict[str, str]:
+def _story_source_inputs(story: Any) -> dict[str, str]:
     """Canonical story-driving inputs used by plan, story, and image prompts."""
     return {
-        "category": story.category or story.event_description or "adventure",
-        "learning_goal": story.learning_goal or "personal growth",
-        "context": story.context or "",
+        "category": getattr(story, "category", None) or getattr(story, "event_description", None) or "adventure",
+        "learning_goal": getattr(story, "learning_goal", None) or "personal growth",
+        "context": getattr(story, "context", None) or "",
     }
 
 
@@ -1087,7 +1087,7 @@ class StoryService:
                 source_inputs.get("category") if isinstance(source_inputs, dict) else None,
                 story_plan.get("theme"),
                 story_plan.get("category"),
-                story.event_description,
+                getattr(story, "event_description", None),
             ),
             100,
         )

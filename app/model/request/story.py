@@ -80,35 +80,28 @@ class StoryGenerationRequest(BaseModel):
     category: str | None = Field(None, max_length=100, description="Story category (e.g., 'adventure')")
     learning_goal: str | None = Field(None, max_length=500, description="Educational objective")
     context: str | None = Field(None, max_length=2000, description="Additional context or preferences")
-    language: str | None = Field(
-        default=None,
-        min_length=2,
-        max_length=16,
-        description="Backward-compatible single language. Use languages for new clients.",
-    )
     languages: list[str] = Field(
         default_factory=lambda: ["en"],
         min_length=1,
         max_length=3,
         description="Story content/narration languages. Supported: en, hi, mr.",
     )
+    language: str | None = Field(
+        default=None,
+        exclude=True,
+        description="Legacy single-language request alias; use languages for new clients.",
+    )
 
     # Testing flags
     skip_image_generation: bool = Field(False, description="Skip image generation for testing")
-    execute_image: bool | None = Field(
-        None,
-        description="Generate story images. When omitted, this is derived from skip_image_generation.",
-    )
+    execute_image: bool = Field(True, description="Generate story images. When omitted, this is derived from skip_image_generation.")
     execute_narration: Annotated[bool, Field(
         True,
         validation_alias=AliasChoices("execute_narration", "execute_narration"),
         description="Generate page narration audio",
     )]
     skip_validation: bool = Field(False, description="Skip validation steps for testing")
-    execute_workflow: bool = Field(
-        False,
-        description="Start background workflow execution after saving. Defaults to false so create only saves the workflow.",
-    )
+    execute_workflow: bool = Field(False, description="Start background workflow execution after saving. Defaults to false so create only saves the workflow.")
 
     @model_validator(mode="before")
     @classmethod

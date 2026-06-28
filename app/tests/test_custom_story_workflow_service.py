@@ -930,8 +930,6 @@ async def test_create_runs_input_safety_before_creating_workflow(monkeypatch):
             user_id=kwargs["user_id"],
             child_id=kwargs["child_id"],
             request_number=kwargs["request_number"],
-            generation_mode=kwargs["generation_mode"],
-            processing_mode=kwargs["processing_mode"],
             age_group=SimpleNamespace(value=kwargs["age_group"]),
             reader_category=kwargs["reader_category"],
             use_child_character=kwargs["use_child_character"],
@@ -1007,8 +1005,6 @@ async def test_create_allows_imagined_cast_without_child_character_image(monkeyp
             user_id=kwargs["user_id"],
             child_id=kwargs["child_id"],
             request_number=kwargs["request_number"],
-            generation_mode=kwargs["generation_mode"],
-            processing_mode=kwargs["processing_mode"],
             age_group=SimpleNamespace(value=kwargs["age_group"]),
             reader_category=kwargs["reader_category"],
             use_child_character=kwargs["use_child_character"],
@@ -1049,7 +1045,8 @@ async def test_create_allows_imagined_cast_without_child_character_image(monkeyp
     response = await service.create(uuid4(), payload)
 
     assert response.workflow_id
-    assert created["processing_mode"] == "delayed"
+    assert "generation_mode" not in created
+    assert "processing_mode" not in created
     assert created["use_child_character"] is False
     assert queued_events == [
         {
@@ -1253,6 +1250,90 @@ async def test_create_custom_story_workflow_queues_event_when_requested(monkeypa
     assert response.data == response_data
     assert response.message == "Custom story workflow queued successfully"
     assert route_response.status_code == 202
+
+
+@pytest.mark.asyncio
+async def test_story_generation_text_batch_reconcile_accepts_workflow_without_event_description():
+    workflow = _workflow(
+        status=CustomStoryWorkflowStatus.IN_PROGRESS,
+        current_step=CustomStoryWorkflowStep.STORY_GENERATION.value,
+        story_plan_json={
+            "title": "Moon Bell",
+            "summary": "A listening adventure.",
+            "moral_theme": "Listening",
+            "pages": [{"page_number": 1}],
+        },
+    )
+    delattr(workflow, "event_description")
+    job = SimpleNamespace(
+        id=uuid4(),
+        workflow_id=workflow.id,
+        story_id=None,
+        job_type=StoryBatchJobType.STORY,
+        status=StoryBatchJobStatus.SUBMITTED,
+        provider_job_name="batches/story",
+        provider_state="JOB_STATE_SUCCEEDED",
+        error_message=None,
+        request_keys=[CustomStoryWorkflowStep.STORY_GENERATION.value],
+        response_payload=None,
+    )
+    response_text = json.dumps(
+        {
+            "title": "Moon Bell",
+            "summary": "Mira listens for a soft bell.",
+            "moral": "Listen kindly.",
+            "pages": [{"page_number": 1, "text": "Mira heard the bell and helped.", "emotion": "happy"}],
+        }
+    )
+    response = SimpleNamespace(response=SimpleNamespace(text=response_text))
+    provider_job = SimpleNamespace(dest=SimpleNamespace(inlined_responses=[response]))
+    updated_jobs = []
+    updated_workflows = []
+
+    class _BatchRunner:
+        def _responses_by_key(self, responses):
+            return {CustomStoryWorkflowStep.STORY_GENERATION.value: responses[0]}
+
+        def _model_dump_safe(self, value):
+            _ = value
+            return {"provider": "ok"}
+
+    async def _update_job(job_arg):
+        updated_jobs.append(job_arg)
+        return job_arg
+
+    async def _update_workflow(workflow_arg):
+        updated_workflows.append(workflow_arg)
+        return workflow_arg
+
+    async def _submitted_event(**kwargs):
+        _ = kwargs
+        return None
+
+    commits = {"count": 0}
+
+    async def _commit():
+        commits["count"] += 1
+
+    service = CustomStoryWorkflowService.__new__(CustomStoryWorkflowService)
+    service.steps = _StepRepo()
+    service.batch_jobs = SimpleNamespace(update=_update_job)
+    service.workflows = SimpleNamespace(update=_update_workflow)
+    service.session = SimpleNamespace(commit=_commit)
+    service._batch_submitted_event_for_job = _submitted_event
+    service._print_reconcile_event = lambda *args, **kwargs: None
+
+    await service._process_reconciled_text_job(workflow, job, provider_job, _BatchRunner())
+
+    assert job.status == StoryBatchJobStatus.SUCCEEDED
+    assert workflow.story_json["pages"][0]["text"] == "Mira heard the bell and helped."
+    assert workflow.story_json["languages"] == ["en"]
+    assert workflow.title == "Moon Bell"
+    assert workflow.summary == "Mira listens for a soft bell."
+    assert workflow.moral == "Listen kindly."
+    assert updated_jobs == [job]
+    assert updated_workflows == [workflow]
+    assert commits["count"] == 1
 
 
 @pytest.mark.asyncio
