@@ -5,17 +5,21 @@ from uuid import uuid4
 
 import pytest
 
+from app.service import support_reply_email_service
 from app.entity.support import SupportMessageSender, SupportQueryStatus
 from app.model.request.support import AddSupportMessageRequest, CreateSupportQueryRequest
 from app.repository.base_repository import BaseRepository
 from app.repository.support_repository import SupportRepository
 from app.routes.v1.support import (
+    _parse_statuses,
     add_jugni_reply,
     create_support_query,
     list_jugni_queries,
     router,
 )
 from app.service.support_service import SupportService
+from app.service.support_reply_email_service import SupportReplyEmailService
+from app.utils.email import EmailClient
 
 
 class _Session:
@@ -76,14 +80,14 @@ class _SupportRepository:
         size,
         pending_at_jugni,
         pending_at_user,
-        query_status,
+        statuses,
     ):
         items = [
             item
             for item in self.list_items
             if (pending_at_jugni is None or item.pending_at_jugni == pending_at_jugni)
             and (pending_at_user is None or item.pending_at_user == pending_at_user)
-            and (query_status is None or item.status == query_status)
+            and (not statuses or item.status in statuses)
         ]
         return items, len(items)
 
@@ -101,11 +105,27 @@ class _SupportRepository:
         self.flush_count += 1
 
 
+class _ReplyEmail:
+    def __init__(self, session):
+        self.session = session
+        self.calls = []
+
+    async def send_jugni_reply(self, *, query, reply_message):
+        self.calls.append(
+            {
+                "query": query,
+                "reply_message": reply_message,
+                "commit_count": self.session.commit_count,
+            }
+        )
+
+
 def _service():
     session = _Session()
     service = SupportService(session)
     repository = _SupportRepository()
     service.support = repository
+    service.reply_email = _ReplyEmail(session)
     return service, session, repository
 
 
@@ -206,6 +226,8 @@ async def test_user_message_sets_query_pending_at_jugni():
     )
     repository.query.pending_at_jugni = False
     repository.query.pending_at_user = True
+    previous_updated_at = datetime.now(UTC) - timedelta(days=1)
+    repository.query.updated_at = previous_updated_at
 
     await service.add_message(
         user_id=user_id,
@@ -215,6 +237,7 @@ async def test_user_message_sets_query_pending_at_jugni():
 
     assert repository.query.pending_at_jugni is True
     assert repository.query.pending_at_user is False
+    assert repository.query.updated_at > previous_updated_at
 
 
 @pytest.mark.asyncio
@@ -225,6 +248,8 @@ async def test_jugni_reply_needs_no_user_id_and_marks_query_responded():
         payload=CreateSupportQueryRequest(subject="Subject", query_details="First"),
     )
 
+    previous_updated_at = datetime.now(UTC) - timedelta(days=1)
+    repository.query.updated_at = previous_updated_at
     response = await service.add_jugni_reply(
         query_id="QRY_1000123",
         payload=AddSupportMessageRequest(message="  I have fixed this for you.  "),
@@ -235,6 +260,10 @@ async def test_jugni_reply_needs_no_user_id_and_marks_query_responded():
     assert repository.query.status == SupportQueryStatus.RESPONDED
     assert repository.query.pending_at_jugni is False
     assert repository.query.pending_at_user is True
+    assert repository.query.updated_at > previous_updated_at
+    assert service.reply_email.calls[0]["query"] is repository.query
+    assert service.reply_email.calls[0]["reply_message"] == "I have fixed this for you."
+    assert service.reply_email.calls[0]["commit_count"] == 2
     assert session.commit_count == 2
 
 
@@ -265,7 +294,7 @@ def test_jugni_and_user_message_routes_are_registered():
         for route in router.routes
         for method in getattr(route, "methods", set())
     }
-    assert ("PUT", "/jugni/queries/{query_id}/message") in method_paths
+    assert ("POST", "/jugni/queries/{query_id}/message") in method_paths
     assert ("POST", "/queries/{query_id}/message") in method_paths
 
 
@@ -276,6 +305,33 @@ def test_jugni_and_user_list_routes_are_registered():
         if "GET" in getattr(route, "methods", set())
     }
     assert {"/jugni/queries", "/queries"} <= get_paths
+
+
+def test_jugni_list_status_filter_defaults_to_open():
+    route = next(
+        route
+        for route in router.routes
+        if route.path == "/jugni/queries" and "GET" in route.methods
+    )
+    status_parameter = next(
+        parameter
+        for parameter in route.dependant.query_params
+        if parameter.alias == "status"
+    )
+    assert status_parameter.default == "OPEN"
+
+
+def test_jugni_list_parses_comma_separated_statuses():
+    assert _parse_statuses("OPEN, CLOSED,responded") == [
+        SupportQueryStatus.OPEN,
+        SupportQueryStatus.CLOSED,
+        SupportQueryStatus.RESPONDED,
+    ]
+
+
+def test_jugni_list_rejects_invalid_comma_separated_status():
+    with pytest.raises(ValueError, match="Invalid support status"):
+        _parse_statuses("OPEN,UNKNOWN")
 
 
 @pytest.mark.asyncio
@@ -292,7 +348,7 @@ async def test_jugni_list_filters_queries_and_returns_all_messages():
         size=20,
         pending_at_jugni=True,
         pending_at_user=False,
-        query_status=SupportQueryStatus.OPEN,
+        statuses=[SupportQueryStatus.OPEN],
     )
 
     assert result.total_records == 1
@@ -372,10 +428,61 @@ async def test_jugni_list_route_passes_pending_and_status_filters():
         size=20,
         pending_at_jugni=True,
         pending_at_user=False,
-        query_status=SupportQueryStatus.OPEN,
+        status_filter="OPEN,IN_PROGRESS",
         current_user=SimpleNamespace(id=uuid4()),
         container=container,
     )
 
     assert response.data.total_records == 1
     assert len(response.data.items[0].messages) == 1
+
+
+def test_support_reply_email_template_escapes_user_controlled_content():
+    rendered = EmailClient()._build_support_reply_template(
+        query_id="QRY_123",
+        query_subject="<Story issue>",
+        reply_message="Fixed <now>\nPlease retry.",
+    )
+
+    assert "Jugni replied to your query" in rendered
+    assert "&lt;Story issue&gt;" in rendered
+    assert "Fixed &lt;now&gt;<br>Please retry." in rendered
+    assert "<Story issue>" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_support_reply_email_uses_query_owner_and_reply(monkeypatch):
+    user_id = uuid4()
+    sent = {}
+
+    class _UserSession:
+        async def get(self, _model, entity_id):
+            assert entity_id == user_id
+            return SimpleNamespace(email="parent@example.com")
+
+    async def _send(email, **kwargs):
+        sent["email"] = email
+        sent.update(kwargs)
+
+    monkeypatch.setattr(
+        support_reply_email_service.email_client,
+        "send_support_reply_email",
+        _send,
+    )
+    service = SupportReplyEmailService(_UserSession())
+
+    await service.send_jugni_reply(
+        query=SimpleNamespace(
+            user_id=user_id,
+            query_id="QRY_123",
+            subject="Unable to generate my story",
+        ),
+        reply_message="The issue is fixed. Please try again.",
+    )
+
+    assert sent == {
+        "email": "parent@example.com",
+        "query_id": "QRY_123",
+        "query_subject": "Unable to generate my story",
+        "reply_message": "The issue is fixed. Please try again.",
+    }

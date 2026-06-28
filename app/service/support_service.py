@@ -17,12 +17,14 @@ from app.model.response.support import (
     SupportQueryListItem,
 )
 from app.repository.support_repository import SupportRepository
+from app.service.support_reply_email_service import SupportReplyEmailService
 
 
 class SupportService:
     def __init__(self, session: AsyncSession):
         self.session = session
         self.support = SupportRepository(session)
+        self.reply_email = SupportReplyEmailService(session)
 
     @staticmethod
     def _required(value: str | None, message: str) -> str:
@@ -102,14 +104,14 @@ class SupportService:
         size: int,
         pending_at_jugni: bool | None,
         pending_at_user: bool | None,
-        query_status: SupportQueryStatus | None,
+        statuses: list[SupportQueryStatus],
     ) -> JugniSupportQueryListData:
         items, total = await self.support.list_for_jugni(
             page=page,
             size=size,
             pending_at_jugni=pending_at_jugni,
             pending_at_user=pending_at_user,
-            query_status=query_status,
+            statuses=statuses,
         )
         return JugniSupportQueryListData(
             page=page,
@@ -164,6 +166,7 @@ class SupportService:
         query.updated_at = datetime.now(UTC)
         await self.support.update(query)
         await self.session.commit()
+        await self.reply_email.send_jugni_reply(query=query, reply_message=text)
         return SupportMessageResponse.model_validate(message)
 
     async def close_query(self, *, user_id: UUID, query_id: str) -> SupportQueryClosed:

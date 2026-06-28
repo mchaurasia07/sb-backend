@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from uuid import UUID
 
 from sqlalchemy import select
@@ -79,19 +80,19 @@ class SupportRepository(BaseRepository[SupportQuery]):
         size: int,
         pending_at_jugni: bool | None,
         pending_at_user: bool | None,
-        query_status: SupportQueryStatus | None,
+        statuses: Sequence[SupportQueryStatus],
     ) -> tuple[list[SupportQuery], int]:
         filters = []
         if pending_at_jugni is not None:
             filters.append(SupportQuery.pending_at_jugni == pending_at_jugni)
         if pending_at_user is not None:
             filters.append(SupportQuery.pending_at_user == pending_at_user)
-        if query_status is not None:
-            filters.append(SupportQuery.status == query_status)
+        if statuses:
+            filters.append(SupportQuery.status.in_(statuses))
         return await self.list_paginated(
             filters=tuple(filters),
             page=page,
             page_size=size,
-            order_by=(SupportQuery.created_at.desc(),),
+            order_by=(SupportQuery.created_at.desc(), SupportQuery.id.desc()),
             loader_options=(selectinload(SupportQuery.messages),),
         )

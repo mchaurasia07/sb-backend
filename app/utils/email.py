@@ -65,6 +65,30 @@ class EmailClient:
         await self._send(email, subject, plain_body, html_body)
         logger.info("story_completed_email_sent", email=email, story_title=story_title)
 
+    async def send_support_reply_email(
+        self,
+        email: str,
+        *,
+        query_id: str,
+        query_subject: str,
+        reply_message: str,
+    ) -> None:
+        subject = f"Reply on: {query_subject}"
+        plain_body = (
+            "Jugni has replied to your support query.\n\n"
+            f"Subject: {query_subject}\n"
+            f"Query ID: {query_id}\n\n"
+            f"Jugni's reply:\n{reply_message}\n\n"
+            "Open Help & Support in the app to review the conversation and respond."
+        )
+        html_body = self._build_support_reply_template(
+            query_id=query_id,
+            query_subject=query_subject,
+            reply_message=reply_message,
+        )
+        await self._send(email, subject, plain_body, html_body)
+        logger.info("support_reply_email_sent", email=email, query_id=query_id)
+
     async def _send(self, recipient: str, subject: str, plain_body: str, html_body: str) -> None:
         await asyncio.to_thread(self._send_sync, recipient, subject, plain_body, html_body)
 
@@ -179,6 +203,34 @@ class EmailClient:
                 <p class="cta-text">Open your dashboard to read the story now.</p>
             """,
             footer="This notification was sent because story generation completed successfully.",
+        )
+
+    def _build_support_reply_template(
+        self,
+        *,
+        query_id: str,
+        query_subject: str,
+        reply_message: str,
+    ) -> str:
+        safe_query_id = html.escape(query_id)
+        safe_subject = html.escape(query_subject)
+        safe_reply = html.escape(reply_message).replace("\n", "<br>")
+        return self._layout(
+            eyebrow="Support update",
+            title="Jugni replied to your query",
+            intro="There is a new response waiting for you in Help & Support.",
+            content=f"""
+                <div class="panel panel-soft">
+                    <strong>{safe_subject}</strong>
+                    <p class="meta">Query ID: {safe_query_id}</p>
+                </div>
+                <div class="panel">
+                    <strong>Jugni's reply</strong>
+                    <p>{safe_reply}</p>
+                </div>
+                <p class="cta-text">Open Help & Support in the app to review the conversation and respond.</p>
+            """,
+            footer="You received this email because you created this support query.",
         )
 
     @staticmethod

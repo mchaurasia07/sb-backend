@@ -34,6 +34,17 @@ def _error(message: str, status_code: int) -> JSONResponse:
     )
 
 
+def _parse_statuses(value: str) -> list[SupportQueryStatus]:
+    raw_statuses = [item.strip().upper() for item in value.split(",") if item.strip()]
+    if not raw_statuses:
+        raise ValueError("At least one status is required.")
+    try:
+        return [SupportQueryStatus(item) for item in raw_statuses]
+    except ValueError as exc:
+        allowed = ", ".join(status_item.value for status_item in SupportQueryStatus)
+        raise ValueError(f"Invalid support status. Allowed values: {allowed}.") from exc
+
+
 async def _server_error(
     container: RequestContainer,
     exc: SQLAlchemyError,
@@ -83,19 +94,26 @@ async def list_jugni_queries(
     size: int = Query(default=20, ge=1, le=100),
     pending_at_jugni: bool | None = Query(default=None),
     pending_at_user: bool | None = Query(default=None),
-    query_status: SupportQueryStatus | None = Query(default=None, alias="status"),
+    status_filter: str = Query(
+        default=SupportQueryStatus.OPEN.value,
+        alias="status",
+        description="Comma-separated statuses, for example: OPEN,CLOSED",
+    ),
     current_user: User = Depends(get_current_user),
     container: RequestContainer = Depends(get_request_container),
 ) -> SupportDataResponse[JugniSupportQueryListData] | JSONResponse:
     _ = current_user
     try:
+        statuses = _parse_statuses(status_filter)
         data = await container.support.list_jugni_queries(
             page=page,
             size=size,
             pending_at_jugni=pending_at_jugni,
             pending_at_user=pending_at_user,
-            query_status=query_status,
+            statuses=statuses,
         )
+    except ValueError as exc:
+        return _error(str(exc), status.HTTP_400_BAD_REQUEST)
     except SQLAlchemyError as exc:
         return await _server_error(container, exc)
     return SupportDataResponse(data=data)
@@ -136,7 +154,7 @@ async def get_support_query(
     return SupportDataResponse(data=data)
 
 
-@router.put(
+@router.post(
     "/jugni/queries/{query_id}/message",
     response_model=SupportSuccessResponse[SupportMessageResponse],
     responses={
