@@ -556,9 +556,9 @@ class StoryService:
     MAX_RETRIES = 3
     PLAN_MAX_TOKENS = 14000
     STORY_MAX_TOKENS_BY_AGE = {
-        AGE_GROUP_0_3: 4000,
-        AGE_GROUP_3_6: 7000,
-        AGE_GROUP_6_9: 9000,
+        AGE_GROUP_0_3: 9000,
+        AGE_GROUP_3_6: 10000,
+        AGE_GROUP_6_9: 12000,
     }
     IMAGE_PLAN_MAX_TOKENS_BY_AGE = {
         AGE_GROUP_0_3: 16000,

@@ -794,6 +794,12 @@ class CustomStoryWorkflowService:
                 "mode": "text",
                 "workflow_step": step.value,
                 "attempt": 1,
+                "generation_config": {
+                    "model": model,
+                    "max_output_tokens": max_tokens,
+                    "temperature": temperature,
+                    "response_mime_type": "application/json",
+                },
                 "event_id": str(event.id) if event is not None else None,
                 "retry_flag": bool(getattr(event, "retry_flag", False)) if event is not None else False,
                 "retry_comment": getattr(event, "retry_comment", None) if event is not None else None,
@@ -1984,10 +1990,14 @@ class CustomStoryWorkflowService:
         raw_text: str | None,
         provider_response: Any | None,
     ) -> None:
+        diagnostics = self._text_batch_failure_diagnostics(provider_response)
+        diagnostics["request_keys"] = list(getattr(job, "request_keys", None) or [])
+        diagnostics["missing_keys"] = list(getattr(job, "missing_keys", None) or [])
         job.response_payload = {
             "text": raw_text,
             "response": provider_response,
             "error": error_message,
+            "diagnostics": diagnostics,
         }
         await self.batch_jobs.update(job)
         await self._mark_batch_step_failed(workflow, job)
@@ -2014,6 +2024,7 @@ class CustomStoryWorkflowService:
             step_name,
             error_message=error_message,
             raw_text=raw_text,
+            diagnostics=diagnostics,
         )
 
         if step_name in {
@@ -2066,21 +2077,69 @@ class CustomStoryWorkflowService:
         *,
         error_message: str,
         raw_text: str | None,
+        diagnostics: dict[str, Any],
     ) -> None:
         logger.error(
             "[CUSTOM_TEXT_BATCH_RECONCILE_FAILED] workflow_id=%s batch_job_id=%s job_type=%s step=%s "
-            "event_id=%s retry_flag=%s retry_comment=%s response_length=%s error=%s raw_llm_response=\n%s",
+            "provider_job_name=%s provider_state=%s finish_reason=%s provider_error=%s "
+            "event_id=%s retry_flag=%s retry_comment=%s request_keys=%s missing_keys=%s "
+            "response_length=%s error=%s raw_llm_response=\n%s",
             workflow.id,
             job.id,
             self._status_value(job.job_type),
             step_name.value,
+            job.provider_job_name,
+            job.provider_state,
+            diagnostics.get("finish_reason"),
+            diagnostics.get("provider_error"),
             getattr(event, "id", None),
             bool(getattr(event, "retry_flag", False)) if event is not None else False,
             getattr(event, "retry_comment", None) if event is not None else None,
+            diagnostics.get("request_keys"),
+            diagnostics.get("missing_keys"),
             len(raw_text or ""),
             error_message,
             raw_text if raw_text is not None else "",
         )
+
+    def _text_batch_failure_diagnostics(self, provider_response: Any | None) -> dict[str, Any]:
+        response = provider_response if isinstance(provider_response, dict) else {}
+        candidate = self._first_dict(
+            response.get("response"),
+            response.get("candidate"),
+            response,
+        )
+        candidates = candidate.get("candidates") if isinstance(candidate.get("candidates"), list) else []
+        first_candidate = candidates[0] if candidates and isinstance(candidates[0], dict) else {}
+        finish_reason = (
+            first_candidate.get("finish_reason")
+            or candidate.get("finish_reason")
+            or response.get("finish_reason")
+        )
+        return {
+            "finish_reason": str(finish_reason) if finish_reason is not None else None,
+            "provider_error": self._compact_provider_error(response.get("error")),
+            "request_keys": [],
+            "missing_keys": [],
+        }
+
+    @staticmethod
+    def _first_dict(*values: Any) -> dict[str, Any]:
+        for value in values:
+            if isinstance(value, dict):
+                return value
+        return {}
+
+    @staticmethod
+    def _compact_provider_error(value: Any) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return value[:1000]
+        try:
+            return json.dumps(value, default=str)[:1000]
+        except (TypeError, ValueError):
+            return str(value)[:1000]
 
     @staticmethod
     def _extract_text_from_inlined_response(response: Any) -> str:

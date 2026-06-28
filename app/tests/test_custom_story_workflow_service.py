@@ -1366,6 +1366,8 @@ async def test_story_generation_text_batch_failure_creates_one_full_retry_event(
         provider_job_name="batches/story",
         provider_state="JOB_STATE_SUCCEEDED",
         error_message="Story generation returned 1 pages; expected 2",
+        request_keys=["STORY_GENERATION"],
+        missing_keys=["STORY_GENERATION"],
         response_payload=None,
     )
     created_events = []
@@ -1410,10 +1412,24 @@ async def test_story_generation_text_batch_failure_creates_one_full_retry_event(
         CustomStoryWorkflowStep.STORY_GENERATION,
         error_message=job.error_message,
         raw_text=raw_text,
-        provider_response={"raw": "provider"},
+        provider_response={
+            "response": {
+                "candidates": [
+                    {
+                        "finish_reason": "MAX_TOKENS",
+                    }
+                ]
+            }
+        },
     )
 
     assert job.response_payload["text"] == raw_text
+    assert job.response_payload["diagnostics"] == {
+        "finish_reason": "MAX_TOKENS",
+        "provider_error": None,
+        "request_keys": ["STORY_GENERATION"],
+        "missing_keys": ["STORY_GENERATION"],
+    }
     assert source_event.status == CustomStoryWorkflowEventStatus.FAILED
     assert source_event.error_message == job.error_message
     assert len(created_events) == 1
