@@ -38,5 +38,6 @@ def test_swagger_alias_and_openapi_tags() -> None:
         "Generic Audios",
         "Workflows",
         "Notifications",
+        "Help & Support",
         "Health",
     ]

@@ -91,6 +91,7 @@ class BaseRepository(Generic[ModelT]):
         page_size: int,
         order_by: Sequence[Any] = (),
         load_columns: Sequence[Any] | None = None,
+        loader_options: Sequence[Any] = (),
     ) -> tuple[list[ModelT], int]:
         total = await self.session.scalar(select(func.count()).select_from(self.model).where(*filters))
         id_statement = (
@@ -111,6 +112,8 @@ class BaseRepository(Generic[ModelT]):
         entity_statement = select(self.model).where(self.model.id.in_(entity_ids))
         if load_columns:
             entity_statement = entity_statement.options(load_only(*load_columns))
+        if loader_options:
+            entity_statement = entity_statement.options(*loader_options)
 
         result = await self.session.execute(entity_statement)
         entities_by_id = {entity.id: entity for entity in result.scalars().all()}

@@ -60,6 +60,10 @@ OPENAPI_TAGS = [
         "description": "User notifications, push-token registration, and notification preferences.",
     },
     {
+        "name": "Help & Support",
+        "description": "Parent support queries, conversations, and query closure.",
+    },
+    {
         "name": "Health",
         "description": "Application health and operational readiness checks.",
     },

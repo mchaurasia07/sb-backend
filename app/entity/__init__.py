@@ -28,6 +28,7 @@ from app.entity.story import Story, StoryContent
 from app.entity.story_batch_job import StoryBatchJob, StoryBatchJobStatus, StoryBatchJobType
 from app.entity.story_page import StoryPage
 from app.entity.story_step import StepStatus, StoryStep, StoryStepName
+from app.entity.support import SupportMessage, SupportMessageSender, SupportQuery, SupportQueryStatus
 from app.entity.user import AuthProvider, User
 
 __all__ = [
@@ -68,5 +69,9 @@ __all__ = [
     "StoryStep",
     "StoryStepName",
     "StepStatus",
+    "SupportMessage",
+    "SupportMessageSender",
+    "SupportQuery",
+    "SupportQueryStatus",
     "User",
 ]
