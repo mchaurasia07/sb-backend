@@ -32,10 +32,12 @@ from app.model.response.subscription import (
     CancelSubscriptionResponse,
     CurrentSubscriptionResponse,
     PaidPurchaseResponse,
+    PaidSubscriptionDetails,
     PaymentHistoryItem,
     PurchaseHistoryItem,
     SubscriptionFeatures,
     SubscriptionPageResponse,
+    SubscriptionPaymentVerificationResponse,
     SubscriptionPlanResponse,
     SubscriptionSummaryResponse,
 )
@@ -187,11 +189,49 @@ class SubscriptionService:
             )
         user_key, child_key = self._keys(user_id, child_id)
         active_subscription = await self._get_current_subscription(user_key=user_key, child_key=child_key)
-        if active_subscription is not None:
+        if active_subscription is not None and active_subscription.plan_id != "FREE_TRIAL":
             raise ConflictException(
                 "Child already has an active subscription.",
                 status_code=409,
                 code="SUBSCRIPTION_ALREADY_ACTIVE",
+            )
+
+        pending_purchase = await self._get_pending_paid_purchase(
+            user_key=user_key,
+            child_key=child_key,
+            plan_id=plan.plan_id,
+            for_update=True,
+        )
+        if pending_purchase is not None:
+            subscription_payload = (pending_purchase.metadata_json or {}).get(
+                "razorpay_subscription"
+            )
+            if not isinstance(subscription_payload, dict):
+                raise AppException(
+                    "Pending purchase is missing its Razorpay subscription details.",
+                    status_code=409,
+                    code="PENDING_PURCHASE_SUBSCRIPTION_MISSING",
+                )
+            provider_subscription_id = (
+                pending_purchase.provider_subscription_id
+                or subscription_payload.get("id")
+            )
+            payment_url = subscription_payload.get("short_url")
+            if not provider_subscription_id or not payment_url:
+                raise AppException(
+                    "Pending purchase has incomplete Razorpay subscription details.",
+                    status_code=409,
+                    code="PENDING_PURCHASE_SUBSCRIPTION_INCOMPLETE",
+                )
+            return PaidPurchaseResponse(
+                purchase_id=pending_purchase.purchase_order_id,
+                subscription=PaidSubscriptionDetails(
+                    subscription_id=provider_subscription_id,
+                    plan=pending_purchase.plan_id,
+                    status=PurchaseStatus.PENDING_PAYMENT.value,
+                    payment_url=payment_url,
+                    expires_at=subscription_payload.get("expire_by"),
+                ),
             )
 
         razorpay_plan_id = self._effective_razorpay_plan_id(plan)
@@ -221,7 +261,7 @@ class SubscriptionService:
             user_id=user_key,
             child_id=child_key,
             purchase_order_id=purchase.purchase_order_id,
-            total_count=1200 if plan.billing_cycle == BillingCycle.MONTHLY else 100,
+            total_count=60 if plan.billing_cycle == BillingCycle.MONTHLY else 60,
         )
         provider_subscription_id = subscription_payload.get("id")
         if not provider_subscription_id:
@@ -237,13 +277,14 @@ class SubscriptionService:
         }
         await self.session.commit()
         return PaidPurchaseResponse(
-            purchase_order_id=purchase.purchase_order_id,
-            provider=PaymentProvider.RAZORPAY.value,
-            razorpay_key=settings.RAZORPAY_KEY_ID,
-            razorpay_subscription_id=provider_subscription_id,
-            amount=plan.price,
-            currency=plan.currency,
-            plan_id=plan.plan_id,
+            purchase_id=purchase.purchase_order_id,
+            subscription=PaidSubscriptionDetails(
+                subscription_id=provider_subscription_id,
+                plan=plan.plan_id,
+                status=subscription_payload["status"],
+                payment_url=subscription_payload["short_url"],
+                expires_at=subscription_payload.get("expire_by"),
+            ),
         )
 
     async def verify_first_payment(
@@ -320,6 +361,157 @@ class SubscriptionService:
         await self.session.commit()
         await self.session.refresh(subscription)
         return self._subscription_summary(subscription)
+
+    async def reconcile_paid_purchase(
+        self,
+        *,
+        user_id: UUID,
+        child_id: UUID,
+        purchase_order_id: str,
+    ) -> SubscriptionPaymentVerificationResponse:
+        user_key, child_key = self._keys(user_id, child_id)
+        purchase = await self._get_purchase_order(purchase_order_id)
+        if purchase.user_id != user_key or purchase.child_id != child_key:
+            raise AppException(
+                "Purchase order does not belong to this child.",
+                status_code=403,
+                code="PURCHASE_FORBIDDEN",
+            )
+        provider_subscription_id = purchase.provider_subscription_id
+        if not provider_subscription_id:
+            raise AppException(
+                "Purchase order is missing its Razorpay subscription.",
+                status_code=409,
+                code="PURCHASE_PROVIDER_SUBSCRIPTION_MISSING",
+            )
+
+        existing = await self._get_by_provider_subscription_id(provider_subscription_id)
+        if purchase.status == PurchaseStatus.COMPLETED and existing is not None:
+            return self._payment_verification_response(
+                purchase=purchase,
+                status="SUCCESS",
+                provider_status="active",
+                can_retry=False,
+                subscription=existing,
+            )
+
+        provider_subscription = await self.razorpay.fetch_subscription(
+            provider_subscription_id
+        )
+        if provider_subscription.get("id") != provider_subscription_id:
+            raise AppException(
+                "Razorpay returned a mismatched subscription.",
+                status_code=502,
+                code="RAZORPAY_SUBSCRIPTION_MISMATCH",
+            )
+        notes = provider_subscription.get("notes")
+        if isinstance(notes, dict):
+            expected_notes = {
+                "purchase_order_id": purchase.purchase_order_id,
+                "user_id": user_key,
+                "child_id": child_key,
+                "app_plan_id": purchase.plan_id,
+            }
+            if any(str(notes.get(key)) != value for key, value in expected_notes.items()):
+                raise AppException(
+                    "Razorpay subscription ownership could not be confirmed.",
+                    status_code=409,
+                    code="RAZORPAY_SUBSCRIPTION_OWNERSHIP_MISMATCH",
+                )
+
+        provider_status = str(provider_subscription.get("status") or "unknown").lower()
+        invoices = await self.razorpay.fetch_subscription_invoices(
+            provider_subscription_id
+        )
+        paid_invoices = [
+            invoice
+            for invoice in invoices
+            if invoice.get("status") == "paid" and invoice.get("payment_id")
+        ]
+        paid_invoice = max(
+            paid_invoices,
+            key=lambda invoice: int(invoice.get("paid_at") or invoice.get("date") or 0),
+            default=None,
+        )
+
+        # Re-lock after provider I/O. Both webhook and interactive verification
+        # serialize on this row before creating financial records.
+        purchase = await self._get_purchase_order(purchase_order_id, for_update=True)
+        existing = await self._get_by_provider_subscription_id(provider_subscription_id)
+        if purchase.status == PurchaseStatus.COMPLETED and existing is not None:
+            return self._payment_verification_response(
+                purchase=purchase,
+                status="SUCCESS",
+                provider_status=provider_status,
+                can_retry=False,
+                subscription=existing,
+            )
+
+        if provider_status in {"active", "completed"} and paid_invoice is not None:
+            subscription = await self._activate_initial_paid_subscription(
+                purchase=purchase,
+                provider_subscription=provider_subscription,
+                paid_invoice=paid_invoice,
+            )
+            await self.session.commit()
+            logger.info(
+                "subscription_purchase_reconciled",
+                purchase_id=purchase.purchase_order_id,
+                provider_subscription_id=provider_subscription_id,
+                provider_status=provider_status,
+                result="SUCCESS",
+            )
+            return self._payment_verification_response(
+                purchase=purchase,
+                status="SUCCESS",
+                provider_status=provider_status,
+                can_retry=False,
+                subscription=subscription,
+            )
+
+        expires_at = provider_subscription.get("expire_by")
+        expired_by_time = (
+            isinstance(expires_at, int)
+            and self._timestamp_from_razorpay(expires_at) <= utc_now()
+        )
+        if provider_status == "expired" or expired_by_time:
+            purchase.status = PurchaseStatus.PAYMENT_FAILED
+            result_status = "EXPIRED"
+            can_retry = False
+        elif provider_status in {"halted", "cancelled"}:
+            purchase.status = PurchaseStatus.PAYMENT_FAILED
+            result_status = "FAILED"
+            can_retry = False
+        else:
+            latest_failure = (purchase.metadata_json or {}).get(
+                "latest_initial_payment_failure"
+            )
+            result_status = "FAILED" if latest_failure else "PENDING"
+            can_retry = True
+
+        purchase.metadata_json = {
+            **(purchase.metadata_json or {}),
+            "last_reconciliation": {
+                "provider_status": provider_status,
+                "invoice_count": len(invoices),
+                "result": result_status,
+            },
+        }
+        await self.session.commit()
+        logger.info(
+            "subscription_purchase_reconciled",
+            purchase_id=purchase.purchase_order_id,
+            provider_subscription_id=provider_subscription_id,
+            provider_status=provider_status,
+            result=result_status,
+        )
+        return self._payment_verification_response(
+            purchase=purchase,
+            status=result_status,
+            provider_status=provider_status,
+            can_retry=can_retry,
+            subscription=None,
+        )
 
     async def process_razorpay_webhook(
         self,
@@ -562,7 +754,11 @@ class SubscriptionService:
         provider_subscription_id: str | None,
         provider_payment_id: str | None,
     ) -> None:
-        if event_type == "subscription.activated":
+        if event_type == "subscription.authenticated":
+            await self._webhook_subscription_authenticated(
+                provider_subscription_id, payload
+            )
+        elif event_type == "subscription.activated":
             await self._webhook_subscription_activated(provider_subscription_id)
         elif event_type == "subscription.charged":
             await self._webhook_subscription_charged(payload, provider_subscription_id, provider_payment_id)
@@ -579,8 +775,43 @@ class SubscriptionService:
         else:
             logger.info("razorpay_webhook_ignored", event_type=event_type)
 
+    async def _webhook_subscription_authenticated(
+        self,
+        provider_subscription_id: str | None,
+        payload: dict[str, Any],
+    ) -> None:
+        purchase = await self._get_purchase_by_provider_subscription(
+            provider_subscription_id
+        )
+        if purchase is None:
+            return
+        subscription_entity = self._entity(payload, "subscription")
+        purchase.metadata_json = {
+            **(purchase.metadata_json or {}),
+            "last_provider_status": subscription_entity.get("status")
+            or "authenticated",
+        }
+        await self.session.flush()
+
     async def _webhook_subscription_activated(self, provider_subscription_id: str | None) -> None:
-        subscription = await self._require_provider_subscription(provider_subscription_id)
+        subscription = await self._get_by_provider_subscription_id(
+            provider_subscription_id
+        )
+        if subscription is None:
+            purchase = await self._get_purchase_by_provider_subscription(
+                provider_subscription_id
+            )
+            if purchase is None:
+                raise NotFoundException(
+                    "Purchase order not found for Razorpay event.",
+                    code="RAZORPAY_PURCHASE_NOT_FOUND",
+                )
+            await self.reconcile_paid_purchase(
+                user_id=UUID(purchase.user_id),
+                child_id=UUID(purchase.child_id),
+                purchase_order_id=purchase.purchase_order_id,
+            )
+            return
         subscription.status = SubscriptionStatus.ACTIVE
         if not subscription.current_period_end:
             plan = await self._get_plan(subscription.plan_id)
@@ -595,7 +826,46 @@ class SubscriptionService:
         provider_subscription_id: str | None,
         provider_payment_id: str | None,
     ) -> None:
-        subscription = await self._require_provider_subscription(provider_subscription_id)
+        subscription = await self._get_by_provider_subscription_id(
+            provider_subscription_id
+        )
+        if subscription is None:
+            purchase = await self._get_purchase_by_provider_subscription(
+                provider_subscription_id
+            )
+            if purchase is None:
+                raise NotFoundException(
+                    "Purchase order not found for Razorpay event.",
+                    code="RAZORPAY_PURCHASE_NOT_FOUND",
+                )
+            purchase = await self._get_purchase_order(
+                purchase.purchase_order_id, for_update=True
+            )
+            payment_entity = self._entity(payload, "payment")
+            invoice_entity = self._entity(payload, "invoice")
+            subscription_entity = self._entity(payload, "subscription")
+            if not provider_payment_id:
+                raise AppException(
+                    "Razorpay charged event is missing its payment.",
+                    status_code=400,
+                    code="RAZORPAY_PAYMENT_ID_MISSING",
+                )
+            paid_invoice = {
+                **invoice_entity,
+                "id": invoice_entity.get("id"),
+                "status": "paid",
+                "payment_id": provider_payment_id,
+                "amount_paid": payment_entity.get("amount"),
+                "currency": payment_entity.get("currency"),
+                "paid_at": payment_entity.get("created_at"),
+            }
+            await self._activate_initial_paid_subscription(
+                purchase=purchase,
+                provider_subscription=subscription_entity,
+                paid_invoice=paid_invoice,
+            )
+            await self.session.flush()
+            return
         plan = await self._get_plan(subscription.plan_id)
         payment_entity = self._entity(payload, "payment")
         invoice_entity = self._entity(payload, "invoice")
@@ -662,7 +932,27 @@ class SubscriptionService:
     ) -> None:
         subscription = await self._get_by_provider_subscription_id(provider_subscription_id) if provider_subscription_id else None
         if subscription is None:
-            logger.info("razorpay_payment_failed_without_known_subscription", provider_subscription_id=provider_subscription_id)
+            purchase = await self._get_purchase_by_provider_subscription(
+                provider_subscription_id
+            )
+            if purchase is not None:
+                payment_entity = self._entity(payload, "payment")
+                purchase.metadata_json = {
+                    **(purchase.metadata_json or {}),
+                    "latest_initial_payment_failure": {
+                        "payment_id": provider_payment_id,
+                        "reason": payment_entity.get("error_description")
+                        or payment_entity.get("error_reason")
+                        or "Payment failed",
+                        "created_at": payment_entity.get("created_at"),
+                    },
+                }
+                await self.session.flush()
+                return
+            logger.info(
+                "razorpay_payment_failed_without_known_subscription",
+                provider_subscription_id=provider_subscription_id,
+            )
             return
         payment_entity = self._entity(payload, "payment")
         failure_reason = payment_entity.get("error_description") or payment_entity.get("error_reason") or "Payment failed"
@@ -719,12 +1009,43 @@ class SubscriptionService:
             raise NotFoundException("Subscription plan not found.", code="SUBSCRIPTION_PLAN_NOT_FOUND")
         return plan
 
-    async def _get_purchase_order(self, purchase_order_id: str) -> PurchaseOrder:
-        result = await self.session.execute(select(PurchaseOrder).where(PurchaseOrder.purchase_order_id == purchase_order_id))
+    async def _get_purchase_order(
+        self, purchase_order_id: str, *, for_update: bool = False
+    ) -> PurchaseOrder:
+        statement = select(PurchaseOrder).where(
+            PurchaseOrder.purchase_order_id == purchase_order_id
+        )
+        if for_update:
+            statement = statement.with_for_update()
+        result = await self.session.execute(statement)
         purchase = result.scalar_one_or_none()
         if purchase is None:
             raise NotFoundException("Purchase order not found.", code="PURCHASE_ORDER_NOT_FOUND")
         return purchase
+
+    async def _get_pending_paid_purchase(
+        self,
+        *,
+        user_key: str,
+        child_key: str,
+        plan_id: str,
+        for_update: bool = False,
+    ) -> PurchaseOrder | None:
+        statement = (
+            select(PurchaseOrder)
+            .where(
+                PurchaseOrder.user_id == user_key,
+                PurchaseOrder.child_id == child_key,
+                PurchaseOrder.plan_id == plan_id,
+                PurchaseOrder.status == PurchaseStatus.PENDING_PAYMENT,
+            )
+            .order_by(PurchaseOrder.created_at.desc())
+            .limit(1)
+        )
+        if for_update:
+            statement = statement.with_for_update()
+        result = await self.session.execute(statement)
+        return result.scalar_one_or_none()
 
     async def _get_event(self, event_id: str) -> SubscriptionEvent | None:
         result = await self.session.execute(select(SubscriptionEvent).where(SubscriptionEvent.event_id == event_id))
@@ -760,6 +1081,21 @@ class SubscriptionService:
             return None
         result = await self.session.execute(
             select(ChildSubscription).where(ChildSubscription.provider_subscription_id == provider_subscription_id).limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def _get_purchase_by_provider_subscription(
+        self, provider_subscription_id: str | None
+    ) -> PurchaseOrder | None:
+        if not provider_subscription_id:
+            return None
+        result = await self.session.execute(
+            select(PurchaseOrder)
+            .where(
+                PurchaseOrder.provider_subscription_id
+                == provider_subscription_id
+            )
+            .limit(1)
         )
         return result.scalar_one_or_none()
 
@@ -820,6 +1156,83 @@ class SubscriptionService:
         await self.session.flush()
         return payment
 
+    async def _activate_initial_paid_subscription(
+        self,
+        *,
+        purchase: PurchaseOrder,
+        provider_subscription: dict[str, Any],
+        paid_invoice: dict[str, Any],
+    ) -> ChildSubscription:
+        provider_subscription_id = purchase.provider_subscription_id
+        existing = await self._get_by_provider_subscription_id(
+            provider_subscription_id
+        )
+        if existing is not None:
+            purchase.status = PurchaseStatus.COMPLETED
+            return existing
+
+        current = await self._get_current_subscription(
+            user_key=purchase.user_id,
+            child_key=purchase.child_id,
+        )
+        if current is not None and current.plan_id != "FREE_TRIAL":
+            raise ConflictException(
+                "Child already has an active paid subscription.",
+                status_code=409,
+                code="SUBSCRIPTION_ALREADY_ACTIVE",
+            )
+
+        plan = await self._get_plan(purchase.plan_id)
+        now = utc_now()
+        period_start = (
+            self._timestamp_from_razorpay(provider_subscription.get("current_start"))
+            or self._timestamp_from_razorpay(paid_invoice.get("paid_at"))
+            or now
+        )
+        period_end = self._timestamp_from_razorpay(
+            provider_subscription.get("current_end")
+        ) or calculate_period_end(period_start, plan)
+        subscription = ChildSubscription(
+            subscription_id=generate_subscription_id(),
+            user_id=purchase.user_id,
+            child_id=purchase.child_id,
+            plan_id=plan.plan_id,
+            billing_cycle=plan.billing_cycle,
+            status=SubscriptionStatus.ACTIVE,
+            start_date=period_start,
+            current_period_start=period_start,
+            current_period_end=period_end,
+            renewal_date=period_end,
+            expiry_date=period_end,
+            auto_renew=True,
+            provider=PaymentProvider.RAZORPAY.value,
+            provider_subscription_id=provider_subscription_id,
+            stories_used=0,
+            stories_limit=plan.stories_per_month,
+        )
+        self.session.add(subscription)
+        await self.session.flush()
+        await self._create_payment_if_absent(
+            purchase_order_id=purchase.purchase_order_id,
+            subscription_id=subscription.subscription_id,
+            user_id=purchase.user_id,
+            child_id=purchase.child_id,
+            plan_id=plan.plan_id,
+            amount=self._amount_from_razorpay(
+                {"amount": paid_invoice.get("amount_paid") or paid_invoice.get("amount")},
+                fallback=plan.price,
+            ),
+            currency=paid_invoice.get("currency") or plan.currency,
+            status=PaymentStatus.SUCCESS,
+            payment_type=PaymentType.INITIAL,
+            provider_payment_id=paid_invoice.get("payment_id"),
+            provider_subscription_id=provider_subscription_id,
+            provider_invoice_id=paid_invoice.get("id"),
+            paid_at=self._timestamp_from_razorpay(paid_invoice.get("paid_at")) or now,
+        )
+        purchase.status = PurchaseStatus.COMPLETED
+        return subscription
+
     async def _mark_purchase_completed_by_provider_subscription(self, provider_subscription_id: str | None) -> None:
         if not provider_subscription_id:
             return
@@ -866,6 +1279,28 @@ class SubscriptionService:
             expiry_date=subscription.expiry_date,
             billing_cycle=subscription.billing_cycle.value,
             auto_renew=subscription.auto_renew,
+        )
+
+    @staticmethod
+    def _payment_verification_response(
+        *,
+        purchase: PurchaseOrder,
+        status: str,
+        provider_status: str,
+        can_retry: bool,
+        subscription: ChildSubscription | None,
+    ) -> SubscriptionPaymentVerificationResponse:
+        return SubscriptionPaymentVerificationResponse(
+            purchase_id=purchase.purchase_order_id,
+            status=status,
+            provider_status=provider_status,
+            can_retry=can_retry,
+            retry_after_seconds=3 if status == "PENDING" else None,
+            subscription=(
+                SubscriptionService._subscription_summary(subscription)
+                if subscription is not None
+                else None
+            ),
         )
 
     @staticmethod

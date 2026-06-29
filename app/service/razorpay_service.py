@@ -94,6 +94,51 @@ class RazorpayService:
             )
         return response.json()
 
+    async def fetch_subscription(self, provider_subscription_id: str) -> dict[str, Any]:
+        self._require_api_credentials()
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.get(
+                f"{self.BASE_URL}/subscriptions/{provider_subscription_id}",
+                auth=(self.key_id, self.key_secret),
+            )
+        if response.status_code >= 400:
+            logger.error(
+                "razorpay_fetch_subscription_failed",
+                provider_subscription_id=provider_subscription_id,
+                status_code=response.status_code,
+            )
+            raise AppException(
+                "Unable to confirm the Razorpay subscription.",
+                status_code=502,
+                code="RAZORPAY_SUBSCRIPTION_FETCH_FAILED",
+            )
+        return response.json()
+
+    async def fetch_subscription_invoices(
+        self, provider_subscription_id: str
+    ) -> list[dict[str, Any]]:
+        self._require_api_credentials()
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.get(
+                f"{self.BASE_URL}/invoices",
+                params={"subscription_id": provider_subscription_id},
+                auth=(self.key_id, self.key_secret),
+            )
+        if response.status_code >= 400:
+            logger.error(
+                "razorpay_fetch_subscription_invoices_failed",
+                provider_subscription_id=provider_subscription_id,
+                status_code=response.status_code,
+            )
+            raise AppException(
+                "Unable to confirm the Razorpay payment.",
+                status_code=502,
+                code="RAZORPAY_INVOICES_FETCH_FAILED",
+            )
+        payload = response.json()
+        items = payload.get("items", [])
+        return items if isinstance(items, list) else []
+
     def verify_subscription_payment_signature(
         self,
         *,

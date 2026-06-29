@@ -55,11 +55,11 @@ class Settings(BaseSettings):
     NOTIFICATION_ADMIN_TOKEN: str = ""
 
     # Razorpay subscription billing.
-    RAZORPAY_KEY_ID: str = ""
-    RAZORPAY_KEY_SECRET: str = ""
-    RAZORPAY_WEBHOOK_SECRET: str = ""
-    RAZORPAY_MONTHLY_PLAN_ID: str = ""
-    RAZORPAY_YEARLY_PLAN_ID: str = ""
+    RAZORPAY_KEY_ID: str = "rzp_test_T78XNVR3u2xPyC"
+    RAZORPAY_KEY_SECRET: str = "NGhcXwN2DEF59fRKeS5nMlNd"
+    RAZORPAY_WEBHOOK_SECRET: str = "secret_1234567890"
+    RAZORPAY_MONTHLY_PLAN_ID: str = "plan_T78qnm4308PSMc"
+    RAZORPAY_YEARLY_PLAN_ID: str = "plan_T78rtEMrGcWfrO"
     SUBSCRIPTION_EXPIRY_SCHEDULER_ENABLED: bool = True
     SUBSCRIPTION_EXPIRY_INTERVAL_MINUTES: int = 60
     SUBSCRIPTION_EXPIRY_START_MINUTE: int = 6

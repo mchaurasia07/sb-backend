@@ -23,6 +23,7 @@ from app.model.response.subscription import (
     PurchaseHistoryItem,
     SubscriptionPageResponse,
     SubscriptionPlanResponse,
+    SubscriptionPaymentVerificationResponse,
     SubscriptionSummaryResponse,
 )
 
@@ -79,7 +80,27 @@ async def create_paid_subscription_purchase(
         child_id=child_id,
         plan_id=payload.plan_id,
     )
-    return success_response(data, "Subscription purchase created successfully.")
+    return success_response(data, "Paid subscription purchase created successfully.")
+
+
+@router.post(
+    "/user/{user_id}/child/{child_id}/subscription/purchase/{purchase_id}/verify",
+    response_model=ApiResponse[SubscriptionPaymentVerificationResponse],
+)
+async def reconcile_subscription_purchase(
+    user_id: UUID,
+    child_id: UUID,
+    purchase_id: str,
+    current_user: User = Depends(get_current_user),
+    container: RequestContainer = Depends(get_request_container),
+) -> ApiResponse[SubscriptionPaymentVerificationResponse]:
+    _authorize_path_user(current_user, user_id)
+    data = await container.subscription.reconcile_paid_purchase(
+        user_id=user_id,
+        child_id=child_id,
+        purchase_order_id=purchase_id,
+    )
+    return success_response(data, "Subscription payment status retrieved successfully.")
 
 
 @router.post(

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Generic, TypeVar
+from typing import Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict
 
@@ -39,14 +39,18 @@ class SubscriptionSummaryResponse(BaseModel):
     auto_renew: bool
 
 
+class PaidSubscriptionDetails(BaseModel):
+    subscription_id: str
+    plan: str
+    status: str
+    payment_url: str
+    expires_at: int | None
+
+
 class PaidPurchaseResponse(BaseModel):
-    purchase_order_id: str
-    provider: str
-    razorpay_key: str
-    razorpay_subscription_id: str
-    amount: Decimal
-    currency: str
-    plan_id: str
+    purchase_type: Literal["subscription"] = "subscription"
+    purchase_id: str
+    subscription: PaidSubscriptionDetails
 
 
 class CurrentSubscriptionResponse(SubscriptionSummaryResponse):
@@ -56,6 +60,15 @@ class CurrentSubscriptionResponse(SubscriptionSummaryResponse):
     stories_used: int
     stories_limit: int
     can_create_story: bool
+
+
+class SubscriptionPaymentVerificationResponse(BaseModel):
+    purchase_id: str
+    status: Literal["SUCCESS", "PENDING", "FAILED", "EXPIRED"]
+    provider_status: str
+    can_retry: bool
+    retry_after_seconds: int | None
+    subscription: SubscriptionSummaryResponse | None
 
 
 class PurchaseHistoryItem(BaseModel):

@@ -87,6 +87,11 @@ class ChildSubscription(TimestampMixin, Base):
         Index("idx_child_subscription_user_child", "user_id", "child_id"),
         Index("idx_child_subscription_status", "status"),
         Index("idx_child_subscription_provider_sub", "provider_subscription_id"),
+        Index(
+            "ux_child_subscription_provider_sub",
+            "provider_subscription_id",
+            unique=True,
+        ),
         Index("ix_child_subscriptions_subscription_id", "subscription_id", unique=True),
     )
 
@@ -117,6 +122,11 @@ class PurchaseOrder(TimestampMixin, Base):
     __table_args__ = (
         Index("idx_purchase_user_child", "user_id", "child_id"),
         Index("idx_purchase_provider_sub", "provider_subscription_id"),
+        Index(
+            "ux_purchase_provider_sub",
+            "provider_subscription_id",
+            unique=True,
+        ),
         Index("idx_purchase_status", "status"),
         Index("ix_purchase_orders_purchase_order_id", "purchase_order_id", unique=True),
     )
@@ -142,6 +152,11 @@ class Payment(TimestampMixin, Base):
         Index("idx_payment_user_child", "user_id", "child_id"),
         Index("idx_payment_subscription", "subscription_id"),
         Index("idx_payment_provider_payment", "provider_payment_id"),
+        Index(
+            "ux_payment_provider_payment",
+            "provider_payment_id",
+            unique=True,
+        ),
         Index("idx_payment_provider_sub", "provider_subscription_id"),
         Index("ix_payments_payment_id", "payment_id", unique=True),
     )
