@@ -1,8 +1,8 @@
 from enum import Enum
-from typing import Annotated, Literal
+from typing import Annotated
 from uuid import UUID
 
-from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.core.age_groups import AGE_GROUP_0_3, AGE_GROUP_3_6, AGE_GROUP_6_9, validate_age_group
 from app.entity.custom_story_workflow import CustomStoryWorkflowType
@@ -70,7 +70,7 @@ class StoryGenerationRequest(BaseModel):
 
     story_type: CustomStoryWorkflowType = Field(
         default=CustomStoryWorkflowType.CUSTOM,
-        description="Workflow/story target type. CUSTOM requires child_id; GENERIC publishes to the generic catalog.",
+        description="Workflow/story target type. CUSTOM requires child_id; GENERIC creates a shared story.",
     )
     child_id: UUID | None = Field(default=None, description="Child profile ID. Required only when story_type is CUSTOM.")
     reader_category: ReaderCategory = Field(
@@ -91,43 +91,21 @@ class StoryGenerationRequest(BaseModel):
     category: str | None = Field(None, max_length=100, description="Story category (e.g., 'adventure')")
     learning_goal: str | None = Field(None, max_length=500, description="Educational objective")
     context: str | None = Field(None, max_length=2000, description="Additional context or preferences")
-    title: str | None = Field(default=None, min_length=1, max_length=255, description="Optional title idea for generic workflows.")
-    actual_story: str | None = Field(default=None, min_length=1, max_length=50000, description="Legacy generic workflow story idea alias.")
-    theme: str | None = Field(default=None, max_length=100, description="Legacy generic workflow theme alias.")
-    genre: str | None = Field(default=None, max_length=100, description="Legacy generic workflow genre alias.")
-    status: Literal["active", "inactive"] = Field(default="inactive", description="Publish status used when a generic workflow publishes.")
+    title: str | None = Field(default=None, min_length=1, max_length=255, description="Optional story title.")
     languages: list[str] = Field(
         default_factory=lambda: ["en"],
         min_length=1,
         max_length=3,
         description="Story content/narration languages. Supported: en, hi, mr.",
     )
-    language: str | None = Field(
-        default=None,
-        exclude=True,
-        description="Legacy single-language request alias; use languages for new clients.",
-    )
-
     # Testing flags
     skip_image_generation: bool = Field(False, description="Skip image generation for testing")
     execute_image: bool | None = Field(None, description="Generate story images. When omitted, this is derived from skip_image_generation.")
-    execute_narration: Annotated[bool, Field(
-        True,
-        validation_alias=AliasChoices("execute_narration", "execute_narration"),
-        description="Generate page narration audio",
-    )]
+    execute_narration: Annotated[bool, Field(True, description="Generate page narration audio")]
     skip_validation: bool = Field(False, description="Skip validation steps for testing")
     execute_workflow: bool = Field(False, description="Start background workflow execution after saving. Defaults to false so create only saves the workflow.")
 
-    @model_validator(mode="before")
-    @classmethod
-    def apply_language_alias(cls, data):
-        if isinstance(data, dict) and "languages" not in data and data.get("language"):
-            data = dict(data)
-            data["languages"] = [data["language"]]
-        return data
-
-    @field_validator("category", "learning_goal", "context", "language", "title", "actual_story", "theme", "genre", mode="before")
+    @field_validator("category", "learning_goal", "context", "title", mode="before")
     @classmethod
     def normalize_text(cls, value):
         if value is None:
@@ -187,18 +165,12 @@ class StoryGenerationRequest(BaseModel):
             self.execute_image = not self.skip_image_generation
         else:
             self.skip_image_generation = not self.execute_image
-        self.language = self.languages[0]
-
         if self.story_type == CustomStoryWorkflowType.CUSTOM:
             if self.child_id is None:
                 raise ValueError("child_id is required when story_type is CUSTOM")
         else:
             self.child_id = None
             self.use_child_character = False
-            if self.category is None:
-                self.category = self.theme or self.genre
-            if self.context is None:
-                self.context = self.actual_story
 
         if not (self.category or self.learning_goal or self.context):
             raise ValueError("Story workflows require category, learning_goal, or context")

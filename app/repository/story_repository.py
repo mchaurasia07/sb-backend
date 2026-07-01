@@ -17,8 +17,8 @@ class StoryRepository:
 
     async def create(
         self,
-        user_id: UUID,
-        child_id: UUID,
+        user_id: UUID | None,
+        child_id: UUID | None,
         age_group: str,
         **kwargs,
     ) -> Story:

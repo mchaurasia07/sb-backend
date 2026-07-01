@@ -31,7 +31,6 @@ class CustomStoryWorkflowRepository:
             CustomStoryWorkflowEntity.user_id,
             CustomStoryWorkflowEntity.child_id,
             CustomStoryWorkflowEntity.story_id,
-            CustomStoryWorkflowEntity.generic_story_id,
             CustomStoryWorkflowEntity.request_number,
             CustomStoryWorkflowEntity.story_type,
             CustomStoryWorkflowEntity.age_group,
@@ -39,7 +38,6 @@ class CustomStoryWorkflowRepository:
             CustomStoryWorkflowEntity.learning_goal,
             CustomStoryWorkflowEntity.context,
             CustomStoryWorkflowEntity.languages,
-            CustomStoryWorkflowEntity.publish_status,
             CustomStoryWorkflowEntity.reader_category,
             CustomStoryWorkflowEntity.use_child_character,
             CustomStoryWorkflowEntity.execute_image,
@@ -472,12 +470,10 @@ class CustomStoryBatchJobRepository:
         provider_model: str | None,
         request_payload: dict | None = None,
         story_id: UUID | None = None,
-        generic_story_id: UUID | None = None,
     ) -> CustomStoryBatchJobEntity:
         job = CustomStoryBatchJobEntity(
             workflow_id=workflow_id,
             story_id=story_id,
-            generic_story_id=generic_story_id,
             job_type=job_type,
             status=StoryBatchJobStatus.SUBMITTED,
             provider="google",
@@ -550,7 +546,6 @@ class CustomStoryBatchJobRepository:
         workflow_id: UUID | None = None,
         status: StoryBatchJobStatus | None = None,
         story_type: CustomStoryWorkflowType | str | None = None,
-        generic_story_id: UUID | None = None,
         job_type: StoryBatchJobType | None = None,
         provider: str | None = None,
     ) -> tuple[list[CustomStoryBatchJobEntity], int]:
@@ -562,9 +557,6 @@ class CustomStoryBatchJobRepository:
 
         if story_type is not None:
             filters.append(CustomStoryWorkflowEntity.story_type == story_type)
-
-        if generic_story_id is not None:
-            filters.append(CustomStoryBatchJobEntity.generic_story_id == generic_story_id)
 
         if status is not None:
             filters.append(CustomStoryBatchJobEntity.status == status)
@@ -600,7 +592,6 @@ class CustomStoryBatchJobRepository:
                     CustomStoryBatchJobEntity.id,
                     CustomStoryBatchJobEntity.workflow_id,
                     CustomStoryBatchJobEntity.story_id,
-                    CustomStoryBatchJobEntity.generic_story_id,
                     CustomStoryBatchJobEntity.job_type,
                     CustomStoryBatchJobEntity.status,
                     CustomStoryBatchJobEntity.provider,

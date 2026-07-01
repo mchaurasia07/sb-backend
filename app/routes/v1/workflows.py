@@ -37,6 +37,14 @@ class WorkflowsRouter:
             methods=["GET"],
             response_model=ApiResponse[PaginatedResponse[CustomStoryWorkflowResponse]],
         )
+
+        self.router.add_api_route(
+            "/all",
+            self.list_all_workflows,
+            methods=["GET"],
+            response_model=ApiResponse[PaginatedResponse[CustomStoryWorkflowResponse]],
+        )
+
         self.router.add_api_route(
             "/events/process",
             self.process_workflow_events,
@@ -137,6 +145,25 @@ class WorkflowsRouter:
         )
         return success_response(data, "Workflows retrieved successfully")
 
+    async def list_all_workflows(
+        self,
+        page: int = Query(1, ge=1),
+        page_size: int = Query(20, ge=1, le=100),
+        status_filter: str | None = Query(default=None, alias="status"),
+        workflow_type_filter: CustomStoryWorkflowType | None = Query(default=None, alias="type"),
+        current_user: User = Depends(get_current_user),
+        container: RequestContainer = Depends(get_request_container),
+    ) -> ApiResponse[PaginatedResponse[CustomStoryWorkflowResponse]]:
+
+        data = await container.workflow_service.list(
+            current_user.id,
+            page=page,
+            page_size=page_size,
+            status_filter=status_filter,
+            workflow_type=workflow_type_filter,
+        )
+        return success_response(data, "Workflows retrieved successfully")
+
     async def process_workflow_events(
         self,
         limit: int = Query(10, ge=1, le=100),
@@ -154,7 +181,6 @@ class WorkflowsRouter:
         workflow_id: UUID | None = Query(default=None),
         story_type: CustomStoryWorkflowType | None = Query(default=None),
         status_filter: StoryBatchJobStatus | None = Query(default=None, alias="status"),
-        generic_story_id: UUID | None = Query(default=None),
         job_type: StoryBatchJobType | None = Query(default=None),
         provider: str | None = Query(default=None),
         current_user: User = Depends(get_current_user),
@@ -167,7 +193,6 @@ class WorkflowsRouter:
             workflow_id=workflow_id,
             story_type=story_type,
             status_filter=status_filter,
-            generic_story_id=generic_story_id,
             job_type=job_type,
             provider=provider,
         )

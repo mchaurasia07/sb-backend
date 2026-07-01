@@ -7,7 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import NotFoundException
 from app.entity.custom_story_workflow import CustomStoryWorkflowType
 from app.entity.story_batch_job import StoryBatchJobStatus, StoryBatchJobType
-from app.model.request.story import StoryGenerationRequest
 from app.model.response.common import PaginatedResponse
 from app.model.response.custom_story_workflow import (
     CustomStoryWorkflowBatchJobResponse,
@@ -39,11 +38,6 @@ class WorkflowService(CustomStoryWorkflowService):
         self.events = self.event_repo
         self.batch_jobs = self.batch_job_repo
 
-    async def create(self, user_id: UUID, payload: StoryGenerationRequest) -> CustomStoryWorkflowResponse:
-        if payload.story_type == CustomStoryWorkflowType.GENERIC:
-            return await super().create_generic(user_id, payload)
-        return await super().create(user_id, payload)
-
     async def list_workflows(
         self,
         user_id: UUID,
@@ -56,13 +50,23 @@ class WorkflowService(CustomStoryWorkflowService):
         workflow_type: CustomStoryWorkflowType | None = None,
     ) -> PaginatedResponse[CustomStoryWorkflowResponse]:
         if workflow_id is not None:
-            workflows, total = await self.workflow_repo.list_workflows(
-                user_id,
-                page=page,
-                page_size=page_size,
-                workflow_id=workflow_id,
-                workflow_type=workflow_type,
-            )
+            if status_filter is None:
+                workflows, total = await self.workflow_repo.list_workflows(
+                    user_id,
+                    page=page,
+                    page_size=page_size,
+                    workflow_id=workflow_id,
+                    workflow_type=workflow_type,
+                )
+            else:
+                workflows, total = await self.workflow_repo.list_workflows(
+                    user_id,
+                    page=page,
+                    page_size=page_size,
+                    workflow_id=workflow_id,
+                    workflow_type=workflow_type,
+                    status_filter=status_filter,
+                )
         else:
             workflows, total = await self.workflow_repo.list_for_user(
                 user_id,
@@ -79,22 +83,29 @@ class WorkflowService(CustomStoryWorkflowService):
             page_size=page_size,
         )
 
+
     async def list(
         self,
         user_id: UUID,
         *,
         page: int,
         page_size: int,
-        child_id: UUID | None = None,
         status_filter: str | None = None,
+        workflow_type: CustomStoryWorkflowType | None = None,
+        workflow_id: UUID | None = None,
     ) -> PaginatedResponse[CustomStoryWorkflowResponse]:
-        return await self.list_workflows(
-            user_id,
+        workflows, total = await self.workflow_repo.list_workflows(
             page=page,
             page_size=page_size,
-            child_id=child_id,
+            workflow_type=workflow_type,
+            workflow_id=workflow_id,
             status_filter=status_filter,
-            workflow_type=CustomStoryWorkflowType.CUSTOM,
+        )
+        return PaginatedResponse[CustomStoryWorkflowResponse].create(
+            items=[self._response(workflow) for workflow in workflows],
+            total=total,
+            page=page,
+            page_size=page_size,
         )
 
     async def get(self, user_id: UUID, workflow_id: UUID) -> CustomStoryWorkflowResponse:
@@ -116,7 +127,7 @@ class WorkflowService(CustomStoryWorkflowService):
         workflow_id: UUID,
         story_type: CustomStoryWorkflowType | str | None = None,
     ) -> list[CustomStoryWorkflowEventResponse]:
-        workflow = await self.workflow_repo.get_for_user(user_id, workflow_id)
+        workflow = await self.workflow_repo.get_by_workflow_id(user_id, workflow_id)
         if workflow is None:
             raise NotFoundException("Custom story workflow not found")
         events = await self.event_repo.list_by_workflow_desc(workflow.id, story_type=story_type)
@@ -131,7 +142,6 @@ class WorkflowService(CustomStoryWorkflowService):
         workflow_id: UUID | None = None,
         status_filter: StoryBatchJobStatus | None = None,
         story_type: CustomStoryWorkflowType | None = None,
-        generic_story_id: UUID | None = None,
         job_type: StoryBatchJobType | None = None,
         provider: str | None = None,
     ) -> PaginatedResponse[CustomStoryWorkflowBatchJobResponse]:
@@ -142,7 +152,6 @@ class WorkflowService(CustomStoryWorkflowService):
             workflow_id=workflow_id,
             status=status_filter,
             story_type=story_type,
-            generic_story_id=generic_story_id,
             job_type=job_type,
             provider=provider,
         )

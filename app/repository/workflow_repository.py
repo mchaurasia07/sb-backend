@@ -31,7 +31,6 @@ class WorkflowRepository(BaseRepository[CustomStoryWorkflowEntity]):
             CustomStoryWorkflowEntity.user_id,
             CustomStoryWorkflowEntity.child_id,
             CustomStoryWorkflowEntity.story_id,
-            CustomStoryWorkflowEntity.generic_story_id,
             CustomStoryWorkflowEntity.request_number,
             CustomStoryWorkflowEntity.story_type,
             CustomStoryWorkflowEntity.age_group,
@@ -39,7 +38,6 @@ class WorkflowRepository(BaseRepository[CustomStoryWorkflowEntity]):
             CustomStoryWorkflowEntity.learning_goal,
             CustomStoryWorkflowEntity.context,
             CustomStoryWorkflowEntity.languages,
-            CustomStoryWorkflowEntity.publish_status,
             CustomStoryWorkflowEntity.reader_category,
             CustomStoryWorkflowEntity.use_child_character,
             CustomStoryWorkflowEntity.execute_image,
@@ -67,11 +65,10 @@ class WorkflowRepository(BaseRepository[CustomStoryWorkflowEntity]):
         latest = await self.session.scalar(select(func.max(CustomStoryWorkflowEntity.request_number)))
         return int(latest or 0) + 1
 
-    async def get_for_user(self, user_id: UUID, workflow_id: UUID) -> CustomStoryWorkflowEntity | None:
+    async def get_by_workflow_id(self, _user_id: UUID, workflow_id: UUID) -> CustomStoryWorkflowEntity | None:
         return await self.get_one(
             filters=(
                 CustomStoryWorkflowEntity.id == workflow_id,
-                CustomStoryWorkflowEntity.user_id == user_id,
             )
         )
 
@@ -95,6 +92,7 @@ class WorkflowRepository(BaseRepository[CustomStoryWorkflowEntity]):
         page_size: int,
         workflow_id: UUID | None = None,
         workflow_type: CustomStoryWorkflowType | str | None = None,
+        status_filter: str | None = None,
     ) -> tuple[list[CustomStoryWorkflowEntity], int]:
         filters = []
         if user_id is not None:
@@ -103,6 +101,8 @@ class WorkflowRepository(BaseRepository[CustomStoryWorkflowEntity]):
             filters.append(CustomStoryWorkflowEntity.id == workflow_id)
         if workflow_type is not None:
             filters.append(CustomStoryWorkflowEntity.story_type == workflow_type)
+        if status_filter:
+            filters.append(CustomStoryWorkflowEntity.status == status_filter)
 
         return await self.list_paginated(
             filters=filters,
@@ -365,12 +365,10 @@ class WorkflowBatchJobRepository(BaseRepository[CustomStoryBatchJobEntity]):
         provider_model: str | None,
         request_payload: dict | None = None,
         story_id: UUID | None = None,
-        generic_story_id: UUID | None = None,
     ) -> CustomStoryBatchJobEntity:
         return await super().create(
             workflow_id=workflow_id,
             story_id=story_id,
-            generic_story_id=generic_story_id,
             job_type=job_type,
             status=StoryBatchJobStatus.SUBMITTED,
             provider="google",
@@ -417,7 +415,6 @@ class WorkflowBatchJobRepository(BaseRepository[CustomStoryBatchJobEntity]):
         workflow_id: UUID | None = None,
         status: StoryBatchJobStatus | None = None,
         story_type: CustomStoryWorkflowType | str | None = None,
-        generic_story_id: UUID | None = None,
         job_type: StoryBatchJobType | None = None,
         provider: str | None = None,
     ) -> tuple[list[CustomStoryBatchJobEntity], int]:
@@ -426,8 +423,6 @@ class WorkflowBatchJobRepository(BaseRepository[CustomStoryBatchJobEntity]):
             filters.append(CustomStoryBatchJobEntity.workflow_id == workflow_id)
         if story_type is not None:
             filters.append(CustomStoryWorkflowEntity.story_type == story_type)
-        if generic_story_id is not None:
-            filters.append(CustomStoryBatchJobEntity.generic_story_id == generic_story_id)
         if status is not None:
             filters.append(CustomStoryBatchJobEntity.status == status)
         if job_type is not None:
@@ -466,7 +461,6 @@ class WorkflowBatchJobRepository(BaseRepository[CustomStoryBatchJobEntity]):
             CustomStoryBatchJobEntity.id,
             CustomStoryBatchJobEntity.workflow_id,
             CustomStoryBatchJobEntity.story_id,
-            CustomStoryBatchJobEntity.generic_story_id,
             CustomStoryBatchJobEntity.job_type,
             CustomStoryBatchJobEntity.status,
             CustomStoryBatchJobEntity.provider,

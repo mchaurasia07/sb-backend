@@ -23,8 +23,7 @@ from app.entity.custom_story_workflow import (
     CustomStoryWorkflowStep,
     CustomStoryWorkflowType,
 )
-from app.entity.generic_story import GenericStory
-from app.entity.story import StoryStatus
+from app.entity.story import StoryStatus, StoryType
 from app.entity.story_batch_job import StoryBatchJobStatus, StoryBatchJobType
 from app.entity.story_step import StoryStepName
 from app.entity.story_step import StepStatus
@@ -49,7 +48,6 @@ from app.repository.custom_story_workflow_repository import (
     CustomStoryWorkflowRepository,
     CustomStoryWorkflowStepRepository,
 )
-from app.repository.generic_story_repository import GenericStoryRepository
 from app.repository.story_page_repository import StoryPageRepository
 from app.repository.story_repository import StoryRepository
 from app.service.image_storage_provider import get_image_storage_service
@@ -97,7 +95,6 @@ class _WorkflowBatchJobs:
         return await self.batch_jobs.create(
             workflow_id=story_id,
             story_id=None,
-            generic_story_id=getattr(self.workflow, "generic_story_id", None),
             job_type=job_type,
             attempt=attempt,
             expected_item_count=expected_item_count,
@@ -202,7 +199,6 @@ class CustomStoryWorkflowService:
         self.batch_jobs = CustomStoryBatchJobRepository(session)
         self.children = ChildRepository(session)
         self.stories = StoryRepository(session)
-        self.generic_stories = GenericStoryRepository(session)
         self.story_pages = StoryPageRepository(session)
 
     @staticmethod
@@ -211,16 +207,23 @@ class CustomStoryWorkflowService:
         print(f"[CUSTOM_RECONCILE] {event}" + (f" {details}" if details else ""), flush=True)
 
     async def create(self, user_id: UUID, payload: StoryGenerationRequest) -> CustomStoryWorkflowResponse:
-        child = await self.children.get_for_user(user_id, payload.child_id)
-        if child is None:
-            raise NotFoundException("Child profile not found")
-        if payload.use_child_character and not child.character_image_url:
-            raise AppException(
-                "Child must have a generated character image when used as the story hero",
-                code="NO_CHARACTER_IMAGE",
+        story_type = payload.story_type
+        child = None
+        if story_type == CustomStoryWorkflowType.CUSTOM:
+            child = await self.children.get_for_user(user_id, payload.child_id)
+            if child is None:
+                raise NotFoundException("Child profile not found")
+            if payload.use_child_character and not child.character_image_url:
+                raise AppException(
+                    "Child must have a generated character image when used as the story hero",
+                    code="NO_CHARACTER_IMAGE",
+                )
+            await SubscriptionService(self.session).require_can_create_story(
+                user_id=user_id,
+                child_id=payload.child_id,
             )
-        await SubscriptionService(self.session).require_can_create_story(user_id=user_id, child_id=payload.child_id)
 
+        child_id = payload.child_id if story_type == CustomStoryWorkflowType.CUSTOM else None
         story_service = StoryService(self.session)
         safety_service = StoryInputSafetyService()
         age_group = payload.age_group or age_group_for_reader_category(payload.reader_category)
@@ -229,7 +232,7 @@ class CustomStoryWorkflowService:
         inspection = await safety_service.inspect(payload)
         audit = await self.input_safety_audits.create(
             user_id=user_id,
-            child_id=payload.child_id,
+            child_id=child_id,
             provider=inspection.provider,
             model=inspection.model,
             request_json=inspection.request_json,
@@ -279,20 +282,21 @@ class CustomStoryWorkflowService:
 
         workflow = await self.workflows.create(
             user_id=user_id,
-            child_id=payload.child_id,
-            story_type=CustomStoryWorkflowType.CUSTOM,
+            child_id=child_id,
+            story_type=story_type,
             age_group=age_group,
             category=payload.category,
             learning_goal=payload.learning_goal,
             context=payload.context,
             languages=payload.languages,
             reader_category=payload.reader_category.value,
-            use_child_character=payload.use_child_character,
+            use_child_character=payload.use_child_character if child_id else False,
             execute_image=bool(payload.execute_image),
             execute_narration=payload.execute_narration,
             skip_validation=payload.skip_validation,
             execute_workflow=execute_workflow,
             status=CustomStoryWorkflowStatus.PENDING,
+            title=payload.title,
             **story_service._current_ai_config(),
         )
         audit.workflow_id = workflow.id
@@ -306,7 +310,7 @@ class CustomStoryWorkflowService:
                 "[CUSTOM_WORKFLOW_CREATE] workflow_id=%s story_type=%s action=event_queued "
                 "execute_workflow=%s first_step=%s",
                 workflow.id,
-                CustomStoryWorkflowType.CUSTOM.value,
+                story_type.value,
                 execute_workflow,
                 CustomStoryWorkflowStep.STORY_PLAN_GENERATION.value,
             )
@@ -315,146 +319,11 @@ class CustomStoryWorkflowService:
                 "[CUSTOM_WORKFLOW_CREATE] workflow_id=%s story_type=%s action=saved_without_event "
                 "execute_workflow=%s reason=execute_workflow_false",
                 workflow.id,
-                CustomStoryWorkflowType.CUSTOM.value,
+                story_type.value,
                 execute_workflow,
             )
         await self.session.commit()
         return self._response(workflow)
-
-    async def create_generic(
-        self,
-        user_id: UUID,
-        payload: StoryGenerationRequest,
-    ) -> CustomStoryWorkflowResponse:
-        """Create an AI workflow that publishes into the generic story catalog."""
-        story_service = StoryService(self.session)
-        safety_service = StoryInputSafetyService()
-        context = self._generic_context(payload)
-        category = payload.category or payload.theme or payload.genre or "adventure"
-        age_group = payload.age_group or age_group_for_reader_category(payload.reader_category)
-        payload.age_group = age_group
-        safety_payload = SimpleNamespace(
-            title=payload.title,
-            category=category,
-            learning_goal=payload.learning_goal,
-            context=context,
-            age_group=age_group,
-            language=payload.language,
-            story_type=CustomStoryWorkflowType.GENERIC.value,
-        )
-        inspection = await safety_service.inspect(safety_payload)
-        audit = await self.input_safety_audits.create(
-            user_id=user_id,
-            child_id=None,
-            provider=inspection.provider,
-            model=inspection.model,
-            request_json=inspection.request_json,
-            request_idea_json={
-                "category": category,
-                "learning_goal": payload.learning_goal or "",
-                "context": context,
-            },
-            prompt=inspection.prompt,
-            status=CustomStoryInputSafetyAuditStatus.IN_PROGRESS,
-            response_text=inspection.response_text,
-            response_json=inspection.response_json,
-            safe=inspection.result.safe if inspection.result is not None else None,
-            risk_level=inspection.result.risk_level if inspection.result is not None else None,
-            blocked_categories=inspection.result.blocked_categories if inspection.result is not None else None,
-            reason=inspection.result.reason if inspection.result is not None else None,
-            safe_rewrite=inspection.result.safe_rewrite if inspection.result is not None else None,
-            error_code=inspection.error_code,
-            error_message=inspection.error_message,
-        )
-        if inspection.error_message:
-            audit.status = CustomStoryInputSafetyAuditStatus.ERROR
-            await self.input_safety_audits.update(audit)
-            await self.session.commit()
-            raise AppException(
-                inspection.error_message,
-                status.HTTP_503_SERVICE_UNAVAILABLE,
-                inspection.error_code or "STORY_INPUT_SAFETY_UNAVAILABLE",
-            )
-        if inspection.result is None:
-            audit.status = CustomStoryInputSafetyAuditStatus.ERROR
-            audit.error_code = "STORY_INPUT_SAFETY_UNAVAILABLE"
-            audit.error_message = "Story safety validation returned an unexpected response. Please try again."
-            await self.input_safety_audits.update(audit)
-            await self.session.commit()
-            raise AppException(
-                "Story safety validation returned an unexpected response. Please try again.",
-                status.HTTP_503_SERVICE_UNAVAILABLE,
-                "STORY_INPUT_SAFETY_UNAVAILABLE",
-            )
-
-        audit.status = (
-            CustomStoryInputSafetyAuditStatus.SAFE
-            if inspection.result.safe
-            else CustomStoryInputSafetyAuditStatus.UNSAFE
-        )
-        await self.input_safety_audits.update(audit)
-        await self.session.commit()
-        if not inspection.result.safe:
-            self._raise_input_safety_failure(inspection.result, audit)
-
-        workflow = await self.workflows.create(
-            user_id=user_id,
-            child_id=None,
-            story_type=CustomStoryWorkflowType.GENERIC,
-            age_group=age_group,
-            category=category,
-            learning_goal=payload.learning_goal,
-            context=context,
-            languages=payload.languages,
-            publish_status=payload.status,
-            reader_category=reader_category_for_age_group(age_group).value,
-            use_child_character=False,
-            execute_image=bool(payload.execute_image),
-            execute_narration=payload.execute_narration,
-            skip_validation=payload.skip_validation,
-            execute_workflow=payload.execute_workflow,
-            status=CustomStoryWorkflowStatus.PENDING,
-            title=payload.title,
-            **story_service._current_ai_config(),
-        )
-        audit.workflow_id = workflow.id
-        await self.input_safety_audits.update(audit)
-        if payload.execute_workflow:
-            await self.events.create_if_absent(
-                workflow_id=workflow.id,
-                step_name=CustomStoryWorkflowStep.STORY_PLAN_GENERATION,
-            )
-            logger.info(
-                "[CUSTOM_WORKFLOW_CREATE] workflow_id=%s story_type=%s action=event_queued "
-                "execute_workflow=%s first_step=%s",
-                workflow.id,
-                CustomStoryWorkflowType.GENERIC.value,
-                payload.execute_workflow,
-                CustomStoryWorkflowStep.STORY_PLAN_GENERATION.value,
-            )
-        else:
-            logger.info(
-                "[CUSTOM_WORKFLOW_CREATE] workflow_id=%s story_type=%s action=saved_without_event "
-                "execute_workflow=%s reason=execute_workflow_false",
-                workflow.id,
-                CustomStoryWorkflowType.GENERIC.value,
-                payload.execute_workflow,
-            )
-        await self.session.commit()
-        return self._response(workflow)
-
-    @staticmethod
-    def _generic_context(payload: StoryGenerationRequest) -> str:
-        parts: list[str] = []
-        if payload.title:
-            parts.append(f"Requested title idea: {payload.title}")
-        if payload.context:
-            parts.append(f"Story idea/context: {payload.context}")
-        if payload.actual_story and payload.actual_story != payload.context:
-            parts.append(f"Story idea/context: {payload.actual_story}")
-        if payload.genre:
-            parts.append(f"Genre: {payload.genre}")
-        return " ".join(parts)
 
     @staticmethod
     def _effective_execute_workflow(payload: StoryGenerationRequest) -> bool:
@@ -546,16 +415,14 @@ class CustomStoryWorkflowService:
         workflow = await self.workflows.get_for_user_for_update(user_id, workflow_id)
         if workflow is None:
             raise NotFoundException("Story workflow not found")
-        story_type = self._status_value(getattr(workflow, "story_type", CustomStoryWorkflowType.CUSTOM))
         retryable_statuses = {
+            CustomStoryWorkflowStatus.PENDING.value,
             CustomStoryWorkflowStatus.FAILED.value,
             CustomStoryWorkflowStatus.IN_PROGRESS.value,
         }
-        if story_type == CustomStoryWorkflowType.GENERIC.value:
-            retryable_statuses.add(CustomStoryWorkflowStatus.PENDING.value)
         if self._status_value(workflow.status) not in retryable_statuses:
             raise AppException(
-                "Only pending, failed, or in-progress generic workflows and failed or in-progress custom workflows can be retried",
+                "Only pending, failed, or in-progress workflows can be retried",
                 status.HTTP_400_BAD_REQUEST,
                 "STORY_WORKFLOW_RETRY_STATUS_INVALID",
             )
@@ -619,7 +486,7 @@ class CustomStoryWorkflowService:
     async def _process_event(self, event: CustomStoryWorkflowEventEntity) -> None:
         workflow = await self.workflows.get_by_id_for_update(event.workflow_id)
         if workflow is None:
-            raise NotFoundException("Custom story workflow not found")
+            raise NotFoundException("Story workflow not found")
         step = CustomStoryWorkflowStep(self._status_value(event.step_name))
         if self._status_value(workflow.status) == CustomStoryWorkflowStatus.COMPLETED.value:
             await self._complete_event(event, {"skipped": True, "reason": "workflow_completed"})
@@ -940,7 +807,6 @@ class CustomStoryWorkflowService:
         job = await self.batch_jobs.create(
             workflow_id=workflow.id,
             story_id=None,
-            generic_story_id=getattr(workflow, "generic_story_id", None),
             job_type=job_type,
             attempt=1,
             expected_item_count=1,
@@ -1395,9 +1261,6 @@ class CustomStoryWorkflowService:
                 step_input,
                 {
                     "story_id": str(workflow.story_id) if workflow.story_id else None,
-                    "generic_story_id": (
-                        str(workflow.generic_story_id) if getattr(workflow, "generic_story_id", None) else None
-                    ),
                 },
             )
             return
@@ -1441,31 +1304,44 @@ class CustomStoryWorkflowService:
         return batch_runner
 
     async def _publish_story(self, workflow: CustomStoryWorkflowEntity) -> None:
-        if self._is_generic_workflow(workflow):
-            await self._publish_generic_story(workflow)
-            return
         if workflow.story_id is not None:
             return
-        if workflow.child_id is None:
+        is_generic = self._is_generic_workflow(workflow)
+        if not is_generic and workflow.child_id is None:
             raise AppException("Custom story workflow is missing child_id", code="CUSTOM_STORY_CHILD_REQUIRED")
         story_json = workflow.story_json if isinstance(workflow.story_json, dict) else {}
         if self._execute_narration_enabled(workflow) and not self._workflow_has_audio_for_all_languages(workflow):
             raise AppException(
-                "Cannot publish custom story before narration audio is complete for every page.",
-                code="CUSTOM_STORY_AUDIO_INCOMPLETE",
+                (
+                    "Cannot publish generic story before narration audio is complete for every page."
+                    if is_generic
+                    else "Cannot publish custom story before narration audio is complete for every page."
+                ),
+                code="GENERIC_STORY_AUDIO_INCOMPLETE" if is_generic else "CUSTOM_STORY_AUDIO_INCOMPLETE",
             )
         story = await self.stories.create(
-            user_id=workflow.user_id,
-            child_id=workflow.child_id,
-            age_group=workflow.age_group.value,
+            user_id=None if is_generic else workflow.user_id,
+            child_id=None if is_generic else workflow.child_id,
+            story_type=StoryType.GENERIC if is_generic else StoryType.CUSTOM,
+            age_group=self._status_value(workflow.age_group),
             category=workflow.category,
             learning_goal=workflow.learning_goal,
         )
         story.status = StoryStatus.COMPLETED
-        story.title = workflow.title
-        story.summary = workflow.summary
+        published_title = (
+            workflow.title
+            or (story_json.get("title") if is_generic else None)
+            or (f"Generic Story {workflow.request_number}" if is_generic else None)
+        )
+        story.title = str(published_title).strip()[:255] if published_title else None
+        story.summary = workflow.summary or (story_json.get("summary") if is_generic else None)
         story.moral = workflow.moral
         story_json = await self._copy_story_images_to_final_story_storage(story_json, story.id)
+        if is_generic:
+            workflow.image_plan_json = await self._copy_character_references_to_final_story_storage(
+                workflow.image_plan_json if isinstance(workflow.image_plan_json, dict) else {},
+                story.id,
+            )
         story_json = _sync_story_media_to_language_variants(story_json, include_audio=True)
         story.total_pages = StoryService._story_total_pages(story_json)
         story.cover_image = StoryService._story_cover_image(story_json)
@@ -1479,7 +1355,7 @@ class CustomStoryWorkflowService:
         for job in await self.batch_jobs.list_by_workflow(workflow.id):
             job.story_id = story.id
             await self.batch_jobs.update(job)
-        if hasattr(self, "session"):
+        if not is_generic and hasattr(self, "session"):
             await SubscriptionService(self.session).increment_story_usage(user_id=workflow.user_id, child_id=workflow.child_id)
         await self.workflows.update(workflow)
 
@@ -1791,7 +1667,7 @@ class CustomStoryWorkflowService:
         workflow = await self.workflows.get_by_id(job.workflow_id)
         if workflow is None:
             job.status = StoryBatchJobStatus.FAILED
-            job.error_message = "Custom story workflow not found during batch reconciliation"
+            job.error_message = "Story workflow not found during batch reconciliation"
             await self.batch_jobs.update(job)
             await self.session.commit()
             return self._batch_reconcile_result(job, "failed", job.error_message)
@@ -1868,7 +1744,7 @@ class CustomStoryWorkflowService:
                 return self._batch_reconcile_result(job, "processed", "Waiting for remaining audio retry batch")
             next_step = await self._enqueue_next_step(workflow, self._step_for_job_type(job.job_type))
             await self.session.commit()
-            return self._batch_reconcile_result(job, "processed", "Custom story workflow batch job processed")
+            return self._batch_reconcile_result(job, "processed", "Story workflow batch job processed")
 
         if state_name in batch_runner.CANCELLED_STATES:
             job.status = StoryBatchJobStatus.CANCELLED
@@ -2044,58 +1920,6 @@ class CustomStoryWorkflowService:
             status=self._status_value(job.status),
         )
 
-    async def _publish_generic_story(self, workflow: CustomStoryWorkflowEntity) -> None:
-        if workflow.generic_story_id is not None:
-            return
-        story_json = workflow.story_json if isinstance(workflow.story_json, dict) else {}
-        if self._execute_narration_enabled(workflow) and not self._workflow_has_audio_for_all_languages(workflow):
-            raise AppException(
-                "Cannot publish generic story before narration audio is complete for every page.",
-                code="GENERIC_STORY_AUDIO_INCOMPLETE",
-            )
-
-        pages = story_json.get("pages") if isinstance(story_json.get("pages"), list) else []
-        title = await self._generic_publish_title(workflow, story_json)
-        generic_story = await self.generic_stories.create(
-            title=title,
-            summary=workflow.summary or story_json.get("summary"),
-            age_group=self._status_value(workflow.age_group),
-            theme=workflow.category,
-            genre=None,
-            moral=workflow.moral,
-            learning_goal=workflow.learning_goal,
-            reading_time_minutes=self._reading_time_minutes(pages),
-            character_type="AI-created",
-            total_pages=len(pages),
-            cover_image=story_json.get("cover_image_url"),
-            status=workflow.publish_status or "inactive",
-        )
-        story_json = await self._copy_story_images_to_final_story_storage(story_json, generic_story.id)
-        workflow.image_plan_json = await self._copy_character_references_to_final_story_storage(
-            workflow.image_plan_json if isinstance(workflow.image_plan_json, dict) else {},
-            generic_story.id,
-        )
-        story_json = _sync_story_media_to_language_variants(story_json, include_audio=True)
-        workflow.story_json = story_json
-        generic_story.cover_image = story_json.get("cover_image_url")
-        await self.generic_stories.upsert_contents(
-            generic_story,
-            [
-                {
-                    "language": language,
-                    "story_json": variant_json,
-                }
-                for language, variant_json in self._story_json_variants_for_publish(workflow).items()
-            ],
-        )
-        workflow.generic_story_id = generic_story.id
-        workflow.story_json = story_json
-        for job in await self.batch_jobs.list_by_workflow(workflow.id):
-            job.generic_story_id = generic_story.id
-            await self.batch_jobs.update(job)
-        await self.generic_stories.flush()
-        await self.workflows.update(workflow)
-
     async def _copy_character_references_to_final_story_storage(
         self,
         image_plan: dict[str, Any],
@@ -2152,27 +1976,6 @@ class CustomStoryWorkflowService:
         character_name = StoryService._character_reference_name_key(str(character.get("name") or ""))
         reference_name = StoryService._character_reference_name_key(str(reference.get("name") or ""))
         return bool(character_name and reference_name and character_name == reference_name)
-
-    async def _generic_publish_title(self, workflow: CustomStoryWorkflowEntity, story_json: dict[str, Any]) -> str:
-        base_title = (
-            workflow.title
-            or story_json.get("title")
-            or f"Generic Story {workflow.request_number}"
-        )
-        title = str(base_title).strip()[:255] or f"Generic Story {workflow.request_number}"
-        existing = await self.generic_stories.get_by_title(title)
-        if existing is None:
-            return title
-        suffix = f" ({workflow.request_number})"
-        return f"{title[: 255 - len(suffix)]}{suffix}"
-
-    @staticmethod
-    def _reading_time_minutes(pages: list[Any]) -> int:
-        word_count = 0
-        for page in pages:
-            if isinstance(page, dict):
-                word_count += len(str(page.get("text") or "").split())
-        return max(1, round(word_count / 120)) if word_count else max(1, len(pages) // 2)
 
     async def _handle_text_batch_failure(
         self,
@@ -2792,7 +2595,6 @@ class CustomStoryWorkflowService:
         return {
             "workflow_id": job.workflow_id,
             "story_id": job.story_id,
-            "generic_story_id": getattr(job, "generic_story_id", None),
             "batch_job_id": job.id,
             "job_type": self._status_value(job.job_type),
             "status": self._status_value(job.status),
@@ -2807,7 +2609,6 @@ class CustomStoryWorkflowService:
             id=job.id,
             workflow_id=job.workflow_id,
             story_id=job.story_id,
-            generic_story_id=getattr(job, "generic_story_id", None),
             job_type=CustomStoryWorkflowService._status_value(job.job_type),
             status=CustomStoryWorkflowService._status_value(job.status),
             provider=job.provider,
@@ -2833,7 +2634,6 @@ class CustomStoryWorkflowService:
     ) -> dict[str, Any]:
         return {
             "workflow_id": workflow.id,
-            "generic_story_id": getattr(workflow, "generic_story_id", None),
             "batch_job_id": job.id,
             "job_type": self._status_value(job.job_type),
             "status": self._status_value(job.status),
@@ -3023,8 +2823,6 @@ class CustomStoryWorkflowService:
                 return True
             return self._workflow_has_audio_for_all_languages(workflow)
         if step == CustomStoryWorkflowStep.PUBLISH_STORY:
-            if self._is_generic_workflow(workflow):
-                return workflow.generic_story_id is not None
             return workflow.story_id is not None
         return False
 
@@ -3145,9 +2943,6 @@ class CustomStoryWorkflowService:
                 getattr(workflow, "story_type", CustomStoryWorkflowType.CUSTOM)
             ),
             "child_id": str(workflow.child_id) if workflow.child_id else None,
-            "generic_story_id": (
-                str(workflow.generic_story_id) if getattr(workflow, "generic_story_id", None) else None
-            ),
             "reader_category": reader_category,
             "age_group": age_group,
             "category": workflow.category,
@@ -3155,7 +2950,6 @@ class CustomStoryWorkflowService:
             "context": workflow.context,
             "language": CustomStoryWorkflowService._workflow_primary_language(workflow),
             "languages": CustomStoryWorkflowService._workflow_languages(workflow),
-            "publish_status": getattr(workflow, "publish_status", None),
             "use_child_character": use_child_character,
             "cast_mode": StoryService.CAST_MODE_CHILD_HERO if use_child_character else StoryService.CAST_MODE_IMAGINED,
             "execute_image": execute_image,
@@ -3213,7 +3007,6 @@ class CustomStoryWorkflowService:
                 getattr(workflow, "story_type", CustomStoryWorkflowType.CUSTOM)
             ),
             story_id=getattr(workflow, "story_id", None),
-            generic_story_id=getattr(workflow, "generic_story_id", None),
             child_id=workflow.child_id,
             status=workflow.status.value if hasattr(workflow.status, "value") else str(workflow.status),
             current_step=workflow.current_step,
@@ -3224,7 +3017,6 @@ class CustomStoryWorkflowService:
             learning_goal=workflow.learning_goal,
             context=workflow.context,
             languages=CustomStoryWorkflowService._workflow_languages(workflow),
-            publish_status=getattr(workflow, "publish_status", None),
             use_child_character=bool(getattr(workflow, "use_child_character", False)),
             execute_image=bool(getattr(workflow, "execute_image", True)),
             execute_narration=bool(getattr(workflow, "execute_narration", True)),

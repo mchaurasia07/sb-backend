@@ -10,7 +10,6 @@ class CustomStoryWorkflowResponse(BaseModel):
     request_number: int
     story_type: str = "CUSTOM"
     story_id: UUID | None
-    generic_story_id: UUID | None = None
     child_id: UUID | None
     status: str
     current_step: str | None
@@ -21,7 +20,6 @@ class CustomStoryWorkflowResponse(BaseModel):
     learning_goal: str | None = None
     context: str | None = None
     languages: list[str] | None = None
-    publish_status: str | None = None
     use_child_character: bool = False
     execute_image: bool = True
     execute_narration: bool = True
@@ -71,7 +69,6 @@ class CustomStoryWorkflowBatchJobResponse(BaseModel):
     id: UUID
     workflow_id: UUID
     story_id: UUID | None
-    generic_story_id: UUID | None = None
     job_type: str
     status: str
     provider: str
